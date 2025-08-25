@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Heterogeneous Adaptive Dimensional Embedding System - Production infrastructure for processing and serving embedded knowledge"
 authors = ["HADES Team"]
 readme = "README.md"
+license = "Apache-2.0"
 packages = [
     { include = "processors" },
     { include = "storage" },

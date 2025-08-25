@@ -13,8 +13,8 @@ The HADES MCP Server provides tools for processing arXiv papers, generating embe
 First, ensure the server dependencies are installed:
 
 ```bash
-cd /home/todd/olympus/HADES
-pip install -r mcp_server/requirements.txt
+cd /home/todd/olympus/HADES-Lab
+pip install -r core/mcp_server/requirements.txt
 ```
 
 ### 2. Configure Database
@@ -34,7 +34,7 @@ There are three ways to add the server to Claude Code:
 
 ```bash
 # Add to current project only
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py \
+claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py \
   -e ARANGO_PASSWORD="your-password" \
   -e ARANGO_HOST="localhost"
 ```
@@ -43,7 +43,7 @@ claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py 
 
 ```bash
 # Add to project and share via .mcp.json
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py \
+claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py \
   -s project \
   -e ARANGO_PASSWORD="${ARANGO_PASSWORD}" \
   -e ARANGO_HOST="${ARANGO_HOST}"
@@ -55,7 +55,7 @@ This creates `.mcp.json` in the project root that can be committed to version co
 
 ```bash
 # Available in all Claude Code sessions
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py \
+claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py \
   -s user \
   -e ARANGO_PASSWORD="${ARANGO_PASSWORD}" \
   -e ARANGO_HOST="${ARANGO_HOST}"
@@ -118,7 +118,7 @@ Claude will use `list_jobs` and `check_job_status` tools.
 
 ## Configuration File
 
-The server uses `mcp_server/config/server_config.yaml` for configuration:
+The server uses `core/mcp_server/config/server_config.yaml` for configuration:
 
 ```yaml
 server:
@@ -147,7 +147,7 @@ Environment variables in the config are automatically expanded.
 
 ```bash
 # Add with custom port and log level
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py \
+claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py \
   --port 8081 \
   --log-level DEBUG \
   -e ARANGO_PASSWORD="your-password"
@@ -157,7 +157,7 @@ claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py 
 
 ```bash
 # Use alternative configuration
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py \
+claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py \
   --config /path/to/custom_config.yaml \
   -e ARANGO_PASSWORD="your-password"
 ```
@@ -169,7 +169,7 @@ For long-running operations, increase the timeout:
 ```bash
 # Set 5 minute timeout for server startup
 export MCP_TIMEOUT=300
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py
+claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py
 ```
 
 ## Troubleshooting
@@ -197,7 +197,7 @@ Ensure Claude Code has access to:
 
 ### Making Changes
 
-1. Edit server code in `mcp_server/`
+1. Edit server code in `core/mcp_server/`
 2. Restart the server in Claude Code:
    ```
    /mcp restart hades-arxiv
@@ -222,7 +222,7 @@ Ensure Claude Code has access to:
 
 Enable debug logging:
 ```bash
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/mcp_server/launch.py \
+claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py \
   --log-level DEBUG
 ```
 

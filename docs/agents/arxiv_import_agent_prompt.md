@@ -95,7 +95,7 @@ INSERT OR REPLACE INTO paper_tracking (
 **Create Processing Tasks:**
 
 ```python
-from arxiv.pipelines.arxiv_pipeline import ProcessingTask
+from tools.arxiv.pipelines.arxiv_pipeline import ProcessingTask
 
 tasks = []
 for arxiv_id, pdf_path in papers_to_process:

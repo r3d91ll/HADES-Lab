@@ -58,7 +58,7 @@ async def main():
     parser = argparse.ArgumentParser(description='HADES MCP Server')
     parser.add_argument(
         '--config',
-        default='mcp_server/config/server_config.yaml',
+        default=str(Path(__file__).parent / 'config' / 'server_config.yaml'),
         help='Path to configuration file'
     )
     parser.add_argument(

@@ -87,7 +87,7 @@ from core.framework.extractors.docling_extractor import DoclingExtractor
 ### ArXiv Tools Imports
 ```python
 # Old
-from arxiv.pipelines.arxiv_pipeline import ProcessingTask
+from tools.arxiv.pipelines.arxiv_pipeline import ProcessingTask
 
 # New
 from tools.arxiv.pipelines.arxiv_pipeline import ProcessingTask
