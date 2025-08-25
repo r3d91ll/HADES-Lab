@@ -15,36 +15,47 @@ HADES is a distributed network infrastructure following Actor-Network Theory pri
 ## Architecture
 
 ```
-HADES/
-├── core/                # Core HADES infrastructure
-│   ├── mcp_server/      # MCP interface for Claude integration
-│   ├── framework/       # Shared framework (embedders, extractors, storage)
-│   └── processors/      # Base processor classes
+HADES-Lab/
+├── core/                       # Core HADES infrastructure
+│   ├── mcp_server/            # MCP interface for Claude integration
+│   ├── framework/             # Shared framework
+│   │   ├── embedders.py      # Jina v4 embeddings
+│   │   ├── extractors/       # Docling PDF extraction
+│   │   └── storage.py        # ArangoDB management
+│   ├── processors/            # Base processor classes
+│   ├── utils/                 # Core utilities
+│   └── logs/                  # Core system logs
 │
-├── tools/               # Processing tools (data sources)
-│   ├── arxiv/           # ArXiv paper processing (hybrid pipeline)
-│   ├── github/          # GitHub repository processing
-│   └── web/             # Web scraping tools
+├── tools/                      # Processing tools (data sources)
+│   └── arxiv/                 # ArXiv paper processing
+│       ├── pipelines/         # ACID-compliant pipelines
+│       ├── monitoring/        # Real-time monitoring
+│       ├── database/          # PostgreSQL setup
+│       ├── scripts/           # Utility scripts
+│       ├── utils/             # Database utilities
+│       ├── tests/             # Integration tests
+│       ├── configs/           # Pipeline configurations
+│       └── logs/              # ArXiv processing logs
 │
-├── configs/             # All configuration files
-│   ├── base.yaml        # Base configuration
-│   ├── embedder.yaml    # Jina v4 embedder config
-│   └── processors/      # Tool-specific configs
-│       ├── arxiv_hybrid.yaml
-│       ├── github.yaml
-│       └── web.yaml
+├── experiments/                # Research and experimentation
+│   ├── README.md              # Experiment guidelines
+│   ├── experiment_template/   # Template for new experiments
+│   ├── datasets/              # Shared experimental datasets
+│   ├── documentation/         # Experiment-specific docs
+│   └── experiment_1/          # Active experiments
 │
-├── experiments/         # Experimental code and research
-│   ├── experiment_datasets/
-│   ├── author_qualitative_data/
-│   └── citation_analysis/
+├── docs/                       # System documentation
+│   ├── adr/                   # Architecture Decision Records
+│   ├── agents/                # Agent configurations
+│   ├── theory/                # Theoretical framework
+│   └── methodology/           # Implementation methodology
 │
-├── analysis/            # Analysis scripts and reports
-├── tests/               # Test suites
-├── logs/                # Centralized logging
-├── docs/                # Documentation
-├── utils/               # Utility scripts
-└── Acheron/             # Deprecated code archive (River Styx)
+├── Acheron/                    # Deprecated code (timestamped)
+│   ├── test_scripts/          # Legacy test scripts
+│   └── configs/               # Deprecated configurations
+│
+└── .claude/                    # Claude Code configurations
+    └── agents/                # Custom agent definitions
 ```
 
 ## Features
@@ -60,9 +71,9 @@ HADES/
 
 ### In Development
 
-- **GitHub Processing**: Clone and embed repositories with code-specific LoRA
-- **Web Scraping**: Extract and embed documentation, tutorials, blogs
-- **Cross-source Graphs**: Theory-practice bridges across ArXiv, GitHub, Web
+- **Additional Data Sources**: GitHub repositories, web documentation
+- **Cross-source Graphs**: Theory-practice bridges across multiple sources
+- **Enhanced Embeddings**: Domain-specific fine-tuning
 
 ## Installation
 

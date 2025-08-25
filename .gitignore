@@ -354,5 +354,14 @@ vgcore.*
 *.tfrecord
 *.tfrecords
 
+# Experiment outputs
+experiments/*/results/
+experiments/*/output/
+experiments/*/logs/
+experiments/*/.cache/
+experiments/*/checkpoints/
+experiments/*/*.checkpoint
+
 Acheron/
+Acheron/*
 logs/

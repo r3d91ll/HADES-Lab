@@ -134,13 +134,22 @@ HADES-Lab/
 │   ├── mcp_server/            # MCP server implementation
 │   ├── processors/            # Processing modules
 │   └── utils/                 # Core utilities
-├── docs/                       # Documentation
+├── experiments/                # Research and experimentation
+│   ├── README.md              # Experiment guidelines
+│   ├── experiment_template/   # Template for new experiments
+│   ├── datasets/              # Shared experimental datasets
+│   ├── documentation/         # Experiment-specific docs
+│   └── experiment_1/          # Active experiments
+├── docs/                       # System documentation
 │   ├── agents/                # Agent prompts and configs
-│   ├── experiments/           # Experiment results and analysis
-│   └── theory/                # Theoretical framework docs
+│   ├── adr/                   # Architecture Decision Records
+│   ├── theory/                # Theoretical framework docs
+│   └── methodology/           # Implementation methodology
 ├── Acheron/                    # Deprecated code (timestamped)
 │   ├── test_scripts/          # Legacy test scripts
 │   └── configs/               # Deprecated configurations
+├── .claude/                    # Claude Code configurations
+│   └── agents/                # Custom agent definitions
 └── pyproject.toml             # Poetry dependency management
 ```
 
@@ -252,3 +261,34 @@ export USE_GPU=true                # Enable GPU acceleration
 - **Staging Directory**: `/dev/shm/acid_staging/` (RamFS for speed)
 - **Checkpoints**: `tools/arxiv/pipelines/acid_phased_checkpoint.json`
 - **Logs**: `tools/arxiv/logs/acid_phased.log`
+- **Experiment Datasets**: `experiments/datasets/` (curated JSON datasets for research)
+
+## Experiments Directory
+
+The `experiments/` directory is separate from infrastructure code and contains:
+
+- **experiment_template/**: Template for creating new experiments
+- **datasets/**: Shared datasets (cs_papers.json, graph_papers.json, etc.)
+- **documentation/**: Experiment-specific documentation and analysis
+- **experiment_*/**: Individual experiment directories
+
+### Creating a New Experiment
+
+```bash
+# Copy template
+cp -r experiments/experiment_template experiments/my_experiment
+
+# Update configuration
+vim experiments/my_experiment/config/experiment_config.yaml
+
+# Run experiment
+cd experiments/my_experiment
+python src/run_experiment.py --config config/experiment_config.yaml
+```
+
+### Infrastructure vs Experiments
+
+- **Infrastructure** (`core/`, `tools/`): Reusable, production-ready components
+- **Experiments** (`experiments/`): Research code, one-off analyses, prototypes
+
+Experiments can import infrastructure but should never modify it directly.
