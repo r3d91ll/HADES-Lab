@@ -79,11 +79,13 @@ HADES-Lab/
 
 ```bash
 # Clone the repository
-git clone git@github.com:r3d91ll/HADES.git
-cd HADES
+git clone git@github.com:r3d91ll/HADES-Lab.git
+cd HADES-Lab
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies with Poetry
+poetry install
+# Optional: activate the virtual environment
+# poetry shell
 
 # Configure database connections
 export PGPASSWORD="your-postgres-password"
@@ -106,16 +108,16 @@ python arxiv_pipeline.py \
     --count 100 \
     --arango-password "$ARANGO_PASSWORD"
 
-# Monitor progress
-cd ../monitoring/
-python acid_monitoring.py
+# Monitor progress (from repo root)
+python core/utils/monitor_pipeline.py \
+  --checkpoint-file tools/arxiv/pipelines/acid_phased_checkpoint.json
 ```
 
 ### MCP Server
 
 ```bash
-# Install in Claude Code
-claude mcp add hades-arxiv python /home/todd/olympus/HADES/core/mcp_server/launch.py \
+# Install in Claude Code (from repo root)
+claude mcp add hades-arxiv python "$(pwd)/core/mcp_server/launch.py" \
   -e ARANGO_PASSWORD="$ARANGO_PASSWORD"
 
 # Or run standalone for testing
@@ -163,4 +165,4 @@ from core.processors.base_processor import BaseProcessor
 
 ## License
 
-MIT License - See LICENSE file for details
+Apache License 2.0 - See LICENSE file for details

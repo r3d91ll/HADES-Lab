@@ -111,9 +111,9 @@ for arxiv_id, pdf_path in papers_to_process:
 **Invoke Pipeline:**
 
 ```bash
-# Use the ACID pipeline for atomic processing
-python /home/todd/olympus/HADES-Lab/arxiv/pipelines/arxiv_pipeline.py \
-    --config ../configs/acid_pipeline_phased.yaml \
+# Use the ACID pipeline for atomic processing (from repo root)
+python tools/arxiv/pipelines/arxiv_pipeline.py \
+    --config tools/arxiv/configs/acid_pipeline_phased.yaml \
     --specific-papers task_list.json \
     --arango-password "$ARANGO_PASSWORD"
 ```
