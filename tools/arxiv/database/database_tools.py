@@ -448,8 +448,6 @@ class DatabaseMaintenance:
             True if successful
         """
         try:
-            import psycopg2
-            
             # Connect to postgres database to see all connections
             conn = psycopg2.connect(
                 host=pg_host,
@@ -552,7 +550,6 @@ class DatabaseMaintenance:
             # Update PostgreSQL if requested
             if update_postgres and pg_password and cleared_papers:
                 try:
-                    import psycopg2
                     conn = psycopg2.connect(
                         host='localhost',
                         database='arxiv_datalake',

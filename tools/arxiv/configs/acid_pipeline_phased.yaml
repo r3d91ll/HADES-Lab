@@ -12,11 +12,11 @@ arango:
 phases:
   # Phase 1: EXTRACTION (GPU-accelerated)
   extraction:
-    workers: 32  # 12 per GPU with 48 cores available
-    memory_per_worker_gb: 4  # 24*8 = 192GB, still within 251GB total
+    workers: 32  # 16 per GPU with 48 cores available
+    memory_per_worker_gb: 4  # 32*4 = 128GB, still within 251GB total
     timeout_seconds: 120
     gpu_devices: [0, 1]  # Both A6000s for extraction
-    workers_per_gpu: 12  # 12 workers per GPU
+    workers_per_gpu: 16  # 16 workers per GPU (16×2=32)
     
     # Docling settings (GPU-accelerated)
     docling:

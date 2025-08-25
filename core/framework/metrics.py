@@ -168,15 +168,27 @@ class MetricsCollector:
                     }
             
             # Write to metrics file (append mode, JSONL format)
-            metrics_file = self.metrics_dir / "metrics.jsonl"
-            with metrics_file.open('a') as f:
-                json.dump({
-                    'timestamp': datetime.now().isoformat(),
-                    'processor': self.processor_name,
-                    'duration': self.metrics['duration'],
-                    'counters': self.metrics['counters'],
-                    'timer_stats': timer_stats,
-                    'gauges': self.metrics['gauges'],
-                    'errors': self.metrics['errors']
-                }, f)
-                f.write('\n')
+            try:
+                metrics_file = self.metrics_dir / "metrics.jsonl"
+                # Ensure directory exists
+                metrics_file.parent.mkdir(parents=True, exist_ok=True)
+                
+                with metrics_file.open('a') as f:
+                    json.dump({
+                        'timestamp': datetime.now().isoformat(),
+                        'processor': self.processor_name,
+                        'duration': self.metrics['duration'],
+                        'counters': self.metrics['counters'],
+                        'timer_stats': timer_stats,
+                        'gauges': self.metrics['gauges'],
+                        'errors': self.metrics['errors']
+                    }, f)
+                    f.write('\n')
+            except (IOError, OSError) as e:
+                # Log but don't crash - metrics are important but not critical
+                import sys
+                print(f"Warning: Failed to save metrics for {self.processor_name}: {e}", file=sys.stderr)
+            except json.JSONEncodeError as e:
+                # Handle JSON encoding errors separately
+                import sys
+                print(f"Warning: Failed to encode metrics for {self.processor_name}: {e}", file=sys.stderr)

@@ -593,12 +593,6 @@ Examples:
     
     args = parser.parse_args()
     
-    # Handle environment variables
-    if not args.password:
-        args.password = os.environ.get('PGPASSWORD')
-    if not args.arango_password:
-        args.arango_password = os.environ.get('ARANGO_PASSWORD')
-    
     try:
         verifier = DatabaseSyncVerifier(
             pg_password=args.password,

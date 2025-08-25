@@ -42,7 +42,7 @@ def check_chunks(db, detailed: bool = False) -> Dict[str, Any]:
     results['total'] = total_chunks
     results['late_chunking'] = late_chunks
     results['traditional'] = traditional_chunks
-    results['late_percentage'] = late_chunks * 100 // total_chunks if total_chunks else 0
+    results['late_percentage'] = (late_chunks / total_chunks) * 100.0 if total_chunks else 0
     
     # Get context window stats for late chunks
     if late_chunks > 0:

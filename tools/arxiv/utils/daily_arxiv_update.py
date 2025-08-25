@@ -658,13 +658,6 @@ Examples:
     
     args = parser.parse_args()
     
-    # Handle password from environment if not provided
-    if not args.pg_password:
-        args.pg_password = os.environ.get('PGPASSWORD')
-        if not args.pg_password:
-            logger.error("PostgreSQL password required (use --pg-password or set PGPASSWORD)")
-            sys.exit(1)
-    
     try:
         with ArXivDailyUpdater(
             pg_password=args.pg_password,

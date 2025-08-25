@@ -139,7 +139,8 @@ class BatchProcessor:
                 if self.conn and self.use_savepoints and cur:
                     try:
                         cur.execute("ROLLBACK TO SAVEPOINT item_process")
-                    except:
+                    except Exception as rollback_err:
+                        logging.warning(f"Failed to rollback savepoint: {rollback_err}")
                         pass  # Savepoint might not exist
                 
                 self.stats['failed'] += 1
@@ -156,7 +157,8 @@ class BatchProcessor:
                 if cur:
                     try:
                         cur.close()
-                    except:
+                    except Exception as cursor_err:
+                        logging.warning(f"Error closing cursor: {cursor_err}")
                         pass  # Ignore errors during cleanup
     
     def get_summary(self) -> str:

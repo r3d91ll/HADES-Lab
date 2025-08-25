@@ -82,8 +82,18 @@ class JinaV4Embedder:
         config = {}
         if config_path:
             import yaml
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f).get('embedder', {})
+            try:
+                with open(config_path, 'r') as f:
+                    loaded = yaml.safe_load(f)
+                    if not isinstance(loaded, dict):
+                        logger.warning(f"Invalid YAML structure in {config_path}, using defaults")
+                        config = {}
+                    else:
+                        config = loaded.get('embedder', {})
+                        logger.debug(f"Loaded embedder config from {config_path}")
+            except (yaml.YAMLError, IOError) as e:
+                logger.warning(f"Failed to load config {config_path}: {e}, using defaults")
+                config = {}
         else:
             # Try default location
             import os
@@ -93,9 +103,18 @@ class JinaV4Embedder:
             )
             if os.path.exists(default_config):
                 import yaml
-                with open(default_config, 'r') as f:
-                    config = yaml.safe_load(f).get('embedder', {})
-                    logger.info(f"Loaded embedder config from {default_config}")
+                try:
+                    with open(default_config, 'r') as f:
+                        loaded = yaml.safe_load(f)
+                        if not isinstance(loaded, dict):
+                            logger.warning(f"Invalid YAML structure in {default_config}, using defaults")
+                            config = {}
+                        else:
+                            config = loaded.get('embedder', {})
+                            logger.info(f"Loaded embedder config from {default_config}")
+                except (yaml.YAMLError, IOError) as e:
+                    logger.warning(f"Failed to load default config {default_config}: {e}, using defaults")
+                    config = {}
         
         # Set parameters with config as defaults, overridable by arguments
         self.device = device or config.get('device', 'cuda')
