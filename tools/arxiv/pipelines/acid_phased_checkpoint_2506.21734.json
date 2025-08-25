@@ -1,0 +1,18 @@
+{
+  "last_run": "2025-08-25T20:51:43.224557",
+  "papers_processed": 1,
+  "extraction_stats": {
+    "start_time": "2025-08-25 20:51:13.155230",
+    "end_time": "2025-08-25 20:51:14.992917",
+    "papers_processed": 1,
+    "papers_failed": 0,
+    "total_size_mb": 0.14996814727783203
+  },
+  "embedding_stats": {
+    "start_time": "2025-08-25 20:51:23.183042",
+    "end_time": "2025-08-25 20:51:43.223643",
+    "papers_processed": 1,
+    "papers_failed": 0,
+    "chunks_created": 24
+  }
+}
