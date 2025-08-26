@@ -5,8 +5,22 @@ Provides data loading, PDF processing, and chunk management utilities
 for processing academic papers from arXiv and other sources.
 """
 
-from .arxiv_loader import ArxivLoader
-# from .document_processor import DocumentProcessor
-# Temporarily disabled due to import issues
+from .document_processor import DocumentProcessor, ProcessingConfig, ProcessingResult
+from .chunking_strategies import (
+    ChunkingStrategy,
+    TokenBasedChunking,
+    SemanticChunking,
+    SlidingWindowChunking,
+    ChunkingStrategyFactory
+)
 
-__all__ = ["ArxivLoader"]
+__all__ = [
+    "DocumentProcessor", 
+    "ProcessingConfig", 
+    "ProcessingResult",
+    "ChunkingStrategy",
+    "TokenBasedChunking",
+    "SemanticChunking",
+    "SlidingWindowChunking",
+    "ChunkingStrategyFactory"
+]
