@@ -17,15 +17,11 @@ import os
 import re
 import json
 import logging
+import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
-
-# Add project root to path
-import sys
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
 
 from core.processors.document_processor import (
     DocumentProcessor,
@@ -417,7 +413,7 @@ class ArXivManager:
             logger.error(f"Failed to store ArXiv paper {paper_info.arxiv_id}: {e}")
             raise
     
-    def process_batch(
+    async def process_batch(
         self,
         arxiv_ids: List[str],
         store_in_db: bool = True
@@ -436,13 +432,14 @@ class ArXivManager:
         
         for arxiv_id in arxiv_ids:
             try:
-                result = self.process_arxiv_paper(arxiv_id, store_in_db)
+                result = await self.process_arxiv_paper(arxiv_id, store_in_db)
                 results.append(result)
             except Exception as e:
                 logger.error(f"Failed to process {arxiv_id}: {e}")
                 # Create failed result
+                from core.processors.document_processor import ProcessingResult, ExtractionResult
                 failed_result = ProcessingResult(
-                    extraction=None,
+                    extraction=ExtractionResult(full_text=""),
                     chunks=[],
                     processing_metadata={'arxiv_id': arxiv_id, 'error': str(e)},
                     total_processing_time=0,

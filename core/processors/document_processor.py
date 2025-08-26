@@ -13,7 +13,6 @@ across the boundary from unstructured to structured formats.
 """
 
 import os
-import sys
 import json
 import time
 import hashlib
@@ -23,10 +22,6 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict, field
 import numpy as np
-
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
 
 from core.framework.extractors.docling_extractor import DoclingExtractor
 from core.framework.extractors.latex_extractor import LaTeXExtractor
@@ -139,7 +134,7 @@ class ProcessingResult:
             'chunks': [
                 {
                     'text': chunk.text,
-                    'embedding': chunk.embedding.tolist(),
+                    'embedding': np.asarray(chunk.embedding).tolist(),
                     'start_char': chunk.start_char,
                     'end_char': chunk.end_char,
                     'chunk_index': chunk.chunk_index,
@@ -147,7 +142,7 @@ class ProcessingResult:
                     'context_window_used': chunk.context_window_used
                 }
                 for chunk in self.chunks
-            ],
+            ] if self.chunks else [],
             'processing_metadata': self.processing_metadata,
             'performance': {
                 'total_time': self.total_processing_time,
@@ -252,14 +247,36 @@ class DocumentProcessor:
             if self.config.chunking_strategy == 'late':
                 # Late chunking: embed full document then chunk
                 chunks = self._create_late_chunks(extraction_result.full_text)
-            else:
+            elif self.config.chunking_strategy in ['traditional', 'token', 'semantic', 'fixed']:
                 # Traditional chunking: chunk then embed
                 chunks = self._create_traditional_chunks(extraction_result.full_text)
+            else:
+                raise ValueError(
+                    f"Unknown chunking strategy: '{self.config.chunking_strategy}'. "
+                    f"Allowed values are: 'late', 'traditional', 'token', 'semantic', 'fixed'"
+                )
             chunking_time = time.time() - chunking_start
+            
+            # Check if chunking produced no results
+            if not chunks:
+                logger.warning(f"No chunks produced for document {doc_id}. Document may be empty.")
+                # Return early with empty result
+                return ProcessingResult(
+                    extraction=extraction_result,
+                    chunks=[],
+                    processing_metadata={'error': 'No chunks produced'},
+                    total_processing_time=time.time() - start_time,
+                    extraction_time=extraction_time,
+                    chunking_time=chunking_time,
+                    embedding_time=0,
+                    success=False,
+                    errors=['Document produced no chunks'],
+                    warnings=['Empty or unprocessable document']
+                )
             
             # Phase 3: Generate embeddings (if not already done by late chunking)
             embedding_start = time.time()
-            if not isinstance(chunks[0], ChunkWithEmbedding):
+            if chunks and not isinstance(chunks[0], ChunkWithEmbedding):
                 chunks = self._embed_chunks(chunks)
             embedding_time = time.time() - embedding_start
             
@@ -378,14 +395,38 @@ class DocumentProcessor:
         This is less optimal than late chunking but maintains compatibility
         with existing systems.
         """
+        # Validate chunking parameters
+        chunk_size = self.config.chunk_size_tokens
+        overlap = self.config.chunk_overlap_tokens
+        
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size_tokens must be positive, got {chunk_size}")
+        
+        if overlap >= chunk_size:
+            raise ValueError(
+                f"chunk_overlap_tokens ({overlap}) must be less than "
+                f"chunk_size_tokens ({chunk_size})"
+            )
+        
+        if overlap < 0:
+            overlap = 0  # Clamp to 0 if negative
+        
+        # Calculate step size
+        step = chunk_size - overlap
+        if step <= 0:
+            raise ValueError(
+                f"Invalid chunking parameters: step size would be {step}. "
+                f"Ensure chunk_size_tokens > chunk_overlap_tokens."
+            )
+        
         # Simple token-based chunking
         chunks = []
         tokens = text.split()  # Simplified - real implementation would use tokenizer
         
-        chunk_size = self.config.chunk_size_tokens
-        overlap = self.config.chunk_overlap_tokens
+        if not tokens:
+            return []  # Return empty list for empty text
         
-        for i in range(0, len(tokens), chunk_size - overlap):
+        for i in range(0, len(tokens), step):
             chunk_tokens = tokens[i:i + chunk_size]
             chunk_text = ' '.join(chunk_tokens)
             
@@ -408,12 +449,24 @@ class DocumentProcessor:
         
         for i, chunk in enumerate(chunks):
             # Generate embedding for chunk
-            embedding = self.embedder.embed(chunk['text'])
+            # JinaV4Embedder expects a list and returns array of embeddings
+            embeddings = self.embedder.embed_texts([chunk['text']], batch_size=1)
+            embedding = embeddings[0] if len(embeddings) > 0 else None
+            
+            # Normalize embedding to consistent numpy array format
+            if embedding is not None:
+                # Convert to numpy array and ensure it's 1D float32
+                embedding_array = np.asarray(embedding, dtype=np.float32)
+                if embedding_array.ndim != 1:
+                    embedding_array = embedding_array.reshape(-1)
+            else:
+                # Create zero embedding if something went wrong
+                embedding_array = np.zeros(self.config.embedding_dim, dtype=np.float32)
             
             # Create ChunkWithEmbedding object
             embedded_chunk = ChunkWithEmbedding(
                 text=chunk['text'],
-                embedding=embedding,
+                embedding=embedding_array,
                 start_char=chunk.get('start_char', 0),
                 end_char=chunk.get('end_char', len(chunk['text'])),
                 start_token=chunk.get('start_token', 0),
@@ -444,7 +497,8 @@ class DocumentProcessor:
         results = []
         
         for i, (pdf_path, latex_path) in enumerate(document_paths):
-            doc_id = document_ids[i] if document_ids else None
+            # Safely get document ID if provided
+            doc_id = document_ids[i] if document_ids and i < len(document_ids) else None
             result = self.process_document(pdf_path, latex_path, doc_id)
             results.append(result)
         

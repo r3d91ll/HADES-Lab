@@ -7,15 +7,11 @@ Tests for the generic document processor to ensure it maintains
 performance and correctness while being source-agnostic.
 """
 
-import sys
 import time
 import logging
 from pathlib import Path
 from typing import List
-
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+import sys
 
 from core.processors.document_processor import (
     DocumentProcessor,
