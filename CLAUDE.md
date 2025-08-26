@@ -7,7 +7,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Run the ACID Pipeline (Most Common)
 ```bash
 # Set environment variables
-export PGPASSWORD="your-postgres-password"
 export ARANGO_PASSWORD="your-arango-password"
 export CUDA_VISIBLE_DEVICES=0,1  # or single GPU: 1
 
@@ -32,9 +31,9 @@ python check_db_status.py --detailed
 # Verify Jina v4 deployment (if script exists)
 python verify_jina_v4_deployment.py
 
-# Reset databases (nuclear option)
+# Clear ArangoDB collections (nuclear option)
 cd ../scripts/
-python reset_databases.py --pg-password "$PGPASSWORD" --arango-password "$ARANGO_PASSWORD"
+# Use ArangoDB web interface or arangosh to clear collections
 ```
 
 ### Testing
@@ -67,14 +66,14 @@ ruff check tools/arxiv/ core/framework/
 
 ## High-Level Architecture
 
-HADES-Lab implements a hybrid PostgreSQL-ArangoDB architecture following Actor-Network Theory principles, where HADES orchestrates between external database actants without data duplication.
+HADES-Lab implements a streamlined ArangoDB architecture following Actor-Network Theory principles, processing PDFs directly from the filesystem without intermediate databases.
 
 ### Core Components
 
-1. **PostgreSQL Data Lake** (`arxiv_datalake`)
-   - Source of truth for all metadata (2.79M ArXiv papers)
-   - Tables: `arxiv_papers`, `arxiv_versions`, `arxiv_authors`, `arxiv_paper_authors`
-   - Never duplicated in ArangoDB
+1. **Local PDF Repository** (`/bulk-store/arxiv-data/pdf/`)
+   - Direct access to ArXiv papers organized by YYMM/arxiv_id.pdf
+   - No database dependencies for processing
+   - Optional SQLite cache for indexing
 
 2. **ArangoDB Graph Store** (`academy_store`)
    - Stores only expensive computations (embeddings, extracted structures)
@@ -82,17 +81,17 @@ HADES-Lab implements a hybrid PostgreSQL-ArangoDB architecture following Actor-N
    - Atomic transactions ensure ACID compliance
 
 3. **ACID Pipeline** (`tools/arxiv/pipelines/arxiv_pipeline.py`)
-   - Phase-separated architecture: Extraction (CPU) → Embedding (GPU)
+   - Phase-separated architecture: Extraction (GPU-accelerated Docling) → Embedding (Jina v4)
    - 11.3 papers/minute processing rate with 100% success
-   - Dual A6000 GPUs with NVLink for parallel processing
+   - Dual A6000 GPUs for parallel processing
 
 ### Processing Flow
 
 ```
-ArXiv Papers → PostgreSQL (metadata) → HADES Processing → ArangoDB (embeddings)
-                                              ↓
-                                    Phase 1: Extract (Docling)
-                                    Phase 2: Embed (Jina v4)
+PDF Files → HADES Processing → ArangoDB (embeddings + structures)
+                    ↓
+          Phase 1: Extract (Docling)
+          Phase 2: Embed (Jina v4)
 ```
 
 ### Key Technologies

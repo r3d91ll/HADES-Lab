@@ -43,9 +43,7 @@ if [ -z "$ARANGO_PASSWORD" ]; then
     exit 1
 fi
 
-if [ -z "$PGPASSWORD" ]; then
-    print_warning "PGPASSWORD not set, using config file value"
-fi
+# PostgreSQL no longer used - removed check
 
 # Print startup information
 echo "=================================="

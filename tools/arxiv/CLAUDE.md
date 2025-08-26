@@ -4,28 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Quick Start (ArXiv Processing)
 
-### Most Common Commands (Updated 2025-08-23)
+### Most Common Commands
 
 ```bash
-# Run unified pipeline with hysteresis control
+# Run ACID pipeline with phase separation
 cd pipelines/
-python arxiv_pipeline_unified_hysteresis.py \
-    --config ../../configs/processors/arxiv_unified.yaml \
+python arxiv_pipeline.py \
+    --config ../configs/acid_pipeline_phased.yaml \
     --count 1000 \
-    --pg-password "$PGPASSWORD" \
     --arango-password "$ARANGO_PASSWORD"
 
 # Monitor processing in real-time
-cd ../monitoring/
-python monitor_overnight.py --arango-password "$ARANGO_PASSWORD" --refresh 5
+tail -f ../logs/acid_phased.log
 
 # Check database status
 cd ../utils/
 python check_db_status.py --detailed
-
-# Reset for fresh start
-cd ../scripts/
-python reset_databases.py --pg-password "$PGPASSWORD" --arango-password "$ARANGO_PASSWORD"
 
 # Check GPU usage
 nvidia-smi
@@ -34,15 +28,14 @@ nvidia-smi
 ### Emergency Fixes
 
 ```bash
-# Pipeline stuck/slow - check queue status
-tail -f ../logs/unified_pipeline.log | grep -E "Queue|Hysteresis|Worker"
+# Pipeline stuck/slow - check logs
+tail -f ../logs/acid_phased.log | grep -E "Phase|Worker"
 
 # Out of memory
 python -c "import torch; torch.cuda.empty_cache()"
 
-# Database corruption - nuclear reset
-cd ../scripts/
-python reset_databases.py --pg-password "$PGPASSWORD" --arango-password "$ARANGO_PASSWORD"
+# Clear staging directory
+rm -rf /dev/shm/acid_staging/*
 
 # Worker distribution issues
 ps aux | grep python | grep worker | wc -l
@@ -53,200 +46,148 @@ ps aux | grep python | grep worker | wc -l
 1. **Workers process COMPLETE papers** - not individual chunks (late chunking requires full context)
 2. **No inter-worker communication** - each worker is completely isolated
 3. **8 GPU workers optimal** - 4 per A6000 with fp16 (~7-8GB VRAM each)
-4. **Hysteresis thresholds** - 1500/1000 prevents queue overflow
-5. **Unified documents** - PDF+LaTeX combined BEFORE embedding
-6. **PostgreSQL = metadata** - ArangoDB = embeddings only (never duplicate)
+4. **Phase separation** - Extraction completes before embedding starts
+5. **Direct PDF processing** - No database dependencies, straight from filesystem
+6. **ArangoDB only** - All storage goes to ArangoDB collections
 
 ## Project Overview
 
-ArXiv Tools provides infrastructure for processing ArXiv papers through a hybrid PostgreSQL-ArangoDB pipeline, implementing the mathematical framework where **C = (W·R·H)/T · Ctx^α**. Following Actor-Network Theory principles, these tools orchestrate between PostgreSQL (metadata source of truth) and ArangoDB (expensive computations only), optimizing for maximum conveyance while minimizing time T.
+ArXiv Tools provides infrastructure for processing ArXiv papers directly from the filesystem through ArangoDB, implementing the mathematical framework where **C = (W·R·H)/T · Ctx^α**. Following Actor-Network Theory principles, these tools process PDFs directly without intermediate databases, optimizing for maximum conveyance while minimizing time T.
 
 ## High-Level Architecture
 
-### Hybrid Pipeline Architecture
+### Streamlined Pipeline Architecture
 
-1. **PostgreSQL Data Lake** (`arxiv_datalake` database)
-   - Source of truth for all metadata (2.79M papers)
-   - Normalized schema: papers, versions, authors, paper_authors
-   - Never duplicated in ArangoDB
-   - Experiment window: 375k papers (Dec 2012 - Aug 2016)
+1. **Local PDF Repository** (`/bulk-store/arxiv-data/pdf/`)
+   - Direct access to ArXiv papers
+   - Organized by YYMM/arxiv_id.pdf structure
+   - No database dependencies for processing
+   - Optional SQLite cache for indexing
 
 2. **ArangoDB Graph Store** (`academy_store` database)
-   - Minimal collections (expensive computations only):
+   - Collections for all extracted data:
      - `arxiv_embeddings`: Jina v4 embeddings with late chunking
+     - `arxiv_chunks`: Text chunks with context windows
+     - `arxiv_papers`: Paper metadata and processing status
      - `arxiv_structures`: Equations, tables, images from PDFs
-   - No metadata duplication from PostgreSQL
    - Atomic transactions ensure consistency
 
-3. **Hybrid Pipeline** (`hybrid_pipeline.py`)
-   - Config-driven via `configs/processors/arxiv_hybrid.yaml`
-   - Queries PostgreSQL for papers to process
-   - Extracts text/structures with Docling v2
-   - Generates Jina v4 embeddings (2048-dim)
-   - Stores only computations in ArangoDB
+3. **ACID Pipeline** (`arxiv_pipeline.py`)
+   - Config-driven via `configs/acid_pipeline_phased.yaml`
+   - Processes PDFs directly from filesystem
+   - Phase 1: Extract with GPU-accelerated Docling
+   - Phase 2: Generate Jina v4 embeddings (2048-dim)
+   - Stores embeddings and structures in ArangoDB
 
 ## Common Development Commands
 
-### Database Setup
+### Pipeline Processing
 
 ```bash
-# Create PostgreSQL data lake
-export PGPASSWORD='YOUR_PASSWORD'
-psql -h localhost -U postgres -d arxiv_datalake < setup_arxiv_datalake.sql
-
-# Import ArXiv metadata (use bulletproof script only!)
-python3 import_arxiv_to_postgres_bulletproof.py \
-    --password 'YOUR_PASSWORD' \
-    --batch-size 5000
-
-# Check import progress
-python3 import_arxiv_to_postgres_bulletproof.py \
-    --password 'YOUR_PASSWORD' \
-    --stats-only
-```
-
-### PDF Coverage Analysis
-
-```bash
-# Verify PDF coverage in experiment window
-python3 verify_pdf_coverage.py --password 'YOUR_PASSWORD' --export
-
-# Check what PDFs are available locally
-ls -la /bulk-store/arxiv-data/pdf/ | head -20
-```
-
-### Hybrid Pipeline Processing
-
-```bash
-# Run the hybrid pipeline (config-driven)
-python3 hybrid_pipeline.py \
-    --config ../../configs/processors/arxiv_hybrid.yaml \
-    --pg-password "$PGPASSWORD" \
+# Run the ACID pipeline (config-driven)
+python arxiv_pipeline.py \
+    --config ../configs/acid_pipeline_phased.yaml \
     --arango-password "$ARANGO_PASSWORD" \
-    --max-papers 100  # For testing
+    --count 100  # Number of papers to process
 
-# Run with fresh start (ignore checkpoint)
-python3 hybrid_pipeline.py \
-    --config ../../configs/processors/arxiv_hybrid.yaml \
-    --pg-password "$PGPASSWORD" \
-    --arango-password "$ARANGO_PASSWORD" \
-    --no-resume
+# Run with specific source
+python arxiv_pipeline.py \
+    --config ../configs/acid_pipeline_phased.yaml \
+    --source local \
+    --count 50
 
-# Monitor running pipeline (from HADES root)
-python3 core/utils/monitor_pipeline.py \
-    --checkpoint tools/arxiv/hybrid_checkpoint.json \
-    --password "$PGPASSWORD" \
-    --database Avernus
+# Monitor pipeline
+tail -f ../logs/acid_phased.log
 ```
 
 ### Database Status Checks
 
 ```bash
-# Check Jina v4 deployment status
-ARANGO_PASSWORD=$ARANGO_PASSWORD python3 verify_jina_v4_deployment.py
+# Check database status
+python check_db_status.py --detailed
 
-# Check database status (from utils directory)
-cd ../../utils
-ARANGO_PASSWORD=$ARANGO_PASSWORD python3 check_db_status.py --detailed
-
-# Clean ArangoDB for fresh start
-cd ../tools/arxiv
-python3 clean_arango_for_hybrid.py
+# Connect to ArangoDB web interface
+# Browse to: http://192.168.1.69:8529
+# Database: academy_store
 ```
 
 ## Key Components
 
-### Hybrid Pipeline (`hybrid_pipeline.py`)
+### ACID Pipeline (`arxiv_pipeline.py`)
 
-- **Config-driven**: All settings in `configs/processors/arxiv_hybrid.yaml`
+- **Phase-separated**: Extraction phase completes before embedding phase
 - **Checkpointing**: Automatic resume on failure with atomic checkpoint saves
 - **Batch processing**: Configurable batch sizes for GPU efficiency
-- **Error recovery**: Tracks failed papers with retry attempts
+- **Error recovery**: Tracks failed papers for retry
 
-### PostgreSQL Import (`import_arxiv_to_postgres_bulletproof.py`)
+### Phase Manager
 
-- **Production-ready**: Handles foreign keys correctly with `INSERT ... ON CONFLICT`
-- **Savepoint isolation**: Per-record transaction isolation prevents corruption
-- **Resumable**: Can restart from any line number after interruption
-- **Note**: Never use the non-bulletproof variants (they have FK bugs)
+- **Phase 1 - Extraction**: GPU-accelerated Docling extracts PDFs to staged JSON
+- **Phase 2 - Embedding**: Jina v4 processes staged JSONs with late chunking
+- **Staging**: Uses RamFS (`/dev/shm/acid_staging`) for inter-phase data transfer
+- **GPU management**: Cleans GPU memory between phases
 
 ### Critical Implementation Details
 
-**No Duplication Philosophy**: PostgreSQL holds all metadata, ArangoDB only stores what can't be quickly recomputed (embeddings, extracted structures).
+**Direct Processing**: PDFs are processed directly from filesystem without database queries.
 
-**Late Chunking with Jina v4**: Process full documents (up to 32k tokens) BEFORE chunking to preserve context, resulting in dramatically better semantic understanding.
+**Late Chunking with Jina v4**: Process full documents (up to 32k tokens) BEFORE chunking to preserve context.
 
-**Minimal Collections**: Only two ArangoDB collections - `arxiv_embeddings` and `arxiv_structures` - following the "expensive computations only" principle.
+**Phase Separation**: Complete extraction phase ensures all GPU memory is available for embedding phase.
 
-**Atomic Operations**: All database operations are atomic - either fully succeed or fully rollback, preventing partial states.
+**Atomic Operations**: All database operations are atomic - either fully succeed or fully rollback.
 
 ## Database Schema
 
-### PostgreSQL Tables (Source of Truth)
+### ArangoDB Collections
 
-- `arxiv_papers`: Core paper metadata (title, abstract, categories)
-- `arxiv_versions`: Version history with dates (v1, v2, etc.)
-- `arxiv_authors`: Unique author names (normalized)
-- `arxiv_paper_authors`: Many-to-many relationships
-
-### ArangoDB Collections (Minimal Design)
-
-- `arxiv_embeddings`: Just embeddings and processing metadata
+- `arxiv_papers`: Paper metadata and processing status
   - `_key`: Sanitized arxiv_id
-  - `abstract_embedding`: 2048-dim vector for abstract
-  - `chunk_embeddings`: Array of chunk embeddings with context info
-  - `processing_date`: When processed
-- `arxiv_structures`: Extracted structures from PDFs
-  - `equations`: LaTeX equations from papers
-  - `tables`: Structured table data with headers
-  - `images`: Image metadata and captions
+  - `status`: Processing status (PROCESSED, FAILED)
+  - `num_chunks`, `num_equations`, `num_tables`, `num_images`: Counts
 
-## Expected Data Volumes
+- `arxiv_chunks`: Text chunks from papers
+  - `paper_id`: Link to arxiv_papers
+  - `text`: Chunk text
+  - `chunk_index`: Position in document
+  - `context_window_used`: Tokens of context
 
-### Experiment Window (Dec 2012 - Aug 2016)
+- `arxiv_embeddings`: Vector embeddings
+  - `paper_id`: Link to arxiv_papers
+  - `chunk_id`: Link to arxiv_chunks
+  - `vector`: 2048-dimensional embedding
+  - `model`: 'jina-v4'
 
-- Total papers: ~376,000
-- Papers with PDFs locally: ~185,000 (49.3%)
-- ML/AI papers: ~10,000
-- Graph-related papers: ~28,000
+- `arxiv_structures`: Extracted structures
+  - Equations, tables, images with metadata
 
-### Processing Performance
+## Expected Performance
 
-- Import speed: 600-1,200 papers/second
-- Total import time: ~40-80 minutes for 2.79M papers
-- Database size: ~10-15GB for complete PostgreSQL dataset
+### Processing Rates
+
+- **Extraction Phase**: ~36 papers/minute with 32 workers
+- **Embedding Phase**: ~8 papers/minute with 8 GPU workers
+- **End-to-end**: ~11.3 papers/minute overall
+- **GPU Memory**: 7-8GB per embedding worker with fp16
 
 ## Environment Variables
 
 ```bash
-# PostgreSQL
-export PGPASSWORD='YOUR_POSTGRES_PASSWORD'
-
 # ArangoDB
 export ARANGO_PASSWORD='YOUR_ARANGO_PASSWORD'
 export ARANGO_HOST='192.168.1.69'  # Default host
 
 # Processing
 export USE_GPU=true
-export CUDA_VISIBLE_DEVICES=1  # or 0,1 for dual GPU
+export CUDA_VISIBLE_DEVICES=0,1  # Dual GPU
 ```
 
 ## File Locations
 
-- **ArXiv metadata**: `/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json`
-- **PDF repository**: `/bulk-store/arxiv-data/pdf/` (organized by YYMM format)
-- **Checkpoint file**: `hybrid_checkpoint.json` (auto-resume on failure)
-- **Failed imports log**: `failed_imports.json` (PostgreSQL import issues)
-
-## Integration with HADES
-
-The hybrid pipeline enables:
-
-- Direct PDF processing from `/bulk-store/arxiv-data/pdf/`
-- Jina v4 embeddings with late chunking (32k token context)
-- Minimal ArangoDB storage (computations only, no duplication)
-- Cross-database queries joining PostgreSQL metadata with ArangoDB embeddings
-- Foundation for theory-practice bridge discovery across multiple sources
+- **ArXiv PDFs**: `/bulk-store/arxiv-data/pdf/` (organized by YYMM)
+- **Staging directory**: `/dev/shm/acid_staging/` (RamFS for speed)
+- **Checkpoint file**: `acid_phased_checkpoint.json`
+- **Log files**: `tools/arxiv/logs/acid_phased.log`
 
 ## Mathematical Framework Implementation
 
@@ -255,50 +196,28 @@ This toolkit directly implements the conveyance equation **C = (W·R·H)/T · Ct
 ### Variable Mappings
 
 - **W (WHAT)**: Jina v4 embeddings (2048-dim) capturing semantic content
-- **R (WHERE)**: PostgreSQL relations + ArangoDB graph proximity
+- **R (WHERE)**: Direct file access + ArangoDB graph proximity
 - **H (WHO)**: Pipeline processing capability, GPU acceleration
 - **T (Time)**: Processing latency, batch efficiency metrics
-- **Ctx**: Context preserved through late chunking (L), config alignment (I), extracted structures (A), citations (G)
+- **Ctx**: Context preserved through late chunking
 - **α ≈ 1.5-2.0**: Measured through retrieval performance
-
-### Optimization Strategy
-
-The hybrid pipeline optimizes for high C by:
-
-1. **Maximizing W**: High-quality embeddings with late chunking
-2. **Maximizing R**: Rich relational structure in dual databases
-3. **Maximizing H**: GPU acceleration, efficient batching
-4. **Minimizing T**: Checkpoint resume, parallel processing
-5. **Maximizing Ctx^α**: Preserving document coherence, extracting actionable content
 
 ## Common Problems & Solutions
 
 ### "Pipeline Processing Slow/Stuck"
 
 ```bash
-# Check what's happening
-python ../../core/utils/monitor_pipeline.py --checkpoint hybrid_checkpoint.json
+# Check what phase is running
+grep "PHASE" ../logs/acid_phased.log | tail -5
 
 # Check GPU memory
 nvidia-smi
 
-# Check database status
-python ../../utils/check_db_status.py --json
+# Check staging directory size
+du -sh /dev/shm/acid_staging/
 
 # Restart with fresh GPU memory
 python -c "import torch; torch.cuda.empty_cache()"
-```
-
-### "Import Errors/Foreign Key Violations"
-
-```bash
-# ALWAYS use bulletproof script
-python import_arxiv_to_postgres_bulletproof.py --password 'PASSWORD' --batch-size 5000
-
-# If still fails, nuclear option
-dropdb arxiv_datalake
-createdb arxiv_datalake
-psql -h localhost -U postgres -d arxiv_datalake < database/setup_arxiv_datalake_complete.sql
 ```
 
 ### "Out of Memory Errors"
@@ -308,56 +227,27 @@ psql -h localhost -U postgres -d arxiv_datalake < database/setup_arxiv_datalake_
 free -h
 nvidia-smi
 
-# Reduce batch sizes in config
-# Edit configs/processors/arxiv_hybrid.yaml
-# batch_size: 32 → 16 → 8
+# Reduce workers in config
+# Edit configs/acid_pipeline_phased.yaml
+# phases.extraction.workers: 32 → 16
+# phases.embedding.workers: 8 → 4
 ```
 
-### "Slow Database Queries"
-
-```sql
--- Refresh materialized views
-REFRESH MATERIALIZED VIEW experiment_papers_2012_2016;
-ANALYZE arxiv_papers;
-
--- Check query performance
-EXPLAIN ANALYZE SELECT COUNT(*) FROM arxiv_papers;
-```
-
-### "Resume Interrupted Processing"
+### "Database Connection Issues"
 
 ```bash
-# Pipeline auto-resumes from checkpoint
-python hybrid_pipeline.py --config ../../configs/processors/arxiv_hybrid.yaml
+# Verify ArangoDB is running
+curl http://192.168.1.69:8529/_api/version
 
-# Force fresh start (ignore checkpoint)
-python hybrid_pipeline.py --config ../../configs/processors/arxiv_hybrid.yaml --no-resume
-
-# Resume import from specific line
-python import_arxiv_to_postgres_bulletproof.py --password 'PASSWORD' --resume-from 1500000
-```
-
-## Troubleshooting
-
-### Check System Status
-
-```bash
-# PostgreSQL
-systemctl status postgresql@14-main
-psql -h localhost -U postgres -d arxiv_datalake -c "SELECT COUNT(*) FROM arxiv_papers;"
-
-# ArangoDB  
-curl http://localhost:8529/_api/version
-python ../../utils/check_db_status.py --detailed
-
-# GPU
-nvidia-smi
-python -c "import torch; print(torch.cuda.is_available())"
+# Check collections exist
+# Browse to http://192.168.1.69:8529
+# Select academy_store database
 ```
 
 ## Performance Optimization
 
-- Use batch size 5000-10000 for imports
-- Increase PostgreSQL `shared_buffers` for better performance
-- Refresh materialized views after large imports
-- Use GPU acceleration for embeddings (CUDA_VISIBLE_DEVICES)
+- Use batch size 24 for both extraction and embedding
+- Keep staging in RamFS for speed
+- Use GPU acceleration for both phases
+- Monitor GPU memory between phases
+- Process papers alphabetically for cache efficiency

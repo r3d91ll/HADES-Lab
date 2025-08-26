@@ -1,16 +1,17 @@
 # HADES - Heterogeneous Adaptive Dimensional Embedding System
 
-Production infrastructure for Information Reconstructionism - processing, storing, and serving embedded knowledge through a hybrid PostgreSQL-ArangoDB architecture.
+Production infrastructure for Information Reconstructionism - processing, storing, and serving embedded knowledge through ArangoDB with local SQLite caching.
 
 ## Overview
 
 HADES is a distributed network infrastructure following Actor-Network Theory principles:
 
-- **PostgreSQL Data Lake**: Source of truth for metadata (2.79M ArXiv papers)
-- **ArangoDB Graph Store**: Expensive computations only (embeddings, structures)
+- **ArangoDB Graph Store**: Primary storage for embeddings and document structures
+- **SQLite Local Cache**: Fast local indexing of PDF locations and metadata
 - **Jina v4 Embeddings**: 2048-dimensional with late chunking (32k token context)
-- **MCP Server**: Model Context Protocol interface for Claude integration
-- **Hybrid Architecture**: HADES orchestrates between databases without duplication
+- **Direct PDF Processing**: Processes papers directly from `/bulk-store/arxiv-data/pdf/`
+- **ACID Compliance**: Atomic transactions ensure data consistency
+- **Acheron Protocol**: Deprecated code preservation with timestamps (never delete, always preserve)
 
 ## Architecture
 
@@ -30,7 +31,7 @@ HADES-Lab/
 │   └── arxiv/                 # ArXiv paper processing
 │       ├── pipelines/         # ACID-compliant pipelines
 │       ├── monitoring/        # Real-time monitoring
-│       ├── database/          # PostgreSQL setup
+│       ├── database/          # Database utilities
 │       ├── scripts/           # Utility scripts
 │       ├── utils/             # Database utilities
 │       ├── tests/             # Integration tests
@@ -41,8 +42,16 @@ HADES-Lab/
 │   ├── README.md              # Experiment guidelines
 │   ├── experiment_template/   # Template for new experiments
 │   ├── datasets/              # Shared experimental datasets
-│   ├── documentation/         # Experiment-specific docs
-│   └── experiment_1/          # Active experiments
+│   │   ├── cs_papers.json     # Computer Science papers
+│   │   ├── graph_papers.json  # Graph theory papers
+│   │   ├── ml_ai_papers.json  # ML/AI papers
+│   │   └── sample_10k.json    # Quick testing sample
+│   ├── documentation/         # Experiment-specific analysis
+│   │   └── experiments/       # Research notes and findings
+│   └── experiment_1/          # Individual experiments
+│       ├── config/            # Experiment configurations
+│       ├── src/               # Experiment source code
+│       └── analysis/          # Results and analysis
 │
 ├── docs/                       # System documentation
 │   ├── adr/                   # Architecture Decision Records
@@ -51,8 +60,10 @@ HADES-Lab/
 │   └── methodology/           # Implementation methodology
 │
 ├── Acheron/                    # Deprecated code (timestamped)
-│   ├── test_scripts/          # Legacy test scripts
-│   └── configs/               # Deprecated configurations
+│   ├── test_scripts/          # Legacy test scripts (timestamped)
+│   ├── configs/               # Deprecated pipeline configurations
+│   ├── acid_monitoring.py     # Legacy monitoring script
+│   └── pipeline_status_reporter.py  # Legacy pipeline reporter
 │
 └── .claude/                    # Claude Code configurations
     └── agents/                # Custom agent definitions
@@ -63,17 +74,20 @@ HADES-Lab/
 ### Current (Production Ready)
 
 - **ACID Pipeline**: 11.3 papers/minute with 100% success rate (validated on 1000+ papers)
-- **E3 Architecture**: Extract (36 CPU) → Encode (Jina v4) → Embed (8 GPU workers)
-- **ArXiv Processing**: 375k papers in experiment window (Dec 2012 - Aug 2016)
+- **Phase-Separated Architecture**: Extract (GPU-accelerated Docling) → Embed (Jina v4)
+- **Direct PDF Processing**: No database dependencies, processes from local filesystem
 - **Jina v4 Late Chunking**: Context-aware embeddings preserving document structure (32k tokens)
-- **Multi-collection Storage**: Separate collections for embeddings, equations, tables, images
-- **MCP Server**: Async tools for progressive document processing
+- **Multi-collection Storage**: Separate ArangoDB collections for embeddings, equations, tables, images
+- **SQLite Caching**: Optional local cache for PDF indexing and metadata
+- **Experiments Framework**: Structured research environment with curated datasets
+- **Acheron Protocol**: Archaeological preservation of all deprecated code
 
 ### In Development
 
 - **Additional Data Sources**: GitHub repositories, web documentation
 - **Cross-source Graphs**: Theory-practice bridges across multiple sources
 - **Enhanced Embeddings**: Domain-specific fine-tuning
+- **Active Monitoring**: Real-time pipeline monitoring system
 
 ## Installation
 
@@ -87,8 +101,7 @@ poetry install
 # Optional: activate the virtual environment
 # poetry shell
 
-# Configure database connections
-export PGPASSWORD="your-postgres-password"
+# Configure ArangoDB connection
 export ARANGO_PASSWORD="your-arango-password"
 export ARANGO_HOST="192.168.1.69"  # or your host
 
@@ -98,7 +111,7 @@ export CUDA_VISIBLE_DEVICES=1  # or 0,1 for dual GPU
 
 ## Usage
 
-### ACID Pipeline (PostgreSQL → ArangoDB)
+### ACID Pipeline (Direct PDF Processing)
 
 ```bash
 # Run the ACID-compliant pipeline (11.3 papers/minute)
@@ -108,30 +121,32 @@ python arxiv_pipeline.py \
     --count 100 \
     --arango-password "$ARANGO_PASSWORD"
 
-# Monitor progress (from repo root)
-python core/utils/monitor_pipeline.py \
-  --checkpoint-file tools/arxiv/pipelines/acid_phased_checkpoint.json
+# Monitor progress
+tail -f tools/arxiv/logs/acid_phased.log
 ```
 
-### MCP Server
+### Creating Experiments
 
 ```bash
-# Install in Claude Code (from repo root)
-claude mcp add hades-arxiv python "$(pwd)/core/mcp_server/launch.py" \
-  -e ARANGO_PASSWORD="$ARANGO_PASSWORD"
+# Copy template
+cp -r experiments/experiment_template experiments/my_experiment
 
-# Or run standalone for testing
-python core/mcp_server/launch.py
+# Update configuration
+vim experiments/my_experiment/config/experiment_config.yaml
+
+# Run experiment
+cd experiments/my_experiment
+python src/run_experiment.py --config config/experiment_config.yaml
 ```
 
 ### Check Status
 
 ```bash
 # Database status
-python utils/check_db_status.py --detailed
+python tools/arxiv/utils/check_db_status.py --detailed
 
-# Jina v4 deployment verification
-python tools/arxiv/verify_jina_v4_deployment.py
+# Verify GPU availability
+nvidia-smi
 ```
 
 ## Philosophy
@@ -139,10 +154,11 @@ python tools/arxiv/verify_jina_v4_deployment.py
 Following Actor-Network Theory (ANT) principles:
 
 - **HADES is the network**, not any single component
-- **PostgreSQL**: External actant providing metadata
-- **ArangoDB**: External actant storing computations
-- **Power through translation**: HADES translates between actants
-- **No duplication**: Each piece of data has one authoritative source
+- **Local filesystem**: External actant providing PDF documents
+- **ArangoDB**: Primary actant for graph-based knowledge storage
+- **Power through translation**: HADES translates documents into embedded knowledge
+- **Direct processing**: No intermediate databases, straight from PDF to embeddings
+- **Acheron Protocol**: "Code never dies, it flows to Acheron" - preserving development archaeology
 
 ## Import Conventions
 
@@ -156,12 +172,28 @@ from core.mcp_server import server
 from core.processors.base_processor import BaseProcessor
 ```
 
+### Infrastructure vs Experiments
+
+- **Infrastructure** (`core/`, `tools/`): Reusable, production-ready components
+- **Experiments** (`experiments/`): Research code, one-off analyses, prototypes
+
+```bash
+# Run experiment
+cd experiments/my_experiment
+python src/run_experiment.py --config config/experiment_config.yaml
+
+# Use shared datasets
+python -c "import json; papers = json.load(open('../datasets/cs_papers.json'))"
+```
+
 ## Key Innovations
 
-1. **Hybrid Architecture**: PostgreSQL for metadata, ArangoDB for expensive computations only
-2. **Late Chunking**: Process full documents (32k tokens) before chunking for context preservation
+1. **Streamlined Architecture**: Direct PDF processing with ArangoDB storage, optional SQLite caching
+2. **Late Chunking**: Process full documents (32k tokens) before chunking for context preservation  
 3. **Multi-source Integration**: Unified framework for ArXiv, GitHub, and Web data
 4. **Information Reconstructionism**: Implementing WHERE × WHAT × CONVEYANCE × TIME theory
+5. **Experiments Framework**: Structured research environment with infrastructure separation
+6. **Archaeological Code Preservation**: Acheron protocol maintains complete development history
 
 ## License
 

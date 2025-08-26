@@ -7,33 +7,40 @@ This document outlines the major directory structure reorganization implemented 
 ## Major Structural Changes
 
 ### 1. Tools Organization
+
 **Before:** ArXiv tools scattered at root level (`arxiv/`)  
 **After:** Consolidated under `tools/arxiv/`
 
 This change clearly separates domain-specific tools from the core framework, making the codebase more modular and maintainable.
 
 ### 2. Core Framework Relocation
+
 **Before:** `core_framework/` at root level  
 **After:** `core/framework/`
 
 The core framework is now properly namespaced under `core/`, with additional subdirectories for:
+
 - `core/mcp_server/` - MCP server implementation
 - `core/processors/` - Processing modules  
 - `core/utils/` - Core utilities
 - `core/logs/` - Centralized logging
 
 ### 3. Acheron Protocol Implementation
+
 **New:** `Acheron/` directory for deprecated code
 
 Following the mythological principle that "code never dies, it flows to Acheron," all deprecated code is now preserved with timestamps:
+
 - Format: `filename_YYYY-MM-DD_HH-MM-SS.ext`
 - Current contents:
   - `Acheron/test_scripts/` - Legacy test scripts
   - `Acheron/configs/` - Deprecated pipeline configurations
 
 ### 4. Test Consolidation
+
 **Before:** `test_scripts/` at root level  
-**After:** 
+**After:**
+
 - Active tests: `tools/arxiv/tests/`
 - Deprecated tests: `Acheron/test_scripts/` (timestamped)
 
@@ -74,6 +81,7 @@ HADES-Lab/
 ## Import Path Updates
 
 ### Core Framework Imports
+
 ```python
 # Old
 from core_framework.embedders import JinaV4Embedder
@@ -85,6 +93,7 @@ from core.framework.extractors.docling_extractor import DoclingExtractor
 ```
 
 ### ArXiv Tools Imports
+
 ```python
 # Old
 from tools.arxiv.pipelines.arxiv_pipeline import ProcessingTask
@@ -96,6 +105,7 @@ from tools.arxiv.pipelines.arxiv_pipeline import ProcessingTask
 ## Command Path Updates
 
 ### Pipeline Execution
+
 ```bash
 # Old
 cd arxiv/pipelines/
@@ -107,6 +117,7 @@ python arxiv_pipeline.py --config ../configs/acid_pipeline_phased.yaml
 ```
 
 ### Database Operations
+
 ```bash
 # Old
 cd arxiv/utils/
@@ -142,6 +153,7 @@ python check_db_status.py
 "In Greek mythology, Acheron is the river of sorrow where souls cross into the underworld. In HADES-Lab, it's where deprecated code flows - never deleted, always preserved with timestamps for archaeological analysis of our development journey."
 
 This approach ensures we can:
+
 - Study failed experiments
 - Understand design evolution
 - Recover useful patterns from deprecated code
