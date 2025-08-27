@@ -14,12 +14,12 @@ from datetime import datetime
 
 try:
     from docling.document_converter import DocumentConverter
-    from docling.datamodel.document import DocumentConversionInput
+    # DocumentConversionInput was removed in newer versions
     from docling.datamodel.pipeline_options import PipelineOptions, TableStructureOptions
     DOCLING_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     DOCLING_AVAILABLE = False
-    logging.warning("Docling not available. Install with: pip install docling")
+    logging.warning(f"Docling not available: {e}")
 
 logger = logging.getLogger(__name__)
 

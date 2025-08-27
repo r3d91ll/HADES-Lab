@@ -183,7 +183,8 @@ class DocumentProcessor:
         # Initialize extractors
         self.docling_extractor = DoclingExtractor(
             use_ocr=self.config.use_ocr,
-            extract_tables=self.config.extract_tables
+            extract_tables=self.config.extract_tables,
+            use_fallback=True  # Enable fallback for robustness
         )
         self.latex_extractor = LaTeXExtractor() if self.config.extract_equations else None
         
@@ -361,8 +362,11 @@ class DocumentProcessor:
                 logger.warning(f"Failed to process LaTeX source: {e}")
         
         # Build extraction result
+        # Docling returns 'full_text' in our extractor, not 'text'
+        full_text = docling_result.get('full_text', '') or docling_result.get('text', '') or docling_result.get('markdown', '')
+        
         return ExtractionResult(
-            full_text=docling_result.get('text', ''),
+            full_text=full_text,
             tables=docling_result.get('tables', []),
             equations=docling_result.get('equations', []),
             images=docling_result.get('images', []),
