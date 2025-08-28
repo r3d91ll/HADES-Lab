@@ -29,10 +29,23 @@ class GitHubRepository:
     
     @property
     def full_name(self):
+        """
+        Return the repository's full name in the form "owner/name".
+        
+        This is derived from the GitHubRepository's `owner` and `name` fields and is suitable for display or constructing GitHub URLs.
+        
+        Returns:
+            str: The repository full name, e.g. "octocat/hello-world".
+        """
         return f"{self.owner}/{self.name}"
     
     @property
     def sanitized_name(self):
+        """
+        Return a filesystem-safe repository identifier composed of the owner and repository name.
+        
+        This property joins the repository owner and name with an underscore (e.g., `owner_repo`) and is suitable for use as a directory or file-friendly identifier.
+        """
         return f"{self.owner}_{self.name}"
 
 
@@ -46,11 +59,15 @@ class GitHubDocumentManager:
     
     def __init__(self, clone_dir: str = "/tmp/github_repos", cleanup: bool = True):
         """
-        Initialize GitHub document manager.
+        Initialize the GitHubDocumentManager.
         
-        Args:
-            clone_dir: Directory for cloning repositories
-            cleanup: Whether to clean up cloned repos after processing
+        Creates (if needed) and stores the local clone directory, configures whether cloned repositories
+        are removed after processing, and initializes the sets of file extensions to include and
+        directory names to skip during repository traversal.
+        
+        Parameters:
+            clone_dir (str): Path where repositories will be cloned. The directory will be created if it does not exist.
+            cleanup (bool): If True, cloned repository directories are removed after processing.
         """
         self.clone_dir = Path(clone_dir)
         self.clone_dir.mkdir(parents=True, exist_ok=True)
@@ -73,14 +90,16 @@ class GitHubDocumentManager:
     
     def prepare_repository(self, repo_url: str, branch: str = None) -> List:
         """
-        Prepare a repository for processing.
+        Prepare a GitHub repository for downstream document processing and return the resulting DocumentTask objects.
         
-        Args:
-            repo_url: GitHub repository URL (https or git)
-            branch: Specific branch to clone (optional)
-            
+        Parses the provided repository URL (supports full GitHub URLs or "owner/repo" shorthand), optionally uses the given branch, clones the repository locally, scans for eligible files to build DocumentTask entries, and (if configured) removes the cloned repository when finished.
+        
+        Parameters:
+            repo_url (str): GitHub repository location (HTTPS/git URL or "owner/repo").
+            branch (str | None): Optional branch to use instead of the repository's default.
+        
         Returns:
-            List of DocumentTask objects for processing
+            List: A list of DocumentTask objects representing files prepared for processing. Returns an empty list if cloning fails.
         """
         # Parse repository info from URL
         repo = self._parse_repo_url(repo_url)
@@ -109,13 +128,15 @@ class GitHubDocumentManager:
     
     def prepare_repositories_from_list(self, repo_urls: List[str]) -> List:
         """
-        Prepare multiple repositories from a list.
+        Prepare multiple GitHub repositories and collect DocumentTask objects.
         
-        Args:
-            repo_urls: List of repository URLs
-            
+        Given a list of repository URLs (or "owner/repo" strings), calls prepare_repository for each entry, logs failures per repository and continues, and returns a combined list of DocumentTask objects created from successfully processed repositories.
+        
+        Parameters:
+            repo_urls (List[str]): Repository URLs or "owner/repo" identifiers to process.
+        
         Returns:
-            Combined list of DocumentTask objects
+            List: Combined list of DocumentTask objects for all successfully prepared repositories.
         """
         all_tasks = []
         for repo_url in repo_urls:
@@ -128,7 +149,18 @@ class GitHubDocumentManager:
         return all_tasks
     
     def _parse_repo_url(self, url: str) -> GitHubRepository:
-        """Parse repository information from URL."""
+        """
+        Parse a GitHub repository identifier or URL and return a populated GitHubRepository.
+        
+        Accepts full GitHub URLs (e.g., "https://github.com/owner/repo", "git@github.com:owner/repo") or the shorthand "owner/repo".
+        Trailing ".git" and leading/trailing slashes/colons are removed. Constructs an HTTPS clone URL in the form "https://github.com/{owner}/{name}.git".
+        
+        Parameters:
+            url (str): Repository URL or "owner/repo" identifier.
+        
+        Returns:
+            GitHubRepository: Dataclass with owner, name, clone_url, and default_branch.
+        """
         # Handle different URL formats
         url = url.strip()
         
@@ -152,7 +184,14 @@ class GitHubDocumentManager:
         )
     
     def _clone_repository(self, repo: GitHubRepository) -> Optional[Path]:
-        """Clone a repository and return its path."""
+        """
+        Clone the given GitHubRepository into the manager's clone directory and return the local Path, or None on failure.
+        
+        The method removes any existing target directory for the repository, attempts a shallow clone (--depth 1) of the repository using repo.default_branch, and falls back to a shallow clone without an explicit branch if the first attempt fails. Cloning is subject to a 5-minute timeout. On any cloning error (including timeout) the function logs the failure and returns None.
+        
+        Returns:
+            Optional[Path]: Path to the cloned repository on success, or None if cloning failed.
+        """
         repo_path = self.clone_dir / repo.sanitized_name
         
         # Remove if exists
@@ -205,7 +244,21 @@ class GitHubDocumentManager:
             return None
     
     def _extract_code_files(self, repo: GitHubRepository, repo_path: Path) -> List:
-        """Extract code files from repository."""
+        """
+        Collects eligible code and documentation files from a cloned repository and returns a list of DocumentTask objects ready for downstream processing.
+        
+        This function recursively walks repo_path, filtering out directories listed in self.skip_dirs, files whose suffix is not in self.code_extensions, and files larger than 10 MB. For each accepted file it constructs a DocumentTask (imported dynamically to avoid circular imports) with:
+        - document_id: "{repo.sanitized_name}/{relative_path}"
+        - pdf_path: string file path to the file
+        - metadata: dict containing repository (owner/name), owner, name, file_path (relative), file_extension, file_size, and source set to "github".
+        
+        Parameters:
+            repo (GitHubRepository): Repository metadata used to build document_id and metadata fields.
+            repo_path (Path): Local filesystem path to the root of the cloned repository.
+        
+        Returns:
+            List[DocumentTask]: A list of DocumentTask instances for all files that passed filtering.
+        """
         # Import here to avoid circular dependency
         import sys
         sys.path.insert(0, str(Path(__file__).parent.parent.parent))

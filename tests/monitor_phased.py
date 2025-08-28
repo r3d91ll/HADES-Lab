@@ -10,7 +10,18 @@ from pathlib import Path
 from datetime import datetime
 
 def get_gpu_status():
-    """Get GPU memory usage."""
+    """
+    Query NVIDIA GPUs via `nvidia-smi` and return a list of GPU status dictionaries.
+    
+    Returns:
+        list[dict]: A list where each dict describes a GPU with keys:
+            - id (int): GPU index.
+            - util (int): GPU utilization percentage.
+            - mem_used (float): Memory used in gigabytes.
+            - mem_total (float): Total memory in gigabytes.
+    
+    If `nvidia-smi` is unavailable or an error occurs, returns an empty list.
+    """
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
@@ -32,7 +43,20 @@ def get_gpu_status():
         return []
 
 def monitor_test():
-    """Monitor the phase-separated test."""
+    """
+    Monitor a phase-separated test by tailing its log file and reporting progress and GPU usage.
+    
+    Continuously reads tests/logs/overnight_phased_dual_gpu.out (every 60 seconds) and:
+    - Detects current phase by scanning recent log lines for "PHASE 1: EXTRACTION" or "PHASE 2: EMBEDDING".
+    - When a progress line containing "Extraction progress:" or "Embedding progress:" is found, prints a timestamped status with the detected phase and the line, then queries and prints per-GPU utilization and memory (via get_gpu_status()).
+    - Tracks file-size inactivity; if the file does not grow for more than 10 consecutive checks (~10 minutes) the monitor prints a stall/completion message and stops.
+    - On encountering "FINAL SUMMARY" in the log, prints a completion banner and selected summary lines ("Overall Rate:", "Extraction:", "Embedding:"), then exits.
+    
+    Behavior:
+    - Prints messages to stdout.
+    - If the log file is missing at start, prints "Log file not found" and returns immediately.
+    - This function does not return a value.
+    """
     
     log_file = Path("tests/logs/overnight_phased_dual_gpu.out")
     

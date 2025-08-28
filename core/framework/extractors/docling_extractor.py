@@ -74,16 +74,30 @@ class DoclingExtractor:
     
     def extract(self, pdf_path: str) -> Dict[str, Any]:
         """
-        Extract text and structures from PDF.
+        Extract text and optional structured content from a file path (PDF or plain text).
         
-        Args:
-            pdf_path: Path to PDF file
-            
+        This method accepts a path to a document and returns a normalized extraction result. Behavior:
+        - If the path does not exist, raises FileNotFoundError.
+        - For text files (suffix .txt, .text, .md): reads the file as UTF-8 and returns an early-text result:
+          a dictionary containing 'text' (file contents), empty lists for 'tables', 'equations', 'images', 'figures',
+          and 'metadata' with page_count=1, extractor='text_reader', pdf_path, processing_time=0.0 and version='text_reader'.
+          Reading errors or empty text raise RuntimeError.
+        - For PDF files: performs a basic PDF header check and then attempts extraction using Docling if available,
+          otherwise uses the configured fallback extractor. The chosen extractor's result is returned (typically containing
+          full_text/markdown, structures, and metadata). In all successful non-text cases the method injects processing_time
+          (seconds) and pdf_path into the returned metadata.
+        - Pre-validation failures (empty file, invalid header, unreadable file) raise RuntimeError and are not retried with fallback.
+        - Processing-time errors will attempt the fallback extractor if use_fallback is True; otherwise a RuntimeError is raised.
+        
         Returns:
-            Dictionary containing:
-            - full_text: Complete text content
-            - structures: Extracted structures (equations, tables, images)
-            - metadata: Processing metadata
+            Dict[str, Any]: Extraction result. For text-reader paths the result contains a 'text' key and metadata described above.
+            For PDF extraction, the exact keys come from the underlying extractor but will include metadata with at least
+            'extractor', 'num_pages' (when available), 'processing_time', and 'pdf_path'.
+        
+        Raises:
+            FileNotFoundError: If the provided path does not exist.
+            RuntimeError: For empty files, invalid PDF header, unreadable files, text read failures, extraction failures,
+                          or when Docling is unavailable and fallback is disabled.
         """
         pdf_path = Path(pdf_path)
         
