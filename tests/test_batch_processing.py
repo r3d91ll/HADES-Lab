@@ -34,14 +34,20 @@ logger = logging.getLogger(__name__)
 
 def generate_synthetic_document(doc_id: int, size: str = "medium") -> str:
     """
-    Generate synthetic document content for testing.
+    Generate a synthetic, academic-style document for testing.
     
-    Args:
-        doc_id: Document identifier
-        size: Document size ('small', 'medium', 'large', 'empty')
+    This returns a text string composed of a title, an abstract, and a number of sections with sample prose and a short mathematical formulation. Use size to control approximate length.
+    
+    Parameters:
+        doc_id (int): Numeric identifier included in the generated title.
+        size (str): One of 'small', 'medium', 'large', or 'empty'. Controls number of sections:
+            - 'small' => ~3 sections
+            - 'medium' => ~10 sections (default)
+            - 'large' => ~30 sections
+            - 'empty' => returns an empty string
     
     Returns:
-        Document text content
+        str: Generated document content as plain text. For 'empty' size, returns "".
     """
     if size == "empty":
         return ""
@@ -86,14 +92,19 @@ def generate_synthetic_document(doc_id: int, size: str = "medium") -> str:
 
 def create_test_documents(num_docs: int, temp_dir: Path) -> List[Tuple[Path, int]]:
     """
-    Create test PDF files (actually text files for testing).
+    Create a set of synthetic test documents on disk and return their paths and IDs.
     
-    Args:
-        num_docs: Number of documents to create
-        temp_dir: Directory to store test documents
-        
+    Generates `num_docs` text files (named "doc_0000.txt", "doc_0001.txt", ...) in `temp_dir`. Each file contains synthetic content produced by `generate_synthetic_document`, with a randomized size selected from the distribution: small (20%), medium (50%), large (25%), and empty (5%) to exercise edge cases. Files are encoded as UTF-8.
+    
+    Parameters:
+        num_docs (int): Number of documents to create.
+        temp_dir (Path): Directory where files will be written; must exist and be writable.
+    
     Returns:
-        List of (file_path, doc_id) tuples
+        List[Tuple[Path, int]]: A list of (file_path, doc_id) tuples for each created document.
+    
+    Side effects:
+        Writes files to disk using the ".txt" extension and logs progress every 10 documents.
     """
     documents = []
     
@@ -133,10 +144,12 @@ def create_test_documents(num_docs: int, temp_dir: Path) -> List[Tuple[Path, int
 
 def test_batch_processing(num_docs: int = 100):
     """
-    Test batch processing with specified number of documents.
+    Run an end-to-end batch-processing test using synthetic documents.
     
-    Args:
-        num_docs: Number of documents to process
+    Creates a temporary directory with `num_docs` synthetic text documents, then processes them in batches across multiple chunking strategies ('traditional', 'late', 'semantic') using ProcessingConfig/DocumentProcessor. Aggregates per-document results (success/failure, chunk counts, processing times), logs throughput and summary statistics, and exercises error-handling scenarios for each strategy via test_error_cases.
+    
+    Parameters:
+        num_docs (int): Number of synthetic documents to create and process (default: 100).
     """
     logger.info(f"\n{'='*60}")
     logger.info(f"BATCH PROCESSING TEST - {num_docs} Documents")
@@ -253,7 +266,15 @@ def test_batch_processing(num_docs: int = 100):
 
 def test_error_cases(processor: DocumentProcessor):
     """
-    Test various error conditions.
+    Run a set of small error-condition checks against the provided DocumentProcessor.
+    
+    Performs four focused tests to verify the processor's handling of common error cases:
+    1. Non-existent file — verifies processing a missing path either fails gracefully or raises an exception.
+    2. Empty document — verifies an empty file produces no chunks or is handled via an exception.
+    3. Invalid chunking parameters — constructs a processor with chunk_overlap_tokens > chunk_size_tokens and ensures processing fails or raises a ValueError.
+    4. Batch with mixed valid/invalid documents — submits a batch containing a valid file, an empty file, a non-existent path, and a duplicate valid file, and reports how many entries succeeded.
+    
+    Creates temporary files/directories as needed and attempts to clean them up. This function does not return a value; it logs outcomes for each check.
     """
     # Test 1: Non-existent file
     try:
@@ -332,7 +353,21 @@ def test_error_cases(processor: DocumentProcessor):
 
 def performance_stress_test():
     """
-    Stress test with various document sizes and strategies.
+    Run a suite of stress tests that process a very large synthetic document across multiple chunk-size/overlap configurations.
+    
+    For each predefined configuration this function:
+    - Writes a single large test file to a temporary directory.
+    - Constructs a ProcessingConfig and DocumentProcessor (using the 'traditional' chunking strategy).
+    - Processes the file with processor.process_document(), measures elapsed time, and logs results:
+      - success/failure
+      - number of chunks produced
+      - processing time and chunking rate (chunks/sec)
+    
+    Side effects:
+    - Creates and deletes temporary files/directories.
+    - Emits progress and result logs via the module logger.
+    
+    This function does not return a value.
     """
     logger.info("\n" + "="*60)
     logger.info("PERFORMANCE STRESS TEST")

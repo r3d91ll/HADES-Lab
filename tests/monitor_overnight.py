@@ -9,7 +9,15 @@ from pathlib import Path
 from datetime import datetime
 
 def monitor_test():
-    """Monitor the overnight test progress."""
+    """
+    Monitor the overnight ArXiv test by tailing the latest log and waiting for a matching results JSON.
+    
+    Searches tests/logs for the most recent file matching `overnight_arxiv_test_*.log`, derives a timestamp suffix from that filename, and expects a corresponding results file named `overnight_arxiv_results_<timestamp>.json` in the same directory. Repeatedly (every 60 seconds) it:
+    - If the results JSON exists and contains a top-level `summary`, prints a completion banner with `best_rate_papers_per_minute` and `best_configuration`, then returns.
+    - Otherwise, reads the latest log and prints the most recent line that contains either "Progress:" or "Results for". If a line contains "TEST COMPLETE" the function prints it and returns.
+    
+    This function blocks until the test completes or until manually interrupted. It performs file I/O and prints progress to stdout.
+    """
     
     # Find the most recent log and results files
     log_dir = Path("tests/logs")

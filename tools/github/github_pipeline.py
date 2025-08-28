@@ -33,7 +33,15 @@ logger = logging.getLogger(__name__)
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
+    """
+    Load configuration from a YAML file.
+    
+    Parameters:
+        config_path (str): Path to the YAML configuration file.
+    
+    Returns:
+        Dict[str, Any]: Parsed configuration as a dictionary (result of `yaml.safe_load`).
+    """
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
@@ -44,7 +52,17 @@ class GitHubPipeline:
     """
     
     def __init__(self, config_path: str):
-        """Initialize pipeline."""
+        """
+        Initialize the GitHubPipeline.
+        
+        Loads configuration from the given YAML path, creates a GitHubDocumentManager (using
+        processing.github.clone_dir and processing.github.cleanup_after_processing with
+        defaults '/tmp/github_repos' and True), and constructs a GenericDocumentProcessor
+        configured with the loaded config and a "github" collection prefix.
+        
+        Parameters:
+            config_path (str): Path to the YAML configuration file used to initialize the pipeline.
+        """
         self.config = load_config(config_path)
         
         # Initialize GitHub manager
@@ -64,13 +82,17 @@ class GitHubPipeline:
     
     def process_repository(self, repo_url: str) -> Dict[str, Any]:
         """
-        Process a single repository.
+        Process a single GitHub repository: prepare its files, run the document processor, and return the processor's results.
         
-        Args:
-            repo_url: GitHub repository URL
-            
+        Parameters:
+            repo_url (str): HTTPS GitHub repository URL or repo identifier to process.
+        
         Returns:
-            Processing results
+            Dict[str, Any]: Result dictionary returned by the GenericDocumentProcessor. On failure to find files returns {'success': False, 'error': 'No files found'}. When successful, the dictionary typically contains:
+                - 'success' (bool): overall success flag
+                - 'extraction' (dict): with keys 'success' (list of extracted items) and 'failed' (list of extraction failures)
+                - 'embedding' (dict): with keys 'success' (list of embedded items) and 'failed' (list of embedding failures)
+                - other processor-specific metadata (e.g., counts, per-file details)
         """
         start_time = datetime.now()
         
@@ -117,13 +139,21 @@ class GitHubPipeline:
     
     def process_repositories(self, repo_urls: List[str]) -> Dict[str, Any]:
         """
-        Process multiple repositories.
+        Process multiple GitHub repository URLs and aggregate per-repository results.
         
-        Args:
-            repo_urls: List of repository URLs
-            
+        This calls self.process_repository(repo_url) for each URL and builds an aggregate
+        summary containing:
+        - "repositories": list of per-repo entries; each entry contains "url" and either
+          "results" (the processor's result dict) or "error" (stringified exception).
+        - "total_files": sum of each repo's results.get('total_processed', 0) when processing succeeded.
+        - "total_success": sum of counts of successful embeddings (len(results['embedding']['success'])).
+        - "total_failed": sum of counts of failed embeddings (len(results['embedding']['failed'])).
+        
+        Parameters:
+            repo_urls (List[str]): Iterable of repository URLs to process.
+        
         Returns:
-            Combined processing results
+            Dict[str, Any]: Aggregated results dictionary as described above.
         """
         all_results = {
             'repositories': [],
@@ -156,7 +186,28 @@ class GitHubPipeline:
 
 
 def main():
-    """Main entry point."""
+    """
+    Entry point for the CLI that runs the GitHub repository processing pipeline.
+    
+    Parses command-line arguments to determine configuration and which repository URLs to process, initializes a GitHubPipeline, runs processing for a single repository or multiple repositories, and writes the results to a timestamped JSON file.
+    
+    Behavior details:
+    - CLI options:
+      - --config: path to a YAML config file (default: 'configs/github_simple.yaml').
+      - --repo: a single repository URL to process.
+      - --repos: one or more repository URLs to process.
+      - --file: path to a file containing repository URLs (one per line).
+      - --arango-password: optional ArangoDB password; if provided, sets the ARANGO_PASSWORD environment variable for the process.
+    - Repository selection priority: --repo, then --repos, then --file. If none provided, defaults to ['https://github.com/kennethreitz/setup.py'].
+    - Processing:
+      - If a single URL is supplied, calls GitHubPipeline.process_repository; otherwise calls GitHubPipeline.process_repositories.
+    - Output:
+      - Results are written as pretty-printed JSON to a file named github_results_<YYYYMMDD_HHMMSS>.json in the current working directory.
+    - Side effects: may set ARANGO_PASSWORD in the environment and creates a JSON results file.
+    
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description='GitHub Repository Processing Pipeline')
     parser.add_argument('--config', type=str,
                        default='configs/github_simple.yaml',
