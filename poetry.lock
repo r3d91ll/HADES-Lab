@@ -2992,6 +2992,24 @@ docs = ["sphinx", "sphinx-rtd-theme", "zope.interface"]
 tests = ["coverage[toml] (==5.0.4)", "pytest (>=6.0.0,<7.0.0)"]
 
 [[package]]
+name = "pymupdf"
+version = "1.26.4"
+description = "A high performance Python library for data extraction, analysis, conversion & manipulation of PDF (and other) documents."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pymupdf-1.26.4-cp39-abi3-macosx_10_9_x86_64.whl", hash = "sha256:cb95562a0a63ce906fd788bdad5239063b63068cf4a991684f43acb09052cb99"},
+    {file = "pymupdf-1.26.4-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:67e9e6b45832c33726651c2a031e9a20108fd9e759140b9e843f934de813a7ff"},
+    {file = "pymupdf-1.26.4-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:2604f687dd02b6a1b98c81bd8becfc0024899a2d2085adfe3f9e91607721fd22"},
+    {file = "pymupdf-1.26.4-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:973a6dda61ebd34040e4df3753bf004b669017663fbbfdaa294d44eceba98de0"},
+    {file = "pymupdf-1.26.4-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:299a49797df5b558e695647fa791329ba3911cbbb31ed65f24a6266c118ef1a7"},
+    {file = "pymupdf-1.26.4-cp39-abi3-win32.whl", hash = "sha256:51b38379aad8c71bd7a8dd24d93fbe7580c2a5d9d7e1f9cd29ebbba315aa1bd1"},
+    {file = "pymupdf-1.26.4-cp39-abi3-win_amd64.whl", hash = "sha256:0b6345a93a9afd28de2567e433055e873205c52e6b920b129ca50e836a3aeec6"},
+    {file = "pymupdf-1.26.4.tar.gz", hash = "sha256:be13a066d42bfaed343a488168656637c4d9843ddc63b768dc827c9dfc6b9989"},
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.2.3"
 description = "pyparsing module - Classes and methods to define and execute parsing grammars"
@@ -4904,4 +4922,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "5cd96e3b235b41078ffedc1180d687288a51537efc3e7a2320f1b288cbdadce0"
+content-hash = "ec27fb253832d451720a3d332f25e034f9cc51c0e1aadfa084b856d02ba23745"

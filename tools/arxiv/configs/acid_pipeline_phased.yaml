@@ -31,9 +31,9 @@ phases:
   
   # Phase 2: EMBEDDING (GPU-only)
   embedding:
-    workers: 8  # Keep conservative until we test (4 per GPU)
+    workers: 6  # Back to 8 - 4 per GPU with proper cleanup
     gpu_devices: [0, 1]  # Both A6000s
-    workers_per_gpu: 4  # 4 workers per GPU - proven stable
+    workers_per_gpu: 3  # 4 workers per GPU - should be stable with cleanup
     
     # Jina v4 settings
     jina:
@@ -105,7 +105,9 @@ performance:
 
 # Checkpoint Configuration
 checkpoint:
-  enabled: true
+  enabled: auto  # auto, true, false (auto enables for 500+ documents)
+  auto_threshold: 500  # Auto-enable checkpoint for runs > this size
+  save_interval: 100   # Save checkpoint every N documents
   file: 'acid_phased_checkpoint.json'
   save_after_extraction: true  # Save after Phase 1
   save_after_embedding: true   # Save after Phase 2

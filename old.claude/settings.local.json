@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(mv:*)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:github.com)",
+      "Read(//bulk-store/**)",
+      "Bash(sqlite3:*)",
+      "Read(//bulk-store/arxiv-data/pdf/**)",
+      "Read(//bulk-store/arxiv-data/pdf/2506/**)",
+      "Read(//bulk-store/arxiv-data/pdf/2506/**)",
+      "Read(//bulk-store/arxiv-data/pdf/2506/**)",
+      "Bash(tree:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh api:*)",
+      "Bash(git rm:*)",
+      "Bash(grep:*)",
+      "Read(///**)",
+      "Bash(gh issue edit:*)",
+      "Bash(python tests/test_document_processor.py)",
+      "Bash(gh pr create:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(poetry run:*)",
+      "Bash(cat:*)",
+      "Bash(pkill:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "/home/todd/olympus/Acheron/test_scripts"
+    ]
+  }
+}
