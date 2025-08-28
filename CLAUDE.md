@@ -2,6 +2,71 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🚨 CRITICAL: Development Cycle
+
+**ALWAYS follow this development cycle for new features:**
+
+### PRD → Issue → Branch → Code → Test → PR
+
+1. **PRD (Product Requirements Document)**
+   - Create comprehensive PRD in `docs/prd/`
+   - Define problem, solution, requirements, success metrics
+   - Get alignment on what we're building BEFORE coding
+
+2. **Issue**
+   - Create GitHub issue from PRD: `gh issue create`
+   - Reference issue number in all commits
+   - Link PRD in issue description
+
+3. **Branch**
+   - Create feature branch: `git checkout -b feature/feature-name`
+   - NEVER develop directly on main
+   - Keep branches focused on single feature
+
+4. **Code**
+   - Implement based on PRD requirements
+   - Follow existing patterns and architecture
+   - Reuse components where possible (70%+ target)
+
+5. **Test**
+   - Write and run tests BEFORE creating PR
+   - Ensure all tests pass
+   - Document test results
+
+6. **PR (Pull Request)**
+   - Create PR with comprehensive description
+   - Reference issue number (Closes #XX)
+   - Wait for CodeRabbit review
+   - Address review comments
+
+### Example Workflow
+```bash
+# 1. Create PRD
+vim docs/prd/new_feature_prd.md
+
+# 2. Create Issue
+gh issue create --title "Feature: New Feature" --body "$(cat docs/prd/new_feature_prd.md)"
+
+# 3. Create Branch
+git checkout -b feature/new-feature
+
+# 4. Code (implement feature)
+# ... development work ...
+
+# 5. Test
+python tests/test_new_feature.py
+
+# 6. Commit and Push
+git add .
+git commit -m "feat: Add new feature (Issue #XX)"
+git push -u origin feature/new-feature
+
+# 7. Create PR
+gh pr create --title "feat: New Feature (Issue #XX)" --body "..."
+```
+
+**NO CODING WITHOUT A PRD!** This ensures we build the right thing with clear requirements.
+
 ## Quick Start Commands
 
 ### Run the ACID Pipeline (Most Common)
