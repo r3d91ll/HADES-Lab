@@ -1,0 +1,84 @@
+# GitHub Pipeline Configuration - Simple
+# Processes GitHub repositories through the generic document processor
+
+# ArangoDB Configuration
+arango:
+  host: 'http://192.168.1.69:8529'
+  database: 'academy_store'
+  username: 'root'
+  # password provided via environment variable ARANGO_PASSWORD
+
+# Phase Configuration for GitHub Processing
+phases:
+  # Phase 1: EXTRACTION (Code files)
+  extraction:
+    type: 'code'  # Use CodeExtractor instead of Docling
+    workers: 8  # Parallel file processing
+    timeout_seconds: 10  # Short timeout for code files
+    
+  # Phase 2: EMBEDDING (Jina v4)
+  embedding:
+    workers: 4  # GPU workers for embedding
+    gpu_devices: [0, 1]
+    workers_per_gpu: 2
+    
+    # Jina v4 settings
+    jina:
+      model_name: 'jinaai/jina-embeddings-v4'
+      device: 'cuda'
+      use_fp16: true
+      chunk_size_tokens: 1000
+      chunk_overlap_tokens: 200
+      max_context_length: 32768
+      batch_size: 24
+
+# Staging Configuration
+staging:
+  directory: '/dev/shm/github_staging'
+  cleanup_on_start: true
+  cleanup_on_complete: true
+
+# Processing Configuration
+processing:
+  source: 'github'
+  
+  # GitHub-specific settings
+  github:
+    clone_dir: '/tmp/github_repos'
+    cleanup_after_processing: true
+    
+    # File filtering
+    code_extensions:
+      - .py
+      - .js
+      - .ts
+      - .java
+      - .go
+      - .rs
+      - .cpp
+      - .c
+      - .h
+      - .md
+      - .yaml
+      - .yml
+      - .json
+    
+    skip_dirs:
+      - .git
+      - __pycache__
+      - node_modules
+      - venv
+      - dist
+      - build
+
+# Performance Configuration
+performance:
+  memory_limit_gb: 32
+  gpu_memory_fraction: 0.90
+  monitor_interval: 5
+
+# Logging Configuration
+logging:
+  level: 'INFO'
+  console: true
+  file: '../logs/github_processing.log'

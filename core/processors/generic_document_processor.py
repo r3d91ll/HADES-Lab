@@ -217,7 +217,6 @@ def _init_extraction_worker(gpu_devices, extraction_config):
     """Initialize extraction worker."""
     global WORKER_DOCLING
     import os
-    from core.framework.extractors.docling_extractor import DoclingExtractor
     
     # Assign GPU
     worker_info = mp.current_process()
@@ -226,12 +225,22 @@ def _init_extraction_worker(gpu_devices, extraction_config):
         gpu_id = gpu_devices[worker_id % len(gpu_devices)]
         os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
     
-    # Initialize Docling
-    WORKER_DOCLING = DoclingExtractor(
-        use_ocr=extraction_config.get('use_ocr', False),
-        extract_tables=extraction_config.get('extract_tables', True),
-        use_fallback=extraction_config.get('use_fallback', True)
-    )
+    # Check extraction type from config
+    extraction_type = extraction_config.get('type', 'pdf')
+    
+    if extraction_type == 'code':
+        # Use CodeExtractor for code files
+        from core.framework.extractors.code_extractor import CodeExtractor
+        WORKER_DOCLING = CodeExtractor()
+    else:
+        # Use RobustExtractor for PDFs
+        from core.framework.extractors.robust_extractor import RobustExtractor
+        WORKER_DOCLING = RobustExtractor(
+            use_ocr=extraction_config.get('docling', {}).get('use_ocr', False),
+            extract_tables=extraction_config.get('docling', {}).get('extract_tables', True),
+            timeout=extraction_config.get('timeout_seconds', 30),
+            use_fallback=extraction_config.get('docling', {}).get('use_fallback', True)
+        )
 
 
 def _extract_document(task: DocumentTask, staging_dir: str) -> Dict[str, Any]:
