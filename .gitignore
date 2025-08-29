@@ -365,3 +365,4 @@ experiments/*/*.checkpoint
 Acheron/
 Acheron/*
 logs/
+tests/*

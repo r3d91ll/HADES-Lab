@@ -508,8 +508,8 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
             )
             
             try:
-                # Store paper metadata
-                txn_db.collection(collections['papers']).insert({
+                # Store paper metadata with Tree-sitter symbols if available
+                paper_doc = {
                     '_key': sanitized_id,
                     'document_id': document_id,
                     'metadata': doc.get('metadata', {}),
@@ -517,7 +517,24 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
                     'processing_date': datetime.now().isoformat(),
                     'num_chunks': len(chunks),
                     'has_latex': extracted.get('has_latex', False)
-                }, overwrite=True)
+                }
+                
+                # Add repository field if this is GitHub data
+                if doc.get('metadata', {}).get('repo'):
+                    paper_doc['repository'] = doc['metadata']['repo']
+                
+                # Add Tree-sitter symbol data if available
+                if extracted.get('symbols'):
+                    paper_doc['symbols'] = extracted['symbols']
+                    paper_doc['symbol_hash'] = extracted.get('symbol_hash', '')
+                    paper_doc['code_metrics'] = extracted.get('code_metrics', {})
+                    paper_doc['code_structure'] = extracted.get('code_structure', {})
+                    paper_doc['language'] = extracted.get('language')
+                    paper_doc['has_tree_sitter'] = True
+                else:
+                    paper_doc['has_tree_sitter'] = False
+                
+                txn_db.collection(collections['papers']).insert(paper_doc, overwrite=True)
                 
                 # Store chunks and embeddings
                 for i, chunk in enumerate(chunks):
@@ -533,14 +550,29 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
                         'end_char': chunk.end_char
                     }, overwrite=True)
                     
-                    # Store embedding
-                    txn_db.collection(collections['embeddings']).insert({
+                    # Store embedding with symbol metadata for code files
+                    embedding_doc = {
                         '_key': f"{chunk_key}_emb",
                         'document_id': sanitized_id,
                         'chunk_id': chunk_key,
                         'vector': chunk.embedding.tolist(),
                         'model': 'jina-v4'
-                    }, overwrite=True)
+                    }
+                    
+                    # Add symbol metadata if this is code with Tree-sitter data
+                    if extracted.get('symbols'):
+                        embedding_doc['has_symbols'] = True
+                        embedding_doc['language'] = extracted.get('language')
+                        # Store a summary of symbols for this chunk's context
+                        # This helps the Jina v4 coding LoRA understand the code context
+                        embedding_doc['symbol_context'] = {
+                            'total_functions': len(extracted['symbols'].get('functions', [])),
+                            'total_classes': len(extracted['symbols'].get('classes', [])),
+                            'total_imports': len(extracted['symbols'].get('imports', [])),
+                            'complexity': extracted.get('code_metrics', {}).get('complexity', 0)
+                        }
+                    
+                    txn_db.collection(collections['embeddings']).insert(embedding_doc, overwrite=True)
                 
                 # Commit
                 txn_db.commit_transaction()

@@ -1,0 +1,247 @@
+# Weekend Test Configuration - 15,000 Papers
+# Optimized for long-running unattended processing over holiday weekend
+
+# ArangoDB Configuration
+arango:
+  host: 'http://192.168.1.69:8529'
+  database: 'academy_store'
+  username: 'root'
+  # password provided via environment variable ARANGO_PASSWORD
+
+# Phase-Separated Processing Configuration
+phases:
+  # Phase 1: EXTRACTION (GPU-accelerated)
+  extraction:
+    workers: 32  # Maximum CPU workers for extraction
+    memory_per_worker_gb: 4
+    timeout_seconds: 180  # Increased timeout for reliability
+    gpu_devices: [0, 1]  # Both A6000s for extraction
+    workers_per_gpu: 16
+    
+    # Docling settings (GPU-accelerated)
+    docling:
+      use_ocr: false  # Keep false for speed
+      extract_tables: true
+      extract_equations: true
+      extract_images: true
+      use_fallback: true
+      max_file_size_mb: 100  # Increased for larger papers
+      batch_size: 32  # Optimized batch size
+      use_gpu: true
+      retry_on_failure: true  # Retry failed extractions
+      max_retries: 3
+  
+  # Phase 2: EMBEDDING (GPU-only)
+  embedding:
+    workers: 8  # Optimal GPU workers
+    gpu_devices: [0, 1]  # Both A6000s
+    workers_per_gpu: 4
+    
+    # Jina v4 settings
+    jina:
+      model_name: 'jinaai/jina-embeddings-v4'
+      device: 'cuda'
+      use_fp16: true
+      chunk_size_tokens: 1000
+      chunk_overlap_tokens: 200
+      max_context_length: 32768
+      batch_size: 32  # Optimized for throughput
+
+# Staging Configuration (RamFS)
+staging:
+  directory: '/dev/shm/weekend_staging'
+  max_size_gb: 28
+  cleanup_on_start: true
+  cleanup_on_complete: true
+  compression: false
+
+# Processing Configuration
+processing:
+  # Source configuration
+  source: 'specific_list'  # Use the 20K list we created
+  count: 15000  # Process 15,000 papers
+  
+  # Specific list source
+  specific_list:
+    arxiv_ids_file: 'data/arxiv_collections/arxiv_ids_extended_*.txt'  # Will use most recent
+    shuffle: false  # Process in order
+    skip_existing: true  # Skip papers already in database
+  
+  # Local source settings (backup)
+  local:
+    pdf_dir: '/bulk-store/arxiv-data/pdf'
+    pattern: '*/*.pdf'
+    sort: 'name'
+
+# Performance Configuration
+performance:
+  # Phase transition
+  transition_delay_seconds: 10  # Extra delay for stability
+  
+  # Memory management
+  memory_limit_gb: 64
+  staging_memory_limit_gb: 28
+  
+  # GPU management
+  gpu_memory_fraction: 0.85  # Conservative for long run
+  clear_gpu_between_phases: true
+  gpu_memory_cleanup_interval: 100  # Clean every 100 papers
+  
+  # Monitoring
+  monitor_interval: 60  # Log stats every minute
+  log_memory_stats: true
+  log_phase_transitions: true
+  
+  # Error handling
+  continue_on_error: true  # Don't stop on individual failures
+  max_consecutive_failures: 50  # Stop if too many failures in a row
+  failure_cooldown_seconds: 60  # Wait before retrying after failures
+
+# Checkpoint Configuration
+checkpoint:
+  enabled: true  # Always checkpoint for long runs
+  auto_threshold: 100  # Not needed, always enabled
+  save_interval: 250  # Save checkpoint every 250 documents
+  file: 'weekend_test_checkpoint.json'
+  save_after_extraction: true
+  save_after_embedding: true
+  
+  # Recovery options
+  resume_from_staging: true
+  validate_staging: true
+  cleanup_incomplete: true  # Clean up incomplete papers on resume
+
+# Logging Configuration
+logging:
+  level: 'INFO'
+  console: true
+  file: '../logs/weekend_test_15k.log'
+  
+  # Phase-specific logs
+  extraction_log: '../logs/weekend_extraction.log'
+  embedding_log: '../logs/weekend_embedding.log'
+  
+  # Reporting
+  show_phase_stats: true
+  show_memory_usage: true
+  report_every: 100  # Report progress every 100 papers
+  
+  # Progress tracking
+  show_eta: true  # Show estimated time of completion
+  show_throughput: true  # Show papers/minute rate
+
+# Output Configuration
+output:
+  save_results: true
+  results_file: 'weekend_test_15k_results.json'
+  generate_report: true
+  report_file: 'weekend_test_15k_report.md'
+  
+  # Periodic reporting
+  interim_report_interval: 1000  # Generate interim report every 1000 papers
+  interim_report_file: 'weekend_interim_report.md'
+  
+  # Phase-specific metrics
+  track_extraction_time: true
+  track_embedding_time: true
+  track_staging_size: true
+  track_gpu_utilization: true
+  track_failure_reasons: true
+
+# SQLite Index Configuration
+sqlite:
+  enabled: true
+  database_file: 'weekend_test_15k_index.db'
+  
+  # Index essential fields
+  index_fields:
+    - 'arxiv_id'
+    - 'pdf_path'
+    - 'extraction_timestamp'
+    - 'embedding_timestamp'
+    - 'num_chunks'
+    - 'phase_completed'
+    - 'processing_status'
+    - 'error_message'
+  
+  # Track phase status
+  phase_tracking: true
+  error_tracking: true
+
+# Validation Configuration
+validation:
+  # Phase 1 validation
+  validate_extraction: true
+  min_text_length: 100
+  require_title: false  # Some old papers may not have clear titles
+  require_abstract: false
+  
+  # Phase 2 validation
+  validate_embeddings: true
+  embedding_dimensions: 2048
+  min_chunks: 1
+  max_chunks: 1000  # Increased for longer papers
+  
+  # Staging validation
+  validate_json: true
+  max_staged_file_size_mb: 100
+
+# Resource Monitoring
+monitoring:
+  # Phase-specific monitoring
+  track_extraction_metrics:
+    - 'cpu_percent'
+    - 'memory_percent'
+    - 'papers_per_minute'
+    - 'staging_size_mb'
+    - 'extraction_failures'
+  
+  track_embedding_metrics:
+    - 'gpu_utilization'
+    - 'gpu_memory_used'
+    - 'chunks_per_second'
+    - 'papers_per_minute'
+    - 'embedding_failures'
+  
+  # Alerts (logged, not emailed)
+  memory_warning_percent: 85
+  memory_critical_percent: 95
+  staging_warning_gb: 25
+  staging_critical_gb: 28
+  
+  # Performance tracking
+  log_throughput: true
+  throughput_window: 300  # 5 minute window
+  
+  # Health checks
+  health_check_interval: 300  # Every 5 minutes
+  check_database_connection: true
+  check_staging_space: true
+  check_gpu_health: true
+
+# Weekend-Specific Optimizations
+weekend_optimizations:
+  # Batch processing
+  batch_papers_for_extraction: true
+  extraction_batch_size: 100  # Process in batches of 100
+  
+  # Error recovery
+  auto_restart_on_crash: false  # Require manual intervention
+  save_failed_paper_list: true
+  failed_papers_file: 'weekend_failed_papers.txt'
+  
+  # Resource management
+  aggressive_cleanup: true  # Clean up aggressively to prevent memory issues
+  periodic_gc_interval: 500  # Force garbage collection every 500 papers
+  
+  # Database optimization
+  batch_database_writes: true
+  database_batch_size: 50  # Write to DB in batches
+  
+  # Progress notifications (for logs)
+  milestone_notifications: [1000, 2500, 5000, 7500, 10000, 12500, 15000]
+  
+  # Emergency stops
+  stop_on_critical_error: true
+  stop_on_disk_full: true
+  stop_on_database_error: false  # Try to continue even with DB issues

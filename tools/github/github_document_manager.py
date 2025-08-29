@@ -148,6 +148,10 @@ class GitHubDocumentManager:
         
         return all_tasks
     
+    def parse_repo_url(self, url: str) -> GitHubRepository:
+        """Parse repository information from URL (public API)."""
+        return self._parse_repo_url(url)
+    
     def _parse_repo_url(self, url: str) -> GitHubRepository:
         """
         Parse a GitHub repository identifier or URL and return a populated GitHubRepository.
