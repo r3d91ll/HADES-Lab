@@ -366,3 +366,5 @@ Acheron/
 Acheron/*
 logs/
 tests/*
+tools/arxiv/scripts/data/arxiv_collections/arxiv_ids_extended_20250829_190526.txt
+tools/arxiv/scripts/data/arxiv_collections/arxiv_extended_collection_20250829_190526.json

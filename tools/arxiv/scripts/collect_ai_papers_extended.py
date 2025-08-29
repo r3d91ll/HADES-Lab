@@ -149,9 +149,12 @@ class ExtendedArXivCollector:
             logger.error(f"Error parsing entry: {e}")
             return None
     
-    def collect_extended_papers(self) -> Dict[str, List[Dict]]:
+    def collect_extended_papers(self, target_count: int = 20000) -> Dict[str, List[Dict]]:
         """
-        Collect papers using extended search strategies to reach 20,000.
+        Collect papers using extended search strategies to reach target count.
+        
+        Args:
+            target_count: Target number of papers to collect
         
         Returns:
             Dictionary mapping topics to lists of papers
@@ -376,20 +379,18 @@ class ExtendedArXivCollector:
             all_papers = self.existing_collection.copy()
             logger.info(f"Starting with {sum(len(papers) for papers in all_papers.values())} existing papers")
         
-        # Target: 20,000 total papers
-        target_total = 20000
-        papers_needed = target_total - len(self.collected_ids)
+        papers_needed = target_count - len(self.collected_ids)
         
         logger.info(f"\n{'='*60}")
         logger.info(f"Extended Collection Phase")
         logger.info(f"Current papers: {len(self.collected_ids)}")
-        logger.info(f"Target total: {target_total}")
+        logger.info(f"Target total: {target_count}")
         logger.info(f"Papers needed: {papers_needed}")
         logger.info(f"{'='*60}")
         
         for topic, topic_queries in extended_queries.items():
-            if len(self.collected_ids) >= target_total:
-                logger.info(f"Reached target of {target_total} papers!")
+            if len(self.collected_ids) >= target_count:
+                logger.info(f"Reached target of {target_count} papers!")
                 break
             
             logger.info(f"\n{'='*60}")
@@ -399,7 +400,7 @@ class ExtendedArXivCollector:
             topic_papers = []
             
             for query in topic_queries:
-                if len(self.collected_ids) >= target_total:
+                if len(self.collected_ids) >= target_count:
                     break
                 
                 # Search with pagination
@@ -415,8 +416,8 @@ class ExtendedArXivCollector:
                     time.sleep(3)
                     
                     # Check if we've reached target
-                    if len(self.collected_ids) >= target_total:
-                        logger.info(f"✅ Reached target of {target_total} papers!")
+                    if len(self.collected_ids) >= target_count:
+                        logger.info(f"✅ Reached target of {target_count} papers!")
                         break
                     
                     # Stop if we have enough papers for this query
@@ -475,15 +476,28 @@ class ExtendedArXivCollector:
 
 def main():
     """Main execution function."""
-    logger.info("Starting Extended ArXiv Paper Collection (Target: 20,000 papers)")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Collect ArXiv papers for AI/RAG/LLM research")
+    parser.add_argument('--target', type=int, default=20000,
+                       help='Target number of papers to collect (default: 20000)')
+    parser.add_argument('--existing-file', type=str, default="arxiv_ids_20250829_174450.txt",
+                       help='Existing ID file to load (default: arxiv_ids_20250829_174450.txt)')
+    parser.add_argument('--no-load-existing', action='store_true',
+                       help='Start fresh without loading existing collection')
+    
+    args = parser.parse_args()
+    
+    logger.info(f"Starting Extended ArXiv Paper Collection (Target: {args.target:,} papers)")
     
     collector = ExtendedArXivCollector()
     
-    # Load existing collection
-    collector.load_existing_collection("arxiv_ids_20250829_174450.txt")
+    # Load existing collection unless told not to
+    if not args.no_load_existing:
+        collector.load_existing_collection(args.existing_file)
     
     # Collect additional papers
-    papers = collector.collect_extended_papers()
+    papers = collector.collect_extended_papers(target_count=args.target)
     
     # Print statistics
     print("\n" + "="*60)
@@ -497,10 +511,10 @@ def main():
     
     print(f"{'TOTAL UNIQUE':20s}: {total_papers:5d} papers")
     
-    if total_papers >= 20000:
-        print(f"\n✅ Target of 20,000 papers achieved!")
+    if total_papers >= args.target:
+        print(f"\n✅ Target of {args.target:,} papers achieved!")
     else:
-        print(f"\n⚠️  Collected {total_papers} papers (target: 20,000)")
+        print(f"\n⚠️  Collected {total_papers:,} papers (target: {args.target:,})")
         print("Consider running with additional queries or date ranges")
     
     # Save results
@@ -511,10 +525,14 @@ def main():
     print(f"  - Full data: {json_path}")
     print(f"  - ID list:   {txt_path}")
     
-    print(f"\n🎯 Ready for weekend test run!")
-    print(f"  - Total papers available: {total_papers}")
-    print(f"  - Recommended test size: 15,000 papers")
-    print(f"  - Estimated runtime: ~22 hours @ 11.3 papers/minute")
+    if args.target <= 1000:
+        print(f"\n🧪 Ready for test run!")
+        print(f"  - Total papers available: {total_papers:,}")
+        print(f"  - Estimated runtime: ~{total_papers / 11.3:.0f} minutes @ 11.3 papers/minute")
+    else:
+        print(f"\n🎯 Ready for large-scale test!")
+        print(f"  - Total papers available: {total_papers:,}")
+        print(f"  - Estimated runtime: ~{total_papers / 11.3 / 60:.1f} hours @ 11.3 papers/minute")
     
     return papers, collector.collected_ids
 
