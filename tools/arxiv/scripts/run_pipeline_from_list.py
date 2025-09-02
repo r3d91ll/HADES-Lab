@@ -14,13 +14,15 @@ import time
 from pathlib import Path
 from datetime import datetime
 import random
+import yaml
 
 def run_pipeline_from_list(
     paper_list: str,
     count: int,
     config_file: str = None,
     shuffle: bool = False,
-    start_from: int = 0
+    start_from: int = 0,
+    skip_processed: bool = True
 ):
     """
     Run the ArXiv pipeline using papers from a list file.
@@ -31,6 +33,7 @@ def run_pipeline_from_list(
         config_file: Configuration file to use
         shuffle: Whether to shuffle the paper list before processing
         start_from: Index to start from in the list
+        skip_processed: Whether to skip papers already in ArangoDB (default: True)
     """
     # Default config if not specified
     if config_file is None:
@@ -61,6 +64,29 @@ def run_pipeline_from_list(
     total_available = len(all_paper_ids)
     print(f"📄 Loaded {total_available:,} paper IDs from {list_path.name}")
     
+    # Check for already processed papers if requested
+    if skip_processed:
+        print("🔍 Checking for already processed papers...")
+        
+        # Import check_existing_papers function
+        sys.path.insert(0, str(Path(__file__).parent))
+        from check_existing_papers import check_existing_papers
+        
+        # Check existing papers
+        check_result = check_existing_papers(paper_list)
+        
+        if check_result and 'unprocessed_ids' in check_result:
+            unprocessed_ids = check_result['unprocessed_ids']
+            processed_count = check_result.get('processed', 0)
+            
+            if processed_count > 0:
+                print(f"⚠️  Found {processed_count:,} already processed papers - skipping them")
+                all_paper_ids = unprocessed_ids
+                total_available = len(all_paper_ids)
+                print(f"📄 Using {total_available:,} unprocessed papers")
+        else:
+            print("⚠️  Could not check for processed papers - continuing with full list")
+    
     # Shuffle if requested
     if shuffle:
         random.shuffle(all_paper_ids)
@@ -74,25 +100,33 @@ def run_pipeline_from_list(
     if actual_count < count:
         print(f"⚠️  Only {actual_count} papers available (requested {count})")
     
-    # Create temporary file with selected IDs
-    temp_list = Path(f"/tmp/arxiv_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-    with open(temp_list, 'w') as f:
-        for paper_id in selected_ids:
-            f.write(f"{paper_id}\n")
-    
-    print(f"📝 Created temporary list: {temp_list}")
-    print(f"   Papers {start_from+1} to {end_idx} of {total_available}")
-    
-    # Check config exists
+    # Load the base config file
     config_path = Path(config_file)
     if not config_path.exists():
         print(f"❌ Config file not found: {config_path}")
         return False
     
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    # Update config with selected paper IDs
+    config['processing']['source'] = 'specific_list'
+    config['processing']['specific_list']['arxiv_ids'] = selected_ids
+    config['processing']['count'] = actual_count
+    
+    # Create temporary config file
+    temp_config = Path(f"/tmp/arxiv_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yaml")
+    with open(temp_config, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False)
+    
+    print(f"📝 Created temporary config: {temp_config}")
+    print(f"   Papers {start_from+1} to {end_idx} of {total_available}")
+    print(f"   Selected {actual_count} paper IDs")
+    
     print("\n" + "=" * 60)
     print(f"ArXiv Pipeline Test - {actual_count} Papers")
     print("=" * 60)
-    print(f"Config: {config_path}")
+    print(f"Base Config: {config_path}")
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Calculate estimated time
@@ -114,16 +148,16 @@ def run_pipeline_from_list(
     cmd = [
         sys.executable,
         str(pipeline_script),
-        "--config", str(config_path),
-        "--paper-list", str(temp_list),
+        "--config", str(temp_config),
+        "--source", "specific_list",
         "--count", str(actual_count),
         "--arango-password", arango_password
     ]
     
     print(f"Running command:")
     print(f"  python arxiv_pipeline.py")
-    print(f"    --config {config_path.name}")
-    print(f"    --paper-list {temp_list.name}")
+    print(f"    --config {temp_config.name}")
+    print(f"    --source specific_list")
     print(f"    --count {actual_count}")
     print(f"    --arango-password [HIDDEN]")
     print()
@@ -154,9 +188,9 @@ def run_pipeline_from_list(
             print(f"Processing rate: {actual_count / elapsed_minutes:.1f} papers/minute")
         
         # Clean up temp file
-        if temp_list.exists():
-            temp_list.unlink()
-            print(f"🧹 Cleaned up temporary list")
+        if temp_config.exists():
+            temp_config.unlink()
+            print(f"🧹 Cleaned up temporary config")
         
         if result.returncode == 0:
             print("✅ Pipeline completed successfully!")
@@ -171,18 +205,18 @@ def run_pipeline_from_list(
         print(f"Runtime before interruption: {elapsed/60:.1f} minutes")
         
         # Clean up temp file
-        if temp_list.exists():
-            temp_list.unlink()
-            print(f"🧹 Cleaned up temporary list")
+        if temp_config.exists():
+            temp_config.unlink()
+            print(f"🧹 Cleaned up temporary config")
         
         return False
     except Exception as e:
         print(f"❌ Error running pipeline: {e}")
         
         # Clean up temp file
-        if temp_list.exists():
-            temp_list.unlink()
-            print(f"🧹 Cleaned up temporary list")
+        if temp_config.exists():
+            temp_config.unlink()
+            print(f"🧹 Cleaned up temporary config")
         
         return False
 
@@ -221,24 +255,31 @@ Examples:
                        help='Shuffle papers before processing')
     parser.add_argument('--start-from', type=int, default=0,
                        help='Start from this index in the list (default: 0)')
+    parser.add_argument('--no-skip', action='store_true',
+                       help='Do not skip already processed papers (default: skip them)')
     
     args = parser.parse_args()
     
     # Find latest paper list if not specified
     if args.paper_list is None:
-        data_dir = Path("data/arxiv_collections")
-        if data_dir.exists():
-            # Find the most recent arxiv_ids file
-            id_files = sorted(data_dir.glob("arxiv_ids*.txt"))
-            if id_files:
-                args.paper_list = str(id_files[-1])
-                print(f"📂 Using latest paper list: {id_files[-1].name}")
-            else:
-                print("❌ No paper lists found in data/arxiv_collections/")
-                print("   Please run: python collect_ai_papers_extended.py")
-                return
+        # Search in both legacy and new SQL-backed output locations
+        candidates = [
+            Path("data/arxiv_collections"),
+            Path("tools/arxiv/scripts/data/arxiv_collections"),
+        ]
+        id_files = []
+        for data_dir in candidates:
+            if data_dir.exists():
+                id_files.extend(sorted(data_dir.glob("arxiv_ids*.txt")))
+        if id_files:
+            latest = sorted(id_files)[-1]
+            args.paper_list = str(latest)
+            print(f"📂 Using latest paper list: {latest}")
         else:
-            print("❌ Data directory not found: data/arxiv_collections/")
+            print("❌ No paper lists found in:")
+            for d in candidates:
+                print(f"   - {d}")
+            print("   Please run: tools/arxiv/scripts/collect_ai_papers_extended.py --mode sql")
             return
     
     # Run the pipeline
@@ -247,7 +288,8 @@ Examples:
         count=args.count,
         config_file=args.config,
         shuffle=args.shuffle,
-        start_from=args.start_from
+        start_from=args.start_from,
+        skip_processed=(not args.no_skip)  # Skip by default unless --no-skip is used
     )
     
     sys.exit(0 if success else 1)

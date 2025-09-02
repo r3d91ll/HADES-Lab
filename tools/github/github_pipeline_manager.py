@@ -317,7 +317,7 @@ class GitHubPipelineManager:
 
 
 def main():
-    """Demo the graph-based pipeline."""
+    """Process GitHub repositories from config file."""
     import yaml
     import os
     
@@ -334,18 +334,36 @@ def main():
     # Create manager
     manager = GitHubPipelineManager(config)
     
-    # Process a repository
-    results = manager.process_repository("https://github.com/dav/word2vec")
+    # Get repositories from config
+    repositories = config['processing'].get('repositories', [])
     
-    print(f"Processed {results.get('total_processed', 0)} files")
-    print(f"Repository: {results['repository']['full_name']}")
+    if not repositories:
+        print("No repositories configured in github_simple.yaml")
+        return
     
-    # Compare word2vec implementations
-    comparisons = manager.compare_repositories("word2vec")
-    print(f"\nFound {len(comparisons)} word2vec repositories:")
-    for comp in comparisons:
-        print(f"  - {comp['repository']}: {comp['file_count']} files, "
-              f"{comp['total_functions']} functions")
+    print(f"Processing {len(repositories)} repositories from config")
+    print("=" * 80)
+    
+    # Process each repository
+    for i, repo in enumerate(repositories, 1):
+        print(f"\n[{i}/{len(repositories)}] Processing: {repo}")
+        print("-" * 40)
+        
+        try:
+            results = manager.process_repository(f"https://github.com/{repo}")
+            print(f"✓ Processed {results.get('total_processed', 0)} files")
+            print(f"  Repository: {results['repository']['full_name']}")
+            
+            # Show file and function counts
+            file_count = results.get('total_processed', 0)
+            func_count = results.get('total_functions', 0)
+            print(f"  Files: {file_count}, Functions: {func_count}")
+            
+        except Exception as e:
+            print(f"✗ Failed to process {repo}: {e}")
+    
+    print("\n" + "=" * 80)
+    print("All repositories processed")
 
 
 if __name__ == "__main__":

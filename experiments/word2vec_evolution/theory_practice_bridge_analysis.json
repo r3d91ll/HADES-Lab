@@ -1,0 +1,77 @@
+{
+  "experiments": [
+    {
+      "name": "word2vec",
+      "year": 2013,
+      "paper_id": "1301.3781",
+      "repo": "dav/word2vec",
+      "conveyance_type": "community_implementation",
+      "conveyance_score": 0.0,
+      "num_paper_chunks": 7,
+      "num_code_files": 0,
+      "mean_entropy": 0,
+      "entropy_std": 0,
+      "bridge_points": [],
+      "paper_title": "Efficient Estimation of Word Representations in Vector Space"
+    },
+    {
+      "name": "doc2vec",
+      "year": 2014,
+      "error": "Missing embeddings"
+    },
+    {
+      "name": "code2vec",
+      "year": 2018,
+      "error": "Missing embeddings"
+    }
+  ],
+  "evolution": {
+    "timeline": [
+      {
+        "year": 2013,
+        "name": "word2vec",
+        "num_paper_chunks": 7,
+        "num_code_files": 0,
+        "conveyance_score": 0.0
+      },
+      {
+        "year": 2014,
+        "name": "doc2vec",
+        "num_paper_chunks": 0,
+        "num_code_files": 0,
+        "conveyance_score": 0
+      },
+      {
+        "year": 2018,
+        "name": "code2vec",
+        "num_paper_chunks": 0,
+        "num_code_files": 0,
+        "conveyance_score": 0
+      }
+    ],
+    "complexity_growth": [
+      0,
+      0,
+      0
+    ],
+    "conveyance_trend": [
+      0.0,
+      0,
+      0
+    ],
+    "complexity_increase": 0,
+    "conveyance_variance": 0.0
+  },
+  "insights": {
+    "highest_conveyance": {
+      "name": "word2vec",
+      "score": 0.0,
+      "type": "community_implementation"
+    },
+    "temporal_pattern": {
+      "complexity_growth": 0,
+      "conveyance_stability": 1.0
+    }
+  },
+  "timestamp": "2025-09-02T16:48:23.219998"
+}

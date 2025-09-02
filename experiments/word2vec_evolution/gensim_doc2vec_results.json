@@ -1,0 +1,10 @@
+{
+  "repository": "piskvorky/gensim",
+  "focus": "doc2vec implementation",
+  "significance": "Pure conveyance - implemented from paper alone",
+  "paper": "1405.4053",
+  "authors_had_code": false,
+  "became_standard": true,
+  "processing_time": 43.946191,
+  "timestamp": "2025-09-02T16:46:28.357831"
+}

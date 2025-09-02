@@ -42,6 +42,12 @@ staging:
 processing:
   source: 'github'
   
+  # Repositories to process (for word2vec evolution experiment)
+  repositories:
+    - 'dav/word2vec'        # word2vec (2013) - community implementation
+    - 'piskvorky/gensim'    # doc2vec (2014) - pure conveyance (no original code!)
+    - 'tech-srl/code2vec'   # code2vec (2018) - official implementation
+  
   # GitHub-specific settings
   github:
     clone_dir: '/bulk-store/git'
