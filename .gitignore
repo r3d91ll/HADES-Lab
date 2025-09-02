@@ -365,3 +365,5 @@ experiments/*/*.checkpoint
 Acheron/
 Acheron/*
 logs/
+experiments/word2vec_evolution/embeddings/
+tools/arxiv/scripts/data/
