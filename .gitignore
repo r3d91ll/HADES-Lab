@@ -362,6 +362,7 @@ experiments/*/logs/
 experiments/*/.cache/
 experiments/*/checkpoints/
 experiments/*/*.checkpoint
+experiments/*/embeddings/*_embeddings.json
 
 Acheron/
 Acheron/*
