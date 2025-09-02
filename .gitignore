@@ -367,9 +367,10 @@ experiments/*/embeddings/*_embeddings.json
 Acheron/
 Acheron/*
 logs/
-# Test artifacts only, not test source files
 tests/*.log
 tests/.cache/
 tests/__pycache__/
 tests/*.pyc
 tools/arxiv/scripts/data/*
+experiments/word2vec_evolution/embeddings/
+tools/arxiv/scripts/data/arxiv_collections/
