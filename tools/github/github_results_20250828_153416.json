@@ -1,0 +1,29 @@
+{
+  "success": false,
+  "extraction": {
+    "success": [],
+    "failed": [
+      "dav_word2vec/README.md",
+      "dav_word2vec/scripts/create-lowercase-phrases-data.sh",
+      "dav_word2vec/scripts/create-text8-data.sh",
+      "dav_word2vec/scripts/create-text8-vector-data.sh",
+      "dav_word2vec/scripts/demo-analogy.sh",
+      "dav_word2vec/scripts/demo-classes.sh",
+      "dav_word2vec/scripts/demo-phrase-accuracy.sh",
+      "dav_word2vec/scripts/demo-phrases.sh",
+      "dav_word2vec/scripts/demo-train-big-model-v1.sh",
+      "dav_word2vec/scripts/demo-word-accuracy.sh",
+      "dav_word2vec/scripts/demo-word.sh",
+      "dav_word2vec/src/compute-accuracy.c",
+      "dav_word2vec/src/distance.c",
+      "dav_word2vec/src/word-analogy.c",
+      "dav_word2vec/src/word2phrase.c",
+      "dav_word2vec/src/word2vec.c"
+    ],
+    "staged_files": []
+  },
+  "embedding": {
+    "success": [],
+    "failed": []
+  }
+}

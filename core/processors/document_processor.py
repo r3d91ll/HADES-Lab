@@ -119,7 +119,19 @@ class ProcessingResult:
     warnings: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for storage."""
+        """
+        Return a JSON-serializable dictionary representation of the ProcessingResult suitable for storage or indexing.
+        
+        The returned dictionary contains:
+        - extraction: raw extraction fields (full_text, tables, equations, images, figures, metadata, has_latex, extraction_time).
+        - chunks: list of chunk records with text, embedding (converted to a plain list of floats), character span, chunk index/total, and context_window_used. Empty list if there are no chunks.
+        - processing_metadata: metadata about the processing run (processor version, model, strategy, timestamps, etc.).
+        - performance: timing metrics (total, extraction, chunking, embedding).
+        - success, errors, warnings: processing status and any diagnostics.
+        
+        Returns:
+            Dict[str, Any]: A JSON-serializable dictionary representation of this ProcessingResult.
+        """
         return {
             'extraction': {
                 'full_text': self.extraction.full_text,
@@ -173,10 +185,20 @@ class DocumentProcessor:
     
     def __init__(self, config: Optional[ProcessingConfig] = None):
         """
-        Initialize document processor with configuration.
+        Create a DocumentProcessor configured for extraction, chunking, and embedding.
         
-        Args:
-            config: Processing configuration (uses defaults if None)
+        If `config` is None, a default ProcessingConfig is used. The initializer:
+        - Stores the active configuration.
+        - Creates a DoclingExtractor configured for OCR and table extraction per the config.
+        - Creates a LaTeXExtractor only if equation extraction is enabled.
+        - Creates a JinaV4Embedder configured with the embedding model, precision, device, and chunking parameters from the config.
+        - When RAMFS staging is enabled, creates (or ensures existence of) the staging directory at `config.staging_dir`.
+        
+        Parameters:
+            config (Optional[ProcessingConfig]): Processing pipeline configuration; defaults are applied when None.
+        
+        Side effects:
+            May create the staging directory on disk when `config.use_ramfs_staging` is True.
         """
         self.config = config or ProcessingConfig()
         
@@ -210,20 +232,21 @@ class DocumentProcessor:
         document_id: Optional[str] = None
     ) -> ProcessingResult:
         """
-        Process a document through extraction, chunking, and embedding.
+        Process a single document end-to-end: extract content, create chunks, and produce embeddings.
         
-        This method implements the complete processing pipeline while
-        remaining agnostic to the document's source. It returns a
-        structured result that source-specific managers can adapt
-        to their storage schemas.
+        Performs extraction from the provided PDF (optionally merging LaTeX-sourced equations), splits or embeds text according to the configured chunking strategy ('late', 'traditional', 'token', 'semantic', 'fixed'), and returns a complete ProcessingResult containing extraction details, per-chunk embeddings, processing metadata, timing metrics, and any errors or warnings.
         
-        Args:
-            pdf_path: Path to PDF file
-            latex_path: Optional path to LaTeX source
-            document_id: Optional identifier for logging
-            
+        Parameters:
+            pdf_path: Path to the PDF file to process. May be a str or pathlib.Path.
+            latex_path: Optional path to a LaTeX source file; when provided and supported, LaTeX-derived equations take precedence over extractor-detected equations.
+            document_id: Optional identifier used for logging and metadata; defaults to the PDF filename stem when omitted.
+        
         Returns:
-            ProcessingResult containing all extracted and embedded content
+            ProcessingResult: Aggregated result including ExtractionResult, a list of ChunkWithEmbedding objects (may be empty on failure), processing metadata (processor version, embedding model, chunking strategy, counts, timestamps), timing metrics (extraction, chunking, embedding, total), and success/error/warning flags.
+        
+        Notes:
+            - If no chunks are produced the function returns a ProcessingResult with success=False and relevant error/warning messages.
+            - Unsupported chunking strategies raise a ValueError internally and result in a failed ProcessingResult.
         """
         start_time = time.time()
         errors = []
@@ -334,10 +357,11 @@ class DocumentProcessor:
         latex_path: Optional[Path] = None
     ) -> ExtractionResult:
         """
-        Extract content from PDF and optional LaTeX source.
+        Extract text and structured content from a PDF, optionally merging LaTeX-derived equations.
         
-        Combines Docling extraction with LaTeX processing when available,
-        preserving maximum semantic information from the source documents.
+        Performs extraction using the configured Docling extractor and, if a LaTeX path is provided and a LaTeX extractor is available, reads the LaTeX source and extracts equations. LaTeX-extracted equations, when present, take precedence over equations reported by Docling. The returned ExtractionResult includes selected full text (preferred keys: 'full_text', then 'text', then 'markdown'), tables, equations, images, figures, metadata, the raw LaTeX source (if read), a has_latex flag, the measured extraction_time, and the extractor_version reported by the Docling extractor.
+        
+        Note: LaTeX reading and extraction failures are caught and logged; they do not raise exceptions out of this function.
         """
         start_time = time.time()
         
@@ -380,12 +404,13 @@ class DocumentProcessor:
     
     def _create_late_chunks(self, text: str) -> List[ChunkWithEmbedding]:
         """
-        Create chunks using late chunking strategy.
+        Create chunks from full document text using the embedder's late-chunking strategy.
         
-        Processes the entire document first to preserve context,
-        then creates chunks that maintain awareness of their surroundings.
-        This prevents zero-propagation in the WHAT dimension by ensuring
-        each chunk contains contextual information.
+        This produces ChunkWithEmbedding objects where embeddings are generated together with
+        context-aware chunk boundaries (late chunking), preserving surrounding context for each chunk.
+        
+        Returns:
+            List[ChunkWithEmbedding]: Context-aware chunks with embeddings produced by the embedder.
         """
         # Use Jina's late chunking capability
         chunks_with_embeddings = self.embedder.embed_with_late_chunking(text)
@@ -393,11 +418,22 @@ class DocumentProcessor:
     
     def _create_traditional_chunks(self, text: str) -> List[Dict[str, Any]]:
         """
-        Create traditional chunks (for backward compatibility).
+        Create traditional token-based text chunks.
         
-        Chunks text first, then embeds each chunk independently.
-        This is less optimal than late chunking but maintains compatibility
-        with existing systems.
+        Performs simple whitespace tokenization and splits the input text into sequential chunks of
+        size `self.config.chunk_size_tokens` with `self.config.chunk_overlap_tokens` overlap.
+        Returns a list of chunk descriptors (dictionaries) suitable for downstream embedding.
+        
+        Each chunk dict contains:
+        - 'text' (str): chunk text.
+        - 'start_token' (int): index of the first token in the chunk.
+        - 'end_token' (int): index one past the last token in the chunk.
+        - 'chunk_index' (int): zero-based chunk sequence number.
+        
+        Behavior and errors:
+        - Uses a simplified tokenizer (text.split()); empty or whitespace-only input returns [].
+        - Raises ValueError if chunk_size_tokens <= 0 or if chunk_overlap_tokens >= chunk_size_tokens.
+        - Negative overlap values are clamped to 0 before chunking.
         """
         # Validate chunking parameters
         chunk_size = self.config.chunk_size_tokens
@@ -445,9 +481,9 @@ class DocumentProcessor:
     
     def _embed_chunks(self, chunks: List[Dict[str, Any]]) -> List[ChunkWithEmbedding]:
         """
-        Generate embeddings for traditional chunks.
+        Generate embeddings for a list of traditional (pre-chunked) text chunks and return them as ChunkWithEmbedding objects.
         
-        Used when not using late chunking strategy.
+        Processes each chunk dict (expected keys: 'text', optional 'start_char', 'end_char', 'start_token', 'end_token') by calling the embedder's embed_texts on the chunk text, normalizing the returned embedding to a 1-D numpy.float32 array, and substituting a zero vector of length config.embedding_dim if embedding generation fails. The returned ChunkWithEmbedding objects include text, embedding, character/token span values (falling back to sensible defaults), chunk index/total, and a simple context_window_used computed as the whitespace token count of the chunk text.
         """
         embedded_chunks = []
         
@@ -489,14 +525,16 @@ class DocumentProcessor:
         document_ids: Optional[List[str]] = None
     ) -> List[ProcessingResult]:
         """
-        Process multiple documents in batch.
+        Process multiple documents sequentially and return their processing results.
         
-        Args:
-            document_paths: List of (pdf_path, latex_path) tuples
-            document_ids: Optional list of document identifiers
-            
+        Each item in `document_paths` should be a tuple (pdf_path, latex_path) where `latex_path`
+        may be None. If `document_ids` is provided, its entries are matched to documents by index;
+        missing or shorter `document_ids` lists result in None document IDs for those entries.
+        Processing is performed by calling `process_document` for each pair and collecting the
+        returned ProcessingResult objects.
+        
         Returns:
-            List of ProcessingResult objects
+            List[ProcessingResult]: Processing results in the same order as `document_paths`.
         """
         results = []
         

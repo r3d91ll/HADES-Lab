@@ -1,0 +1,29 @@
+{
+  "repositories": [
+    {
+      "repo": "dav/word2vec",
+      "name": "word2vec",
+      "paper": "1301.3781",
+      "success": true,
+      "timestamp": "2025-09-02T16:21:40.378761"
+    },
+    {
+      "repo": "bnosac/doc2vec",
+      "name": "doc2vec",
+      "paper": "1405.4053",
+      "success": true,
+      "timestamp": "2025-09-02T16:22:25.969064"
+    },
+    {
+      "repo": "tech-srl/code2vec",
+      "name": "code2vec",
+      "paper": "1803.09473",
+      "success": true,
+      "timestamp": "2025-09-02T16:23:10.773621"
+    }
+  ],
+  "successful": 3,
+  "total": 3,
+  "elapsed_seconds": 135.854245,
+  "timestamp": "2025-09-02T16:23:10.773915"
+}

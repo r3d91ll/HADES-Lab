@@ -23,15 +23,45 @@ class MockEmbedder:
     """Mock embedder for testing without loading models."""
     
     def __init__(self, *args, **kwargs):
+        """
+        Initialize the mock embedder.
+        
+        Sets a fixed embedding dimensionality of 2048. Accepts arbitrary positional and keyword arguments for compatibility with the real embedder's constructor; those arguments are ignored.
+        """
         self.embedding_dim = 2048
     
     def embed_texts(self, texts: List[str], batch_size: int = 1):
-        """Return random embeddings for testing."""
+        """
+        Return mock embeddings for a list of input texts.
+        
+        This generates a NumPy array of random float32 vectors shaped (len(texts), self.embedding_dim) suitable for testing. The `batch_size` parameter is accepted for API compatibility but is ignored by this mock implementation.
+        
+        Parameters:
+            texts (List[str]): Input texts to embed.
+            batch_size (int): Ignored in this mock; present for interface compatibility.
+        
+        Returns:
+            numpy.ndarray: Array of shape (N, embedding_dim) with dtype float32, where N == len(texts).
+        """
         import numpy as np
         return np.random.randn(len(texts), self.embedding_dim).astype(np.float32)
     
     def embed_with_late_chunking(self, text: str):
-        """Return mock chunks with embeddings."""
+        """
+        Create mock chunks from `text` using a late-chunking strategy and attach random embeddings.
+        
+        Splits the input text into chunks of up to 100 words, produces one ChunkWithEmbedding per chunk with
+        a random float32 embedding of length `self.embedding_dim`, and fills chunk metadata. Each chunk's
+        `chunk_index` is its zero-based position and `total_chunks` is set to the final number of chunks.
+        Start/end token fields are word-index based; `end_char` is set to the start index plus the chunk's
+        character length.
+        
+        Parameters:
+            text (str): Input document text to be chunked.
+        
+        Returns:
+            List[ChunkWithEmbedding]: List of chunk objects with mock embeddings and metadata populated.
+        """
         import numpy as np
         from core.framework.embedders import ChunkWithEmbedding
         
@@ -77,7 +107,24 @@ logger = logging.getLogger(__name__)
 
 
 def create_test_documents(num_docs: int, temp_dir: Path) -> List[Path]:
-    """Create test text documents."""
+    """
+    Create a set of test text files on disk and return their paths.
+    
+    Generates num_docs plain-text files in the directory temp_dir named doc_0000.txt, doc_0001.txt, ... Each file contains one of four content sizes to exercise different processing behaviors:
+    - Empty files (~5%): completely empty.
+    - Small files (~10%): a short human-readable sentence.
+    - Medium files (~65%): ~200 synthetic tokens.
+    - Large files (~20%): ~500 synthetic tokens.
+    
+    Files are written using Path.write_text and the function returns a list of Path objects in creation order.
+    
+    Parameters:
+        num_docs (int): Number of test documents to create.
+        temp_dir (Path): Directory where files will be created.
+    
+    Returns:
+        List[Path]: Paths to the created document files in the order they were generated.
+    """
     docs = []
     
     for i in range(num_docs):
@@ -175,7 +222,17 @@ def test_batch_processing():
 
 
 def test_error_handling():
-    """Test error handling cases."""
+    """
+    Run a set of manual tests exercising DocumentProcessor error and edge-case handling.
+    
+    Performs several scenarios and prints human-readable results:
+    - Invalid chunking parameters: constructs a ProcessingConfig with chunk_overlap_tokens > chunk_size_tokens and verifies a ValueError is raised.
+    - Non-existent file: verifies processing returns an unsuccessful ProcessingResult for a missing path.
+    - Empty file: verifies an empty file is handled (treated as failure or produces no chunks).
+    - Mixed batch: submits a batch containing a valid document, an empty document, and an invalid path and reports how many documents succeeded.
+    
+    This function is intended for manual/test-harness use and prints results rather than raising assertions or returning values.
+    """
     
     print("\n" + "="*40)
     print("ERROR HANDLING TESTS")
@@ -249,7 +306,11 @@ def test_error_handling():
 
 
 def test_chunking_strategies():
-    """Test different chunking strategies."""
+    """
+    Run end-to-end checks comparing 'traditional' and 'late' chunking strategies using a temporary on-disk test document.
+    
+    Creates a temporary text file, processes it once with each chunking strategy (configured with token size 50 and overlap 10), and prints a brief summary for each run including number of chunks produced, total processing time, and size of the first chunk when available. The temporary file is removed at the end. Intended as a lightweight, manual/test harness; it does not raise exceptions for processing failures but prints error information when a run is unsuccessful.
+    """
     
     print("\n" + "="*40)
     print("CHUNKING STRATEGY TESTS")
@@ -297,7 +358,13 @@ def test_chunking_strategies():
 
 
 def main():
-    """Run all tests."""
+    """
+    Run the simple batch processing test suite.
+    
+    Orchestrates and executes the module's top-level tests: batch processing, error handling,
+    and chunking-strategy comparisons. Prints a brief header before running the tests and
+    a completion banner when finished. Intended for manual/CLI-driven test runs.
+    """
     
     print("="*60)
     print("SIMPLE BATCH PROCESSING TEST SUITE")

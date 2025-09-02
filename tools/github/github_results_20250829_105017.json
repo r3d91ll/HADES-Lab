@@ -1,0 +1,65 @@
+{
+  "success": true,
+  "extraction": {
+    "success": [
+      "dav_word2vec/README.md",
+      "dav_word2vec/scripts/demo-train-big-model-v1.sh",
+      "dav_word2vec/scripts/create-lowercase-phrases-data.sh",
+      "dav_word2vec/scripts/demo-word.sh",
+      "dav_word2vec/scripts/demo-analogy.sh",
+      "dav_word2vec/scripts/create-text8-vector-data.sh",
+      "dav_word2vec/scripts/create-text8-data.sh",
+      "dav_word2vec/scripts/demo-phrase-accuracy.sh",
+      "dav_word2vec/scripts/demo-word-accuracy.sh",
+      "dav_word2vec/scripts/demo-phrases.sh",
+      "dav_word2vec/scripts/demo-classes.sh",
+      "dav_word2vec/src/word-analogy.c",
+      "dav_word2vec/src/word2vec.c",
+      "dav_word2vec/src/compute-accuracy.c",
+      "dav_word2vec/src/distance.c",
+      "dav_word2vec/src/word2phrase.c"
+    ],
+    "failed": [],
+    "staged_files": [
+      "/dev/shm/github_staging/dav_word2vec_README.md.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-train-big-model-v1.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_create-lowercase-phrases-data.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-word.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-analogy.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_create-text8-vector-data.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_create-text8-data.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-phrase-accuracy.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-word-accuracy.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-phrases.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-classes.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_src_word-analogy.c.json",
+      "/dev/shm/github_staging/dav_word2vec_src_word2vec.c.json",
+      "/dev/shm/github_staging/dav_word2vec_src_compute-accuracy.c.json",
+      "/dev/shm/github_staging/dav_word2vec_src_distance.c.json",
+      "/dev/shm/github_staging/dav_word2vec_src_word2phrase.c.json"
+    ]
+  },
+  "embedding": {
+    "success": [],
+    "failed": [
+      "/dev/shm/github_staging/dav_word2vec_README.md.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-train-big-model-v1.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-word.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_create-lowercase-phrases-data.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_create-text8-vector-data.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_create-text8-data.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-analogy.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-phrase-accuracy.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-word-accuracy.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_src_word-analogy.c.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-classes.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_scripts_demo-phrases.sh.json",
+      "/dev/shm/github_staging/dav_word2vec_src_compute-accuracy.c.json",
+      "/dev/shm/github_staging/dav_word2vec_src_distance.c.json",
+      "/dev/shm/github_staging/dav_word2vec_src_word2phrase.c.json",
+      "/dev/shm/github_staging/dav_word2vec_src_word2vec.c.json"
+    ],
+    "chunks_created": 0
+  },
+  "total_processed": 0
+}
