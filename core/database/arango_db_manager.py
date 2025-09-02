@@ -133,7 +133,8 @@ class ArangoDBManager:
         
         Usage:
             @db_manager.with_connection
-            def my_function(db, ...):
+            def my_function(**kwargs):
+                db = kwargs['db']
                 # Use db connection
                 pass
         """
@@ -141,7 +142,10 @@ class ArangoDBManager:
         def wrapper(*args, **kwargs):
             db = self.get_connection()
             try:
-                return func(db, *args, **kwargs)
+                # Inject connection via keyword argument
+                if 'db' not in kwargs:
+                    kwargs['db'] = db
+                return func(*args, **kwargs)
             finally:
                 self.return_connection(db)
         return wrapper
@@ -165,18 +169,38 @@ class ArangoDBManager:
         # Create TTL index on locks collection for automatic cleanup
         if self.db.has_collection('arxiv_locks'):
             locks_coll = self.db.collection('arxiv_locks')
-            # Check if TTL index already exists
+            # Check if TTL index already exists on 'expiresAt' field
             existing_indexes = locks_coll.indexes()
-            has_ttl = any(idx.get('type') == 'ttl' for idx in existing_indexes)
+            has_ttl = any(
+                idx.get('type') == 'ttl' and 
+                'expiresAt' in idx.get('fields', [])
+                for idx in existing_indexes
+            )
             if not has_ttl:
-                locks_coll.add_ttl_index(fields=['expiresAt'], expiry_time=0)
-                logger.info("Created TTL index on arxiv_locks collection")
+                try:
+                    locks_coll.add_ttl_index(fields=['expiresAt'], expiry_time=0)
+                    logger.info("Created TTL index on arxiv_locks collection")
+                except Exception as e:
+                    logger.warning(f"Failed to create TTL index: {e}")
     
-    def insert_document(self, collection: str, document: Dict[str, Any]):
-        """Insert a document into a collection."""
+    def insert_document(self, collection: str, document: Dict[str, Any], overwrite: bool = False):
+        """
+        Insert a document into a collection.
+        
+        Args:
+            collection: Collection name
+            document: Document to insert
+            overwrite: If True, replaces existing document with same key (WARNING: can cause data loss).
+                      If False, raises error if document with same key exists.
+        
+        WARNING: When overwrite=True, ALL fields in the existing document will be replaced,
+                 potentially causing data loss. Consider using update_document for partial updates.
+        """
         coll = self.db.collection(collection)
         try:
-            result = coll.insert(document, overwrite=True)
+            if overwrite:
+                logger.warning(f"Inserting document with overwrite=True in {collection}, existing data may be lost")
+            result = coll.insert(document, overwrite=overwrite)
             return result
         except DocumentInsertError as e:
             logger.error(f"Failed to insert document into {collection}: {type(e).__name__}: {e}")

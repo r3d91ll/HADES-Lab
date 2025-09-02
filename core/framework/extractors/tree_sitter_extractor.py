@@ -321,15 +321,8 @@ class TreeSitterExtractor:
                 name_node = node.child_by_field_name('name')
                 if name_node:
                     # Check for generator by looking for '*' token
-                    is_generator = False
-                    for child in node.children:
-                        if child.type == '*' or (hasattr(child, 'text') and child.text == b'*'):
-                            is_generator = True
-                            break
-                    
-                    # Also check generator field if available
-                    if hasattr(node, 'generator'):
-                        is_generator = node.generator
+                    # Rely on the node's generator attribute for JS/TS
+                    is_generator = bool(getattr(node, 'generator', False))
                     
                     symbols['functions'].append({
                         'name': content[name_node.start_byte:name_node.end_byte],

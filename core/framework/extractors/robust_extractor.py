@@ -158,14 +158,22 @@ class RobustExtractor:
                         child.join(timeout=1)
                 
                 # Additional cleanup of executor processes
-                if hasattr(executor, '_processes'):
-                    for process in executor._processes.values():
-                        if process and process.is_alive():
-                            process.terminate()
-                            process.join(timeout=2)
-                            if process.is_alive():
-                                process.kill()
-                                process.join(timeout=1)
+                try:
+                    # Try public shutdown API first
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    # Fall back to private attribute access as last resort
+                    try:
+                        if hasattr(executor, '_processes'):
+                            for process in executor._processes.values():
+                                if process and process.is_alive():
+                                    process.terminate()
+                                    process.join(timeout=2)
+                                    if process.is_alive():
+                                        process.kill()
+                                        process.join(timeout=1)
+                    except (AttributeError, Exception) as e:
+                        logger.debug(f"Could not access executor processes: {e}")
                 
             except Exception as e:
                 logger.error(f"Docling crashed: {pdf_file.name} - {e}")
