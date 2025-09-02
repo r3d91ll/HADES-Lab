@@ -366,3 +366,5 @@ Acheron/
 Acheron/*
 logs/
 tests/*
+experiments/word2vec_evolution/embeddings/
+tools/arxiv/scripts/data/arxiv_collections/
