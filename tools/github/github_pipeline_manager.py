@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tools.github.github_document_manager import GitHubDocumentManager
 from core.processors.generic_document_processor import GenericDocumentProcessor
-from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+from core.database.arango_db_manager import ArangoDBManager
 from typing import List, Dict, Any
 import logging
 from datetime import datetime

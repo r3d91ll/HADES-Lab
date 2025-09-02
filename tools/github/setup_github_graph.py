@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+from core.database.arango_db_manager import ArangoDBManager
 import os
 import logging
 

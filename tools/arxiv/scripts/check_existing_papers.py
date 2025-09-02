@@ -18,7 +18,7 @@ project_root = Path(__file__).parent.parent.parent.parent  # Goes up to HADES-La
 sys.path.insert(0, str(project_root))
 
 # Import ArangoDBManager from the correct location
-from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+from core.database.arango_db_manager import ArangoDBManager
 
 
 def check_existing_papers(paper_list_file: str = None) -> Dict:

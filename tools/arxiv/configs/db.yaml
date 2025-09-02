@@ -1,5 +1,7 @@
 postgres:
-  dsn: "postgresql://user:pass@localhost:5432/arxiv"
+  # DSN should be provided via environment variable POSTGRES_DSN
+  # Format: postgresql://username:password@host:port/database
+  dsn: "${POSTGRES_DSN:-postgresql://localhost:5432/arxiv}"
   schema: "public"
   statement_timeout_ms: 3600000  # 60 minutes for complex queries
   pool_size: 5

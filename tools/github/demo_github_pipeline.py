@@ -99,7 +99,7 @@ def demo_pipeline():
     # Step 4: Query stored data
     logger.info("\n4. Querying stored data...")
     
-    from core.database import ArangoDBManager
+    from core.database.arango_db_manager import ArangoDBManager
     db_manager = ArangoDBManager(config['arango'])
     
     # Query for different file types
