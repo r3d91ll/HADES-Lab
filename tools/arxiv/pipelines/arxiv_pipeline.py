@@ -201,6 +201,10 @@ class PhaseManager:
         self.config = config
         self.current_phase = "IDLE"
         
+        # Load metadata snapshot if available
+        self.metadata_cache = {}
+        self._load_metadata_snapshot()
+        
         # Setup staging directory in RamFS
         self.staging_dir = Path(config.get('staging', {}).get('directory', '/dev/shm/acid_staging'))
         self.staging_dir.mkdir(parents=True, exist_ok=True)
@@ -229,6 +233,55 @@ class PhaseManager:
         
         # Worker pools (created per phase)
         self.worker_pool = None
+        
+    def _load_metadata_snapshot(self):
+        """Load ArXiv metadata from JSON snapshot for enrichment."""
+        metadata_path = Path('/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json')
+        if metadata_path.exists():
+            try:
+                logger.info("Loading ArXiv metadata snapshot...")
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            try:
+                                paper = json.loads(line)
+                                arxiv_id = paper.get('id', '')
+                                if arxiv_id:
+                                    self.metadata_cache[arxiv_id] = paper
+                            except json.JSONDecodeError:
+                                continue
+                logger.info(f"Loaded metadata for {len(self.metadata_cache):,} papers")
+            except Exception as e:
+                logger.warning(f"Failed to load metadata snapshot: {e}")
+        else:
+            logger.info("No metadata snapshot found, proceeding without enrichment")
+    
+    def get_paper_metadata(self, arxiv_id: str) -> Dict[str, Any]:
+        """Get metadata for a paper from cache."""
+        return self.metadata_cache.get(arxiv_id, {})
+    
+    def _enrich_staged_files_with_metadata(self, staged_files: List[str]):
+        """Enrich staged JSON files with metadata from snapshot."""
+        enriched_count = 0
+        for staged_path in staged_files:
+            try:
+                # Load staged JSON
+                with open(staged_path, 'r', encoding='utf-8') as f:
+                    doc = json.load(f)
+                
+                # Get metadata from cache
+                arxiv_id = doc.get('arxiv_id', '')
+                if arxiv_id and arxiv_id in self.metadata_cache:
+                    doc['metadata'] = self.metadata_cache[arxiv_id]
+                    enriched_count += 1
+                    
+                    # Save enriched document back
+                    with open(staged_path, 'w', encoding='utf-8') as f:
+                        json.dump(doc, f, ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"Failed to enrich {staged_path}: {e}")
+        
+        logger.info(f"Enriched {enriched_count}/{len(staged_files)} documents with metadata")
         
     def start_extraction_phase(self, tasks: List[ProcessingTask]) -> Dict[str, Any]:
         """
@@ -315,6 +368,10 @@ class PhaseManager:
         
         # Now clean up GPU memory after extraction workers are gone
         self._cleanup_gpu_memory()
+        
+        # Enrich staged files with metadata from snapshot
+        logger.info("Enriching staged documents with metadata...")
+        self._enrich_staged_files_with_metadata(results['staged_files'])
         
         # Additional delay to ensure GPU is ready for embedding workers
         logger.info("Preparing for embedding phase...")
@@ -622,14 +679,39 @@ class PhaseManager:
                 )
                 
                 try:
-                    # Store paper metadata
+                    # Store paper metadata with file paths
+                    pdf_path = doc.get('pdf_path', '')
+                    latex_path = doc.get('latex_path', '')
+                    
+                    # Calculate file size if PDF exists
+                    file_size_mb = None
+                    if pdf_path and Path(pdf_path).exists():
+                        file_size_mb = Path(pdf_path).stat().st_size / (1024 * 1024)
+                    
+                    # Get metadata from snapshot if available
+                    metadata = doc.get('metadata', {})
+                    
                     txn_db.collection('arxiv_papers').insert({
                         '_key': sanitized_id,
                         'arxiv_id': arxiv_id,
-                        'title': doc.get('title', ''),
-                        'abstract': doc.get('abstract', ''),
+                        'pdf_path': pdf_path,
+                        'pdf_exists': bool(pdf_path and Path(pdf_path).exists()),
+                        'latex_path': latex_path,
+                        'latex_exists': bool(latex_path and Path(latex_path).exists()),
+                        'has_latex_source': doc.get('has_latex', False),
+                        'file_size_mb': file_size_mb,
+                        'title': metadata.get('title', doc.get('title', '')),
+                        'authors': metadata.get('authors', ''),
+                        'abstract': metadata.get('abstract', doc.get('abstract', '')),
+                        'categories': metadata.get('categories', ''),
+                        'journal_ref': metadata.get('journal-ref', ''),
+                        'doi': metadata.get('doi', ''),
+                        'comments': metadata.get('comments', ''),
+                        'submission_date': metadata.get('created', ''),
+                        'update_date': metadata.get('update_date', ''),
                         'status': 'PROCESSED',
                         'processing_date': datetime.now().isoformat(),
+                        'extraction_date': doc.get('processing_date', ''),
                         'num_chunks': len(chunks),
                         'num_equations': len(structures.get('equations', [])),
                         'num_tables': len(structures.get('tables', [])),

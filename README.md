@@ -21,22 +21,30 @@ HADES-Lab/
 │   ├── mcp_server/            # MCP interface for Claude integration
 │   ├── framework/             # Shared framework
 │   │   ├── embedders.py      # Jina v4 embeddings
-│   │   ├── extractors/       # Docling PDF extraction
+│   │   ├── extractors/       # Content extraction
+│   │   │   ├── docling_extractor.py    # PDF extraction
+│   │   │   ├── code_extractor.py       # Code file extraction
+│   │   │   └── tree_sitter_extractor.py # Symbol extraction
 │   │   └── storage.py        # ArangoDB management
 │   ├── processors/            # Base processor classes
 │   ├── utils/                 # Core utilities
 │   └── logs/                  # Core system logs
 │
 ├── tools/                      # Processing tools (data sources)
-│   └── arxiv/                 # ArXiv paper processing
-│       ├── pipelines/         # ACID-compliant pipelines
-│       ├── monitoring/        # Real-time monitoring
-│       ├── database/          # Database utilities
-│       ├── scripts/           # Utility scripts
-│       ├── utils/             # Database utilities
-│       ├── tests/             # Integration tests
-│       ├── configs/           # Pipeline configurations
-│       └── logs/              # ArXiv processing logs
+│   ├── arxiv/                 # ArXiv paper processing
+│   │   ├── pipelines/         # ACID-compliant pipelines
+│   │   ├── monitoring/        # Real-time monitoring
+│   │   ├── database/          # Database utilities
+│   │   ├── scripts/           # Utility scripts
+│   │   ├── utils/             # Database utilities
+│   │   ├── tests/             # Integration tests
+│   │   ├── configs/           # Pipeline configurations
+│   │   └── logs/              # ArXiv processing logs
+│   └── github/                # GitHub repository processing
+│       ├── configs/           # GitHub pipeline configurations
+│       ├── github_pipeline_manager.py  # Graph-based processing
+│       ├── setup_github_graph.py       # Graph collection setup
+│       └── test_treesitter_simple.py   # Tree-sitter testing
 │
 ├── experiments/                # Research and experimentation
 │   ├── README.md              # Experiment guidelines
@@ -76,6 +84,9 @@ HADES-Lab/
 - **ACID Pipeline**: 11.3 papers/minute with 100% success rate (validated on 1000+ papers)
 - **Phase-Separated Architecture**: Extract (GPU-accelerated Docling) → Embed (Jina v4)
 - **Direct PDF Processing**: No database dependencies, processes from local filesystem
+- **GitHub Repository Processing**: Clone, extract, embed code with Tree-sitter symbol extraction
+- **Graph-Based Storage**: Repository → File → Chunk → Embedding relationships in ArangoDB
+- **Tree-sitter Integration**: Symbol extraction for Python, JavaScript, TypeScript, Java, C/C++, Go, Rust
 - **Jina v4 Late Chunking**: Context-aware embeddings preserving document structure (32k tokens)
 - **Multi-collection Storage**: Separate ArangoDB collections for embeddings, equations, tables, images
 - **SQLite Caching**: Optional local cache for PDF indexing and metadata
@@ -84,9 +95,9 @@ HADES-Lab/
 
 ### In Development
 
-- **Additional Data Sources**: GitHub repositories, web documentation
-- **Cross-source Graphs**: Theory-practice bridges across multiple sources
-- **Enhanced Embeddings**: Domain-specific fine-tuning
+- **Cross-Repository Analysis**: Theory-practice bridge detection across repositories
+- **Enhanced Config Understanding**: Leveraging Jina v4's coding LoRA for config semantics
+- **Incremental Repository Updates**: Only process changed files
 - **Active Monitoring**: Real-time pipeline monitoring system
 
 ## Installation
@@ -123,6 +134,27 @@ python arxiv_pipeline.py \
 
 # Monitor progress
 tail -f tools/arxiv/logs/acid_phased.log
+```
+
+### GitHub Repository Processing
+
+```bash
+# Setup graph collections (first time only)
+cd tools/github/
+python setup_github_graph.py
+
+# Process a single repository
+python github_pipeline_manager.py --repo "owner/repo"
+
+# Example: Process word2vec repository
+python github_pipeline_manager.py --repo "dav/word2vec"
+
+# Query processed repositories (in ArangoDB)
+# Find all embeddings for a repository:
+# FOR v, e, p IN 1..3 OUTBOUND 'github_repositories/owner_repo'
+#   GRAPH 'github_graph'
+#   FILTER IS_SAME_COLLECTION('github_embeddings', v)
+#   RETURN v
 ```
 
 ### Creating Experiments
@@ -191,9 +223,11 @@ python -c "import json; papers = json.load(open('../datasets/cs_papers.json'))"
 1. **Streamlined Architecture**: Direct PDF processing with ArangoDB storage, optional SQLite caching
 2. **Late Chunking**: Process full documents (32k tokens) before chunking for context preservation  
 3. **Multi-source Integration**: Unified framework for ArXiv, GitHub, and Web data
-4. **Information Reconstructionism**: Implementing WHERE × WHAT × CONVEYANCE × TIME theory
-5. **Experiments Framework**: Structured research environment with infrastructure separation
-6. **Archaeological Code Preservation**: Acheron protocol maintains complete development history
+4. **Graph-Based Code Storage**: Repository → File → Chunk → Embedding relationships enable cross-repo analysis
+5. **Tree-sitter Symbol Extraction**: AST-based symbol extraction without semantic interpretation (let Jina handle that)
+6. **Information Reconstructionism**: Implementing WHERE × WHAT × CONVEYANCE × TIME theory
+7. **Experiments Framework**: Structured research environment with infrastructure separation
+8. **Archaeological Code Preservation**: Acheron protocol maintains complete development history
 
 ## License
 

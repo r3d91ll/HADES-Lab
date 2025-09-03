@@ -33,10 +33,13 @@ class ArXivDocumentManager:
     
     def __init__(self, pdf_base_dir: str = "/bulk-store/arxiv-data/pdf"):
         """
-        Initialize ArXiv manager.
+        Create an ArXivDocumentManager bound to a base PDF directory.
         
-        Args:
-            pdf_base_dir: Base directory containing ArXiv PDFs in YYMM subdirectories
+        Parameters:
+            pdf_base_dir (str): Path to the root directory containing ArXiv PDFs organized by YYMM subdirectories (default: "/bulk-store/arxiv-data/pdf").
+        
+        Raises:
+            ValueError: If the provided `pdf_base_dir` does not exist.
         """
         self.pdf_base_dir = Path(pdf_base_dir)
         if not self.pdf_base_dir.exists():
@@ -46,13 +49,15 @@ class ArXivDocumentManager:
     
     def prepare_documents_from_ids(self, arxiv_ids: List[str]) -> List[DocumentTask]:
         """
-        Prepare DocumentTask objects from ArXiv IDs.
+        Create DocumentTask objects for the given list of arXiv IDs.
         
-        Args:
-            arxiv_ids: List of ArXiv IDs (e.g., ["2301.12345", "2302.54321"])
-            
+        For each ID in arxiv_ids attempts to prepare a DocumentTask via the internal _prepare_single_document helper; IDs that are invalid or whose PDF cannot be located are skipped (a warning is logged for each). The returned list contains only successfully prepared DocumentTask objects in the same order as the input IDs when successful.
+        
+        Parameters:
+            arxiv_ids (List[str]): Iterable of arXiv identifiers (expected format like "YYMM.NNNNN" or "YYMM.NNNNNN", optionally including a version suffix).
+        
         Returns:
-            List of DocumentTask objects ready for processing
+            List[DocumentTask]: DocumentTask instances for the successfully prepared documents.
         """
         tasks = []
         
@@ -70,15 +75,17 @@ class ArXivDocumentManager:
                                         year_month: str, 
                                         limit: Optional[int] = None) -> List[DocumentTask]:
         """
-        Prepare documents from a specific YYMM directory.
-        
-        Args:
-            year_month: Directory name (e.g., "2301" for Jan 2023)
-            limit: Maximum number of documents to prepare
-            
-        Returns:
-            List of DocumentTask objects
-        """
+                                        Prepare DocumentTask objects for PDFs located in a specific ArXiv YYMM directory.
+                                        
+                                        Searches the manager's PDF base directory under the given year_month (e.g., "2301"), finds up to `limit` PDF files, and builds DocumentTask objects for each PDF. The ArXiv ID passed to the task is constructed as "{year_month}.{paper_id}" where `paper_id` is derived from the PDF filename stem.
+                                        
+                                        Parameters:
+                                            year_month (str): Two-digit year and month string in YYMM format (e.g., "2301").
+                                            limit (Optional[int]): Maximum number of PDFs to process from the directory. If None, all PDFs are processed.
+                                        
+                                        Returns:
+                                            List[DocumentTask]: A list of prepared DocumentTask objects. Returns an empty list if the directory does not exist or no tasks could be prepared.
+                                        """
         dir_path = self.pdf_base_dir / year_month
         if not dir_path.exists():
             logger.error(f"Directory does not exist: {dir_path}")
@@ -100,13 +107,15 @@ class ArXivDocumentManager:
     
     def prepare_recent_documents(self, count: int = 100) -> List[DocumentTask]:
         """
-        Prepare the most recent documents.
+        Return DocumentTask objects for the most recent ArXiv PDFs found under the manager's base directory.
         
-        Args:
-            count: Number of documents to prepare
-            
+        Scans YYMM subdirectories in descending (newest-first) order and, within each, scans PDF files newest-first. For each PDF, derives an arXiv identifier (uses the PDF filename if it already contains a dot; otherwise prefixes with the containing YYMM directory name), builds a DocumentTask via _prepare_from_path, and collects tasks until `count` tasks have been prepared or no more PDFs are available.
+        
+        Parameters:
+            count (int): Maximum number of recent documents to prepare (default 100).
+        
         Returns:
-            List of DocumentTask objects
+            List[DocumentTask]: Prepared DocumentTask objects, up to `count`.
         """
         tasks = []
         
@@ -141,7 +150,17 @@ class ArXivDocumentManager:
         return tasks
     
     def _prepare_single_document(self, arxiv_id: str) -> Optional[DocumentTask]:
-        """Prepare a single document from ArXiv ID."""
+        """
+        Prepare a DocumentTask for a single arXiv identifier.
+        
+        Given an arXiv ID of the form "YYMM.NNNNN" (or with a version suffix, e.g. "YYMM.NNNNNv1"), this locates the corresponding PDF under the manager's base directory (pdf_base_dir/YYMM/<arxiv_id>.pdf) and, if found, delegates construction of the DocumentTask to _prepare_from_path.
+        
+        Parameters:
+            arxiv_id (str): ArXiv identifier expected to contain a single dot separating the YYMM prefix from the paper number.
+        
+        Returns:
+            Optional[DocumentTask]: A DocumentTask for the PDF when the ID is valid and the PDF exists; otherwise None.
+        """
         # Parse ArXiv ID to get YYMM directory
         parts = arxiv_id.split('.')
         if len(parts) != 2:
@@ -160,7 +179,22 @@ class ArXivDocumentManager:
         return self._prepare_from_path(pdf_path, arxiv_id)
     
     def _prepare_from_path(self, pdf_path: Path, arxiv_id: str) -> Optional[DocumentTask]:
-        """Prepare a DocumentTask from a PDF path."""
+        """
+        Create a DocumentTask for an arXiv PDF and optional LaTeX source.
+        
+        Builds metadata for the document and returns a DocumentTask containing the PDF path,
+        an optional LaTeX path (looks for a same-name `.tex` or `.tar.gz`), and ArXiv-specific metadata.
+        If the provided pdf_path does not exist, returns None.
+        
+        Parameters:
+            pdf_path (Path): Path to the PDF file to wrap. Must exist; otherwise the function returns None.
+            arxiv_id (str): ArXiv identifier for the document (e.g., "2101.01234" or with version suffix "2101.01234v2").
+                The function uses the portion before the first '.' as the year_month metadata when available.
+        
+        Returns:
+            Optional[DocumentTask]: A DocumentTask populated with document_id (arxiv_id), pdf_path (string),
+            latex_path (string or None), and metadata including source, arxiv_id, year_month, and has_latex.
+        """
         if not pdf_path.exists():
             return None
         
@@ -189,13 +223,17 @@ class ArXivDocumentManager:
     
     def validate_arxiv_id(self, arxiv_id: str) -> bool:
         """
-        Validate ArXiv ID format.
+        Validate whether a string is a properly formatted ArXiv identifier.
         
-        Args:
-            arxiv_id: ID to validate
-            
+        A valid ArXiv ID must have two parts separated by a single dot: `YYMM` and a paper number.
+        - `YYMM`: exactly four digits (year and month).
+        - paper number: 4–6 digits, optionally followed by a version suffix such as `v1`, `v2`, etc.
+        
+        Parameters:
+            arxiv_id (str): The ArXiv identifier to validate (e.g., "2305.12345" or "2305.12345v2").
+        
         Returns:
-            True if valid ArXiv ID format
+            bool: True if `arxiv_id` matches the expected ArXiv ID format, otherwise False.
         """
         # Basic format: YYMM.NNNNN or YYMM.NNNNNN
         parts = arxiv_id.split('.')
@@ -208,9 +246,12 @@ class ArXivDocumentManager:
         if not year_month.isdigit() or len(year_month) != 4:
             return False
         
-        # Check paper number is 4-6 digits (or with version like 12345v2)
-        paper_num_base = paper_num.rstrip('v0123456789')
-        if not paper_num_base.isdigit() or not (4 <= len(paper_num_base) <= 6):
+        # Check paper number is 4-6 digits, optionally followed by version like v2
+        base, _, version = paper_num.partition('v')
+        if not base.isdigit() or not (4 <= len(base) <= 6):
+            return False
+        # If there's a version, validate it's numeric
+        if version and not version.isdigit():
             return False
         
         return True

@@ -56,7 +56,14 @@ def test_document_processor_initialization():
 
 
 def test_chunking_strategies():
-    """Test different chunking strategies."""
+    """
+    Run unit-style checks for token-based, semantic, and sliding-window chunking strategies.
+    
+    Creates a multi-paragraph sample text, instantiates each chunking strategy via ChunkingStrategyFactory with representative parameters, and verifies that each strategy produces at least one chunk. For sliding-window chunking, also checks that adjacent chunks share tokens (overlap). Intended for use in the test suite to validate chunk generation behavior; raises AssertionError on failure.
+    
+    Returns:
+        bool: True if all chunking strategy checks pass.
+    """
     print("\n=== Testing Chunking Strategies ===")
     
     sample_text = """
@@ -112,7 +119,18 @@ def test_chunking_strategies():
 
 
 def test_processing_result_serialization():
-    """Test ProcessingResult serialization."""
+    """
+    Validate ProcessingResult.to_dict() produces a complete, correctly structured serialization.
+    
+    Creates a mock ExtractionResult and two ChunkWithEmbedding instances (2048-dim embeddings), assembles a ProcessingResult, serializes it with to_dict(), and asserts:
+    - overall success flag is preserved,
+    - chunks are serialized with text and full-length embeddings,
+    - top-level sections 'extraction', 'processing_metadata', and 'performance' are present,
+    - performance.total_time matches the ProcessingResult.total_processing_time.
+    
+    Returns:
+        bool: True when all assertions pass (test success).
+    """
     print("\n=== Testing ProcessingResult Serialization ===")
     
     # Create mock extraction result
@@ -233,7 +251,17 @@ def test_arxiv_manager():
 
 
 def run_performance_benchmark():
-    """Run a simple performance benchmark."""
+    """
+    Run a simple performance benchmark of available chunking strategies.
+    
+    Creates a large sample text, instantiates a DocumentProcessor with a token-based
+    configuration, and measures chunk creation throughput for the 'token',
+    'semantic', and 'sliding' strategies. Prints the number of chunks produced,
+    elapsed time, and chunks-per-second for each strategy.
+    
+    Returns:
+        bool: True on completion.
+    """
     print("\n=== Running Performance Benchmark ===")
     
     # Create large sample text
@@ -274,7 +302,16 @@ def run_performance_benchmark():
 
 
 def main():
-    """Run all tests."""
+    """
+    Run the module's test suite and report results.
+    
+    Executes a predefined list of test functions for the document processor (initialization,
+    chunking strategies, result serialization, optional ArXiv integration, and a performance
+    benchmark). Prints per-test outcomes and a final summary to standard output.
+    
+    Returns:
+        bool: True if all tests passed (no failures), False otherwise.
+    """
     print("=" * 60)
     print("DOCUMENT PROCESSOR TEST SUITE")
     print("=" * 60)

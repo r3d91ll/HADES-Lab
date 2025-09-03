@@ -50,15 +50,34 @@ if MOCK_EMBEDDER:
         """Mock embedder for testing without loading heavy models."""
         
         def __init__(self, *args, **kwargs):
+            """
+            Initialize the instance and set the default embedding dimensionality.
+            
+            Sets the instance attribute `embedding_dim` to 2048. Accepts arbitrary positional and keyword arguments for compatibility with callers; they are not used by this initializer.
+            """
             self.embedding_dim = 2048
         
         def embed_texts(self, texts: List[str], batch_size: int = 1):
-            """Return random embeddings for testing."""
+            """
+            Generate random embeddings for a batch of input texts (testing only).
+            
+            This returns a NumPy array of shape (len(texts), self.embedding_dim) with dtype float32 containing random normal values. The `batch_size` parameter is accepted for API compatibility but is ignored by this mock implementation.
+            """
             import numpy as np
             return np.random.randn(len(texts), self.embedding_dim).astype(np.float32)
         
         def embed_with_late_chunking(self, text: str):
-            """Return mock chunks with embeddings."""
+            """
+            Create overlapping text chunks and attach mock embeddings for late-chunking tests.
+            
+            This mock implementation splits `text` into overlapping word-based chunks (chunk size 256 words with a 50-word overlap) and returns a list of `ChunkWithEmbedding` objects. Each chunk receives a randomly sampled float32 embedding of length `self.embedding_dim`. Character offsets (`start_char`, `end_char`) are approximate (computed as token indices * 5) and token offsets (`start_token`, `end_token`) correspond to word indices. The returned chunks have their `chunk_index` and `total_chunks` fields populated.
+            
+            Parameters:
+                text (str): The source document text to chunk.
+            
+            Returns:
+                List[ChunkWithEmbedding]: Mock chunks with random embeddings suitable for testing late-chunking behavior.
+            """
             import numpy as np
             from core.framework.embedders import ChunkWithEmbedding
             
@@ -101,15 +120,22 @@ from core.processors.document_processor import (
 
 def generate_document(doc_id: int, doc_type: str = "mixed") -> str:
     """
-    Generate synthetic document content for testing.
+    Generate a synthetic document text for testing.
     
-    Document types:
-    - 'research': Academic paper style
-    - 'technical': Technical documentation
-    - 'narrative': Story/narrative style
-    - 'mixed': Random mix
-    - 'empty': Empty document
-    - 'huge': Very large document
+    doc_type selects the style of generated content and may be one of:
+      - "research": academic-paper style with title, abstract, and multiple sections.
+      - "technical": structured technical documentation (Overview, Installation, Configuration, API Reference, Examples).
+      - "narrative": story/report style composed of multiple paragraphs.
+      - "mixed": randomly selects one of the other types (weighted sampling among research, technical, narrative, huge, empty).
+      - "empty": returns an empty string.
+      - "huge": produces a very large, multi-section document.
+    
+    Parameters:
+        doc_id (int): Numeric identifier used in titles and seeded content fragments.
+        doc_type (str): Desired document style (see choices above). Defaults to "mixed".
+    
+    Returns:
+        str: The generated document content (possibly empty). Content is randomized; repeated calls may produce different results.
     """
     
     if doc_type == "empty":
@@ -186,9 +212,24 @@ def generate_document(doc_id: int, doc_type: str = "mixed") -> str:
 
 def create_test_corpus(num_docs: int, output_dir: Path) -> Dict[str, Any]:
     """
-    Create a test corpus with metadata.
+    Generate a synthetic corpus of documents, write each document to output_dir, and return statistics about the created corpus.
     
-    Returns dict with statistics about the corpus.
+    This will create num_docs text files named "doc_00000.txt", "doc_00001.txt", ... in output_dir by calling generate_document for each index. Progress is logged periodically. The output_dir must exist and be writable.
+    
+    Parameters:
+        num_docs (int): Number of documents to generate.
+        output_dir (Path): Directory where document files will be written.
+    
+    Returns:
+        Dict[str, Any]: Statistics about the created corpus with keys:
+            - total_docs: int, requested number of documents
+            - empty_docs: int, count of zero-length documents
+            - small_docs: int, documents with <500 chars
+            - medium_docs: int, documents with 500–4999 chars
+            - large_docs: int, documents with 5000–19999 chars
+            - huge_docs: int, documents with >=20000 chars
+            - total_chars: int, total characters across all documents
+            - creation_time: float, total time in seconds spent creating the corpus
     """
     logger.info(f"Creating test corpus of {num_docs} documents in {output_dir}")
     
@@ -252,7 +293,26 @@ def create_test_corpus(num_docs: int, output_dir: Path) -> Dict[str, Any]:
 
 def run_overnight_test(num_docs: int = 2000):
     """
-    Run comprehensive overnight test.
+    Run the full overnight end-to-end test workflow that builds a synthetic corpus, processes it under several chunking configurations, and collects performance and correctness metrics.
+    
+    This function:
+    - Creates a temporary test corpus of synthetic text documents (num_docs) on disk.
+    - Runs multiple document-processing configurations (different chunking strategies and sizes) using DocumentProcessor, processing documents in batches.
+    - Aggregates per-run statistics (success/failure counts, chunk counts, processing rates, timing) and records sample failures.
+    - Persists intermediate and final results to a timestamped JSON results file and writes detailed logs to the configured log file.
+    
+    Parameters:
+        num_docs (int): Number of synthetic documents to generate and process (default 2000).
+    
+    Returns:
+        dict: A dictionary containing:
+          - 'corpus_stats': metadata about the generated corpus,
+          - 'test_runs': list of per-configuration summaries (config, totals, rates, failed samples, etc.),
+          - 'summary': final summary including best configuration, best processing rate, completion time, and file paths.
+    
+    Side effects:
+    - Writes generated document files into a temporary directory.
+    - Writes intermediate and final JSON results to the configured results file and emits logs to the configured log file.
     """
     logger.info("="*70)
     logger.info(f"OVERNIGHT TEST - {num_docs} Documents")

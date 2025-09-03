@@ -28,7 +28,7 @@ from core.processors.document_processor import (
     ProcessingConfig,
     ProcessingResult
 )
-from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+from core.database.arango_db_manager import ArangoDBManager
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,12 @@ class ArXivPaperInfo:
     
     @property
     def sanitized_id(self) -> str:
-        """Get sanitized ID for database storage."""
+        """
+        Return a filesystem- and database-safe identifier derived from the ArXiv ID.
+        
+        Replaces dots and slashes in the original `arxiv_id` with underscores so the result can be used
+        as a filename, database key, or filesystem-safe identifier.
+        """
         return self.arxiv_id.replace('.', '_').replace('/', '_')
     
     @property
@@ -87,10 +92,11 @@ class ArXivValidator:
     @classmethod
     def validate_arxiv_id(cls, arxiv_id: str) -> Tuple[bool, Optional[str]]:
         """
-        Validate ArXiv ID format.
+        Validate an arXiv identifier.
         
-        Returns:
-            Tuple of (is_valid, error_message)
+        Checks whether the given `arxiv_id` matches either the new format (YYMM.NNNNN, optional `vN` suffix allowed) or the legacy format (category/YYMMNNN, optional `vN` suffix allowed). The function ignores any trailing version suffix (`vN`) when validating and returns a tuple (is_valid, error_message) where `error_message` is None on success or a short diagnostic on failure.
+        
+        Examples of accepted forms: "2308.12345", "2308.12345v2", "hep-th/9901001", "hep-th/9901001v3".
         """
         # Remove any version suffix for validation
         base_id = re.sub(r'v\d+$', '', arxiv_id)
@@ -108,9 +114,21 @@ class ArXivValidator:
     @classmethod
     def get_pdf_path(cls, arxiv_id: str) -> Path:
         """
-        Get PDF path for an ArXiv ID.
+        Return the filesystem Path to the PDF for the given arXiv identifier.
         
-        ArXiv PDFs are organized by YYMM/arxiv_id.pdf
+        Given an arXiv ID (new-style 'YYMM.NNNNN' or old-style 'category/YYMMNNN', with optional version suffix like 'v2'),
+        this resolves the expected PDF location under the class PDF_BASE_PATH:
+        - new format -> PDF_BASE_PATH / YYMM / 'base_id.pdf'
+        - old format -> PDF_BASE_PATH / YYMM / 'category_YYMMNNN.pdf' (slashes replaced with underscores)
+        
+        Parameters:
+            arxiv_id (str): ArXiv identifier; version suffix (e.g., 'v2') is ignored when computing the path.
+        
+        Returns:
+            Path: Resolved path to the PDF for the provided arXiv ID.
+        
+        Raises:
+            ValueError: If the arXiv ID does not match either the new or old recognized formats.
         """
         # Extract base ID without version
         base_id = re.sub(r'v\d+$', '', arxiv_id)
@@ -134,9 +152,9 @@ class ArXivValidator:
     @classmethod
     def get_latex_path(cls, arxiv_id: str) -> Optional[Path]:
         """
-        Get LaTeX source path for an ArXiv ID if it exists.
+        Return the Path to a LaTeX main file for the given arXiv ID if a LaTeX source exists, otherwise None.
         
-        LaTeX sources are optional and follow similar structure to PDFs.
+        The function ignores any trailing version suffix (e.g., `v2`) and only attempts to resolve LaTeX sources for new-format IDs (YYMM.NNNNN). If a LaTeX directory is found it prefers a main file named `main.tex`, `paper.tex`, or `{base_id}.tex` in that order; if none of those exist it returns the first `*.tex` file found. Returns None when no LaTeX source directory or .tex files are present.
         """
         # Extract base ID without version
         base_id = re.sub(r'v\d+$', '', arxiv_id)
@@ -163,9 +181,19 @@ class ArXivValidator:
     @classmethod
     def parse_arxiv_id(cls, arxiv_id: str) -> Dict[str, str]:
         """
-        Parse ArXiv ID into components.
+        Parse an arXiv identifier into its constituent components.
         
-        Returns dict with 'base_id', 'version', 'year_month', etc.
+        Given an arXiv ID (new-style like `YYMM.NNNNN` or old-style like `category/YYMMNNN`) optionally suffixed with a version (`vN`), return a dictionary of extracted fields useful for path resolution and metadata lookup.
+        
+        Returned dictionary keys (when present):
+        - base_id: the arXiv identifier without any version suffix.
+        - version: version suffix (e.g. `v2`). If no version is present, `v1` is returned.
+        - format: `'new'` for `YYMM.NNNNN` style IDs or `'old'` for `category/YYMMNNN`.
+        - year_month: the `YYMM` portion for new-style IDs or the best-effort year/month fragment for old-style IDs.
+        - number: the numeric sequence component of the identifier.
+        - category: (old-style only) the subject/category prefix (e.g. `cs.CV`).
+        
+        The function does not validate the semantic correctness of fields beyond pattern matching; keys absent in the result indicate the corresponding pattern component was not found.
         """
         components = {}
         
@@ -211,11 +239,13 @@ class ArXivManager:
         arango_config: Optional[Dict[str, Any]] = None
     ):
         """
-        Initialize ArXiv manager.
+        Create a new ArXivManager, wiring the document processor, optional ArangoDB manager, validator, and metadata cache.
         
-        Args:
-            processing_config: Configuration for document processing
-            arango_config: Configuration for ArangoDB connection
+        If provided, processing_config is passed to the underlying DocumentProcessor. If arango_config is provided, an ArangoDBManager is created to enable persistent storage; otherwise DB storage is disabled and related methods will be no-ops. The constructor also instantiates an ArXivValidator and attempts to load the in-memory metadata cache from the configured metadata snapshot.
+         
+        Parameters:
+            processing_config: Optional configuration forwarded to DocumentProcessor (affects parsing/embedding behavior).
+            arango_config: Optional ArangoDB connection/configuration; when omitted, database-backed storage is disabled.
         """
         # Initialize generic processor
         self.processor = DocumentProcessor(processing_config)
@@ -233,7 +263,15 @@ class ArXivManager:
         logger.info("Initialized ArXivManager")
     
     def _load_metadata_cache(self):
-        """Load ArXiv metadata from JSON snapshot."""
+        """
+        Load the ArXiv metadata snapshot (JSON Lines) into self.metadata_cache.
+        
+        Reads the file at ArXivValidator.METADATA_PATH, parses each non-empty line as JSON,
+        and stores each paper object keyed by its 'id' field into self.metadata_cache.
+        Blank lines are ignored. If the file is missing the method does nothing.
+        Any exceptions raised while reading or parsing the snapshot are caught and result
+        in a logged warning; the exception is not propagated.
+        """
         metadata_path = ArXivValidator.METADATA_PATH
         if metadata_path.exists():
             try:
@@ -251,10 +289,24 @@ class ArXivManager:
     
     def get_paper_info(self, arxiv_id: str) -> ArXivPaperInfo:
         """
-        Get complete ArXiv paper information.
+        Return a populated ArXivPaperInfo for the given ArXiv identifier.
         
-        Combines filesystem paths with metadata to create complete
-        paper information for processing.
+        Validates and parses the provided `arxiv_id`, resolves filesystem paths for the PDF
+        (and optional LaTeX source), and combines those with metadata loaded from the
+        in-memory metadata cache to construct an ArXivPaperInfo instance.
+        
+        Parameters:
+            arxiv_id: ArXiv identifier in either new format (YYMM.NNNNN[vN]) or old format
+                (category/YYMMNNN[vN]). The function strips/uses any version suffix when
+                appropriate.
+        
+        Returns:
+            ArXivPaperInfo populated with filesystem paths, version, title, authors, abstract,
+            categories, submission/update dates and optional fields (comments, journal_ref, doi).
+        
+        Raises:
+            ValueError: if `arxiv_id` is not a valid ArXiv identifier.
+            FileNotFoundError: if the resolved PDF file does not exist.
         """
         # Validate ID
         is_valid, error = self.validator.validate_arxiv_id(arxiv_id)
@@ -296,18 +348,20 @@ class ArXivManager:
         store_in_db: bool = True
     ) -> ProcessingResult:
         """
-        Process an ArXiv paper with ArXiv-specific handling.
+        Process a single arXiv paper: run the generic document processor and attach arXiv-specific metadata.
         
-        This method bridges ArXiv-specific concerns with generic processing,
-        ensuring all ArXiv metadata is preserved while benefiting from
-        shared processing infrastructure.
+        Retrieves arXiv-specific paths and metadata for the given arXiv_id, invokes the shared DocumentProcessor on the paper's PDF (and optional LaTeX), augments the returned ProcessingResult.processing_metadata with arXiv fields, and optionally persists the result to ArangoDB.
         
-        Args:
-            arxiv_id: ArXiv paper identifier
-            store_in_db: Whether to store results in database
-            
+        Parameters:
+            arxiv_id (str): ArXiv identifier (new or old format); invalid IDs raise ValueError.
+            store_in_db (bool): If True and a DB manager is configured, persist processing results to the arXiv-specific collections.
+        
         Returns:
-            ProcessingResult with ArXiv-specific metadata attached
+            ProcessingResult: Result from the generic processor with added keys: 'source', 'arxiv_id', 'version', 'categories', 'has_latex_source', and 'submission_date'.
+        
+        Raises:
+            ValueError: If the arXiv_id is invalid.
+            FileNotFoundError: If the referenced PDF cannot be found.
         """
         logger.info(f"Processing ArXiv paper: {arxiv_id}")
         
@@ -343,10 +397,14 @@ class ArXivManager:
         result: ProcessingResult
     ):
         """
-        Store processing results in ArXiv-specific database collections.
+        Persist ArXiv processing results and extracted artifacts to the configured ArangoDB collections.
         
-        Maintains separate collections for ArXiv papers to preserve
-        source-specific metadata and enable specialized queries.
+        If no database manager is configured, the call is a no-op (it logs a warning and returns). When a DB manager is present, this inserts:
+        - a main document into the `arxiv_papers` collection (keyed by paper_info.sanitized_id) containing ArXiv metadata and processing metrics;
+        - one document per text chunk with embeddings into `arxiv_embeddings`;
+        - an optional `arxiv_structures` document containing tables, equations, images, and figures when any are present.
+        
+        Errors raised by the DB manager or during document insertion are logged and re-raised.
         """
         if not self.db_manager:
             logger.warning("No database manager configured, skipping storage")
@@ -378,7 +436,7 @@ class ArXivManager:
             }
             
             # Store main paper document
-            await self.db_manager.insert_document('arxiv_papers', arxiv_doc)
+            self.db_manager.insert_document('arxiv_papers', arxiv_doc)
             
             # Store chunks with embeddings
             for chunk in result.chunks:
@@ -393,7 +451,7 @@ class ArXivManager:
                     'end_char': chunk.end_char,
                     'context_window_used': chunk.context_window_used
                 }
-                await self.db_manager.insert_document('arxiv_embeddings', chunk_doc)
+                self.db_manager.insert_document('arxiv_embeddings', chunk_doc)
             
             # Store structures if present
             if result.extraction.tables or result.extraction.equations or result.extraction.images:
@@ -405,7 +463,7 @@ class ArXivManager:
                     'images': result.extraction.images,
                     'figures': result.extraction.figures
                 }
-                await self.db_manager.insert_document('arxiv_structures', structures_doc)
+                self.db_manager.insert_document('arxiv_structures', structures_doc)
             
             logger.info(f"Stored ArXiv paper {paper_info.arxiv_id} in database")
             
@@ -419,14 +477,16 @@ class ArXivManager:
         store_in_db: bool = True
     ) -> List[ProcessingResult]:
         """
-        Process multiple ArXiv papers in batch.
+        Process a list of ArXiv papers and return their processing results.
         
-        Args:
-            arxiv_ids: List of ArXiv IDs to process
-            store_in_db: Whether to store results in database
-            
+        Processes each arXiv ID sequentially by calling process_arxiv_paper. If processing a specific ID raises an exception, this method logs the error and appends a synthesized failed ProcessingResult (success=False) containing the arXiv ID and the error message so the returned list preserves an entry for every requested ID.
+        
+        Parameters:
+            arxiv_ids (List[str]): ArXiv IDs to process.
+            store_in_db (bool): If True (default), successful results will be stored in the configured database when available.
+        
         Returns:
-            List of ProcessingResults
+            List[ProcessingResult]: A list of ProcessingResult objects in the same order as arxiv_ids. Entries for IDs that failed during processing are returned as failed ProcessingResult instances containing the error details.
         """
         results = []
         

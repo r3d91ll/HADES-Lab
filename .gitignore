@@ -143,6 +143,7 @@ cython_debug/
 # VS Code
 .vscode/
 *.code-workspace
+.codex/
 
 # Local History for Visual Studio Code
 .history/
@@ -361,9 +362,24 @@ experiments/*/logs/
 experiments/*/.cache/
 experiments/*/checkpoints/
 experiments/*/*.checkpoint
+experiments/*/embeddings/*_embeddings.json
 
 Acheron/
 Acheron/*
 logs/
 experiments/word2vec_evolution/embeddings/
+experiments/word2vec_evolution/extracted_papers/
+experiments/word2vec_evolution/*_results.json
+experiments/word2vec_evolution/*_analysis.json
+# Test artifacts only, not test source files
+tests/*.log
+tests/.cache/
+tests/__pycache__/
+tests/*.pyc
+tools/arxiv/scripts/data/*
 tools/arxiv/scripts/data/arxiv_collections/
+# Pipeline result files
+*_results_*.json
+tools/arxiv/pipelines/*_results_*.json
+tools/github/*_results_*.json
+arxiv_pipeline_v2_results_*.json

@@ -55,7 +55,23 @@ ARXIV_PDF_BASE = Path("/bulk-store/arxiv-data/pdf")
 
 
 def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> List[Tuple[Path, str]]:
-    """Collect paths to real ArXiv PDFs from the local repository."""
+    """
+    Collect paths to ArXiv PDF files from the local ARXIV_PDF_BASE repository.
+    
+    Scans numeric year-month subdirectories under ARXIV_PDF_BASE (filtered to names >= start_year),
+    randomly samples PDF files from each directory until up to target_count papers are collected,
+    and returns a list of (pdf_path, arxiv_id) tuples where arxiv_id is the PDF filename stem.
+    
+    Parameters:
+        target_count (int): Maximum number of papers to collect.
+        start_year (str): Minimum directory name (inclusive) to consider (e.g., "202001" or "1501").
+    
+    Returns:
+        List[Tuple[Path, str]]: Collected (Path to PDF, arXiv id) pairs, up to target_count items.
+    
+    Raises:
+        ValueError: If no year-month directories are found at or after start_year.
+    """
     logger.info(f"Collecting {target_count} ArXiv PDFs from {ARXIV_PDF_BASE}")
     
     papers = []
@@ -86,7 +102,18 @@ def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> 
 
 
 def extract_single_document(args: Tuple[Path, str, DoclingExtractor]) -> Dict[str, Any]:
-    """Extract a single document (worker function)."""
+    """
+    Extract a single PDF to a staged JSON file (worker entrypoint).
+    
+    This worker expects `args` to be a 3-tuple: (pdf_path: Path, arxiv_id: str, _), where the third element is a placeholder
+    for an extractor instance (it is ignored). The function creates a new DoclingExtractor for the process, extracts the
+    document, augments the extraction result with `arxiv_id`, `pdf_path`, and `success=True`, and writes the result to
+    STAGING_DIR/{arxiv_id}.json.
+    
+    Returns a dict summarizing the outcome:
+    - On success: {'arxiv_id': arxiv_id, 'success': True, 'staged_path': str(path_to_staged_json)}
+    - On failure: {'arxiv_id': arxiv_id, 'success': False, 'error': str(exception)}
+    """
     pdf_path, arxiv_id, _ = args
     
     try:
@@ -115,8 +142,33 @@ def extract_single_document(args: Tuple[Path, str, DoclingExtractor]) -> Dict[st
 
 def phase1_extraction(papers: List[Tuple[Path, str]], num_workers: int = 8) -> Dict[str, Any]:
     """
-    Phase 1: Extract all documents with Docling and stage to JSON.
-    Uses multiple workers for parallel processing.
+    Run Phase 1 extraction: parallel Docling extraction of provided PDFs and stage per-document JSON files.
+    
+    Processes the given list of papers in a ProcessPoolExecutor, calling the worker extract_single_document for each item. This function:
+    - Clears the staging directory before starting.
+    - Submits one extraction task per paper and collects completed results (workers are given 60s per future.result call).
+    - Records successes and failures (failed tasks are captured and returned rather than raised).
+    - Clears GPU memory cache after extraction if CUDA is available.
+    
+    Parameters:
+        papers (List[Tuple[Path, str]]): Iterable of (pdf_path, arxiv_id) tuples to extract.
+        num_workers (int): Number of parallel worker processes to use.
+    
+    Returns:
+        Dict[str, Any]: Summary of the extraction phase containing:
+            - 'phase' (str): "extraction"
+            - 'total_papers' (int): number of papers processed
+            - 'successful' (int): count of successful extractions
+            - 'failed' (int): count of failed extractions
+            - 'phase_time' (float): elapsed time in seconds for the phase
+            - 'papers_per_minute' (float): throughput computed over the phase_time
+            - 'staged_files' (int): number of JSON files present in the staging directory after the run
+    
+    Side effects:
+        - Deletes existing JSON files in STAGING_DIR before running.
+        - Writes per-document JSON files to STAGING_DIR via worker processes.
+        - Logs progress and errors to the configured logger.
+        - May clear CUDA cache via torch.cuda.empty_cache() if CUDA is available.
     """
     logger.info("="*70)
     logger.info(f"PHASE 1: EXTRACTION - {len(papers)} papers with {num_workers} workers")
@@ -191,7 +243,28 @@ def phase1_extraction(papers: List[Tuple[Path, str]], num_workers: int = 8) -> D
 
 
 def process_single_staged_file(args: Tuple[Path, int]) -> Dict[str, Any]:
-    """Process a single staged JSON file (worker function)."""
+    """
+    Process a single staged extraction JSON and produce embeddings for its text.
+    
+    This worker reads a staged JSON file produced by the extraction phase, selects the text content
+    (preference order: `full_text`, `text`, `markdown`), assigns a GPU based on the provided
+    worker_id (falls back to CPU if CUDA is unavailable), instantiates a JinaV4Embedder on that
+    device, and generates embeddings using late chunking.
+    
+    Parameters:
+        args (tuple): (staged_file: Path, worker_id: int). `worker_id` is used to map the process to a GPU.
+    
+    Returns:
+        dict: Result payload with keys:
+            - 'arxiv_id' (str): identifier for the document (from JSON or filename stem).
+            - 'success' (bool): True on success, False on failure.
+            - On success:
+                - 'num_chunks' (int): number of text chunks embedded.
+                - 'chunks' (list): chunk metadata/embeddings as returned by the embedder.
+                - 'gpu_used' (int or str): GPU index used or 'cpu'.
+            - On failure:
+                - 'error' (str): error message explaining the failure (e.g., 'No text content' or exception text).
+    """
     staged_file, worker_id = args
     
     try:
@@ -249,8 +322,23 @@ def process_single_staged_file(args: Tuple[Path, int]) -> Dict[str, Any]:
 
 def phase2_embedding(num_workers: int = 8) -> Dict[str, Any]:
     """
-    Phase 2: Process all staged JSONs with Jina embeddings.
-    Uses multiple GPU workers for parallel processing.
+    Run Phase 2: generate embeddings for all staged JSON documents using multiple workers (GPU-aware).
+    
+    Scans the staging directory for JSON files produced by Phase 1 and processes them in parallel batches to limit GPU memory pressure. Each staged file is handed to a worker that selects a device (GPU by worker id or CPU), loads the staged JSON, extracts the document text, and produces embeddings (with late chunking). Results are aggregated into counts of successful and failed files and total embedding chunks.
+    
+    Parameters:
+        num_workers (int): Number of parallel worker processes to use; also used to round-robin assign GPU device ids (worker_id % num_workers). Increase to parallelize across more GPUs or CPU workers.
+    
+    Returns:
+        dict: Summary of the embedding phase containing:
+            - phase (str): "embedding"
+            - total_files (int): number of staged JSON files discovered
+            - successful (int): count of successfully embedded files
+            - failed (int): count of files that failed embedding
+            - total_chunks (int): total number of embedding chunks produced across successful files
+            - avg_chunks_per_doc (float): average chunks per successful document (0 if none)
+            - phase_time (float): elapsed time in seconds for the embedding phase
+            - papers_per_minute (float): processing rate computed as total_files / phase_time * 60
     """
     logger.info("="*70)
     logger.info(f"PHASE 2: EMBEDDING - Processing staged JSONs with {num_workers} workers")
@@ -349,7 +437,30 @@ def phase2_embedding(num_workers: int = 8) -> Dict[str, Any]:
 
 
 def run_phased_test(num_docs: int = 2000, extraction_workers: int = 8, embedding_workers: int = 8):
-    """Run the phase-separated overnight test."""
+    """
+    Run the two-phase (extraction -> embedding) overnight ArXiv processing test and return aggregated results.
+    
+    This orchestrator runs:
+    - Phase 1: collects up to `num_docs` ArXiv PDFs and extracts each into a staged JSON using multiple workers.
+    - Phase 2: reads staged JSONs and generates embeddings with GPU-aware worker distribution.
+    
+    Side effects:
+    - Persists intermediate and final results to a timestamped JSON file in the configured log directory.
+    - Emits progress and summary information to the configured logger.
+    - Writes per-document staged JSONs to the shared staging directory.
+    
+    Parameters:
+        num_docs (int): Target number of documents to process (default: 2000).
+        extraction_workers (int): Number of worker processes for Phase 1 extraction (default: 8).
+        embedding_workers (int): Number of worker processes for Phase 2 embedding (default: 8).
+    
+    Returns:
+        dict: A nested results dictionary containing:
+            - test_config: configuration used for the run
+            - corpus_info: metadata about collected papers
+            - phases: per-phase result objects ('extraction' and 'embedding')
+            - summary: overall timing, rates, chunk counts, and completion timestamp
+    """
     logger.info("="*70)
     logger.info(f"PHASE-SEPARATED ARXIV TEST - {num_docs} Papers")
     logger.info(f"Started at: {datetime.now().isoformat()}")

@@ -5,12 +5,10 @@ description = "Heterogeneous Adaptive Dimensional Embedding System - Production 
 authors = ["HADES Team"]
 readme = "README.md"
 license = "Apache-2.0"
+# Installable packages from this repo
 packages = [
-    { include = "processors" },
-    { include = "storage" },
-    { include = "embeddings" },
-    { include = "utils" },
-    { include = "mcp_server" }
+    { include = "core" },
+    { include = "tools" },
 ]
 
 [tool.poetry.dependencies]
@@ -40,6 +38,9 @@ ray = "^2.48.0"
 peft = "^0.17.0"
 structlog = "^25.4.0"
 pymupdf = "^1.26.4"
+psycopg = {version = "^3.1.18", extras = ["binary"]}
+sqlalchemy = "^2.0.31"
+alembic = "^1.13.2"
 
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.5.0"
@@ -99,6 +100,26 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "PIL.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "yaml"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "psycopg.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "sqlalchemy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "alembic.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "sickle.*"
 ignore_missing_imports = true
 
 [tool.ruff]

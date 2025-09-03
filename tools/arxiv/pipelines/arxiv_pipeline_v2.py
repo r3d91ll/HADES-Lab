@@ -36,7 +36,15 @@ logger = logging.getLogger(__name__)
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file."""
+    """
+    Load and parse a YAML configuration file.
+    
+    Parameters:
+        config_path (str): Path to a YAML file containing the configuration.
+    
+    Returns:
+        Dict[str, Any]: Parsed configuration as a dictionary (the YAML root should be a mapping).
+    """
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
@@ -47,7 +55,14 @@ class ArXivPipelineV2:
     """
     
     def __init__(self, config_path: str):
-        """Initialize pipeline."""
+        """
+        Create and initialize an ArXivPipelineV2 instance.
+        
+        Loads configuration from the provided YAML path, determines the PDF base directory (uses config value at `processing.local.pdf_dir` or the default '/bulk-store/arxiv-data/pdf'), instantiates the ArXivDocumentManager and GenericDocumentProcessor (with collection prefix "arxiv"), and initializes checkpointing state.
+        
+        Parameters:
+            config_path (str): Path to the YAML configuration file used to configure the pipeline.
+        """
         self.config = load_config(config_path)
         
         # Initialize ArXiv-specific manager
@@ -66,7 +81,19 @@ class ArXivPipelineV2:
         logger.info("Initialized ArXiv Pipeline v2 with separated architecture")
     
     def _init_checkpoint(self):
-        """Initialize checkpoint system."""
+        """
+        Initialize checkpointing state from configuration and load any existing checkpoint file.
+        
+        Reads the 'checkpoint' section from self.config and sets:
+        - self.checkpoint_enabled: 'true', 'false', or 'auto' (default 'auto')
+        - self.checkpoint_auto_threshold: number used when mode is 'auto' (default 500)
+        - self.checkpoint_save_interval: how often to persist (default 100)
+        - self.checkpoint_file: Path to the checkpoint JSON file (default 'arxiv_pipeline_v2_checkpoint.json')
+        
+        Loads checkpoint contents via self._load_checkpoint() into self.checkpoint_data and initializes
+        self.processed_ids as a set of previously processed document IDs (empty set if no checkpoint).
+        Logs the count of loaded processed IDs when any are present.
+        """
         checkpoint_config = self.config.get('checkpoint', {})
         self.checkpoint_enabled = checkpoint_config.get('enabled', 'auto')
         self.checkpoint_auto_threshold = checkpoint_config.get('auto_threshold', 500)
@@ -81,7 +108,12 @@ class ArXivPipelineV2:
             logger.info(f"Loaded checkpoint with {len(self.processed_ids)} previously processed documents")
     
     def _load_checkpoint(self) -> Dict[str, Any]:
-        """Load checkpoint if exists."""
+        """
+        Load and return checkpoint data from the configured checkpoint file.
+        
+        If the checkpoint file exists and contains valid JSON, its contents are returned as a dict.
+        If the file does not exist or cannot be read/parsed, an empty dict is returned.
+        """
         if self.checkpoint_file.exists():
             try:
                 with open(self.checkpoint_file, 'r') as f:
@@ -91,7 +123,23 @@ class ArXivPipelineV2:
         return {}
     
     def _save_checkpoint(self, extraction_results=None, embedding_results=None):
-        """Save checkpoint data."""
+        """
+        Persist current checkpoint state to the configured checkpoint file.
+        
+        Updates internal checkpoint_data with the current set of processed IDs and a last_saved ISO timestamp.
+        If provided, records the most recent extraction and embedding phase summaries under `last_extraction` and
+        `last_embedding` (each uses keys `success` and `failed`; extraction also includes `staged_files`).
+        
+        Parameters:
+            extraction_results (dict, optional): Extraction phase summary with optional keys
+                `success` (list), `failed` (list), and `staged_files` (list). Missing keys default to empty lists.
+            embedding_results (dict, optional): Embedding phase summary with optional keys
+                `success` (list) and `failed` (list). Missing keys default to empty lists.
+        
+        Notes:
+            - The method writes JSON to `self.checkpoint_file`. I/O errors are logged but not propagated.
+            - Does not return a value.
+        """
         self.checkpoint_data['processed_ids'] = list(self.processed_ids)
         self.checkpoint_data['last_saved'] = datetime.now().isoformat()
         
@@ -117,7 +165,19 @@ class ArXivPipelineV2:
             logger.error(f"Failed to save checkpoint: {e}")
     
     def _should_use_checkpoint(self, count: int) -> bool:
-        """Determine if checkpointing should be enabled."""
+        """
+        Decide whether checkpointing should be enabled for this run.
+        
+        If the pipeline config explicitly sets checkpointing to 'true' or 'false', that value is respected.
+        Otherwise (auto mode), checkpointing is enabled when the requested document count is greater than
+        or equal to the configured auto-threshold.
+        
+        Parameters:
+            count (int): Number of documents requested for this run; used when checkpointing is in auto mode.
+        
+        Returns:
+            bool: True if checkpointing should be used, False otherwise.
+        """
         if self.checkpoint_enabled == 'true':
             return True
         elif self.checkpoint_enabled == 'false':
@@ -127,12 +187,22 @@ class ArXivPipelineV2:
     
     def run(self, source: str = 'recent', count: int = 100, arxiv_ids: List[str] = None):
         """
-        Run the pipeline.
+        Run the ArXiv processing pipeline: prepare tasks, process them, update checkpoints, and write a results file.
         
-        Args:
-            source: Source of documents ('recent', 'specific', 'directory')
-            count: Number of documents to process
-            arxiv_ids: Specific ArXiv IDs to process (if source='specific')
+        This orchestrates end-to-end pipeline steps:
+        - Prepares document tasks from one of three sources: 'recent' (most recent submissions), 'specific' (requires arxiv_ids), or 'directory' (uses configured year_month).
+        - Optionally filters out previously processed documents when checkpointing is enabled.
+        - Processes documents via the configured GenericDocumentProcessor.
+        - Updates and persists checkpoint data with extraction/embedding outcomes when available.
+        - Logs a summary report (timing, success/failure counts, processing rate) and writes a JSON results file named arxiv_pipeline_v2_results_<timestamp>.json containing timing, source, requested count, and the full results payload.
+        
+        Parameters:
+            source (str): Source of documents; one of 'recent', 'specific', or 'directory'. If 'specific', provide arxiv_ids.
+            count (int): Number of documents to request/limit from the source.
+            arxiv_ids (List[str] | None): List of ArXiv IDs to process when source == 'specific'. Omitted otherwise.
+        
+        Returns:
+            None
         """
         start_time = datetime.now()
         
@@ -238,7 +308,22 @@ class ArXivPipelineV2:
 
 
 def main():
-    """Main entry point."""
+    """
+    Command-line entry point for the ArXiv Pipeline v2.
+    
+    Parses CLI arguments (config path, source type, count, optional ArXiv IDs, and optional ArangoDB password),
+    optionally sets the ARANGO_PASSWORD environment variable when provided, constructs an ArXivPipelineV2 using
+    the resolved configuration file, and runs the pipeline with the requested source, count, and IDs.
+    
+    Defaults:
+    - config: 'tools/arxiv/configs/acid_pipeline_phased.yaml'
+    - source: 'recent' (choices: 'recent', 'specific', 'directory')
+    - count: 100
+    
+    Side effects:
+    - May set the ARANGO_PASSWORD environment variable.
+    - Instantiates and runs the ArXivPipelineV2, which performs file I/O and network/DB operations as configured.
+    """
     parser = argparse.ArgumentParser(description='ArXiv Pipeline v2 - Separated Architecture')
     parser.add_argument('--config', type=str, 
                        default='tools/arxiv/configs/acid_pipeline_phased.yaml',

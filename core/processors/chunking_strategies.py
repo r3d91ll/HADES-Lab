@@ -14,7 +14,7 @@ through our processing pipeline.
 
 import re
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable, Union
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import numpy as np
@@ -38,12 +38,23 @@ class TextChunk:
     
     @property
     def char_count(self) -> int:
-        """Character count in chunk."""
+        """
+        Return the number of characters in this chunk's text.
+        
+        Returns:
+            int: Character count (equivalent to len(self.text)).
+        """
         return len(self.text)
     
     @property
     def token_count_estimate(self) -> int:
-        """Rough estimate of token count (words)."""
+        """
+        Return a rough estimate of the token count for this chunk.
+        
+        This uses a simple whitespace split on the chunk text and should be treated as an approximate token count (use a tokenizer for exact tokenization).
+        Returns:
+            int: Estimated number of tokens (words) in the chunk.
+        """
         return len(self.text.split())
 
 
@@ -58,11 +69,25 @@ class ChunkingStrategy(ABC):
     
     @abstractmethod
     def create_chunks(self, text: str, **kwargs) -> List[TextChunk]:
-        """Create chunks from text using the strategy."""
+        """
+        Create a sequence of TextChunk objects representing segments of the input text.
+        
+        This is the abstract interface for chunking implementations. Implementations should accept the raw document string in `text` and return a list of TextChunk instances that together cover meaningful portions of the input (possibly with overlap depending on the strategy). The exact behavior, chunk size semantics, and accepted `**kwargs` are strategy-specific; callers should consult the concrete strategy's documentation for those details.
+        
+        Parameters:
+            text (str): The input document to split into chunks.
+        
+        Returns:
+            List[TextChunk]: A list of TextChunk objects (may be empty).
+        """
         pass
     
     def _clean_text(self, text: str) -> str:
-        """Clean and normalize text before chunking."""
+        """
+        Normalize input text for chunking by collapsing all whitespace to single spaces, removing null characters, and trimming leading/trailing spaces.
+        
+        This produces a compact, single-line-safe string suitable for downstream tokenization and chunk boundary calculations.
+        """
         # Remove excessive whitespace
         text = re.sub(r'\s+', ' ', text)
         # Remove null characters
@@ -83,18 +108,34 @@ class TokenBasedChunking(ChunkingStrategy):
         self,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
-        tokenizer: Optional[Any] = None
+        tokenizer: Optional[Union[Callable[[str], List[str]], Any]] = None
     ):
         """
-        Initialize token-based chunking.
+        Initialize a token-based chunking strategy.
         
-        Args:
-            chunk_size: Target size of each chunk in tokens
-            chunk_overlap: Number of overlapping tokens between chunks
-            tokenizer: Optional tokenizer (uses simple split if None)
+        Parameters:
+            chunk_size (int): Target number of tokens per chunk.
+            chunk_overlap (int): Number of tokens to overlap between consecutive chunks; must be less than chunk_size.
+            tokenizer: Optional tokenizer that can be either:
+                - A callable function that takes a string and returns a list of tokens: Callable[[str], List[str]]
+                - A tokenizer-like object with .tokenize(text) and .convert_tokens_to_string(tokens) methods
+                - None (uses simple whitespace split)
+        
+        Raises:
+            ValueError: If `chunk_overlap` is greater than or equal to `chunk_size`.
+            TypeError: If tokenizer is provided but doesn't support either expected interface.
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        
+        # Validate tokenizer interface if provided
+        if tokenizer is not None:
+            if not (callable(tokenizer) or hasattr(tokenizer, 'tokenize')):
+                raise TypeError(
+                    "Tokenizer must be either a callable that returns List[str], "
+                    "or an object with .tokenize() method (and optionally .convert_tokens_to_string())"
+                )
+        
         self.tokenizer = tokenizer
         
         if chunk_overlap >= chunk_size:
@@ -102,16 +143,29 @@ class TokenBasedChunking(ChunkingStrategy):
     
     def create_chunks(self, text: str, **kwargs) -> List[TextChunk]:
         """
-        Create token-based chunks with overlap.
+        Create token-based text chunks with configurable overlap.
         
-        The overlap ensures that information at chunk boundaries isn't lost,
-        preventing zero-propagation at the edges of our processing units.
+        Generates a sequence of TextChunk objects by sliding a token window of size
+        `self.chunk_size` across the cleaned text in steps of `self.chunk_size - self.chunk_overlap`.
+        If a tokenizer was provided to the strategy it will be used for tokenization and
+        reconstruction; otherwise simple whitespace splitting and joining are used.
+        Character offsets (start_char, end_char) are approximate and derived from token
+        boundaries, and metadata includes token indices and chunking parameters.
+        
+        Returns:
+            List[TextChunk]: Ordered list of created chunks covering the input text (may
+            overlap). 
         """
         text = self._clean_text(text)
         
-        # Tokenize text
+        # Tokenize text using appropriate interface
         if self.tokenizer:
-            tokens = self.tokenizer.tokenize(text)
+            if callable(self.tokenizer):
+                # Tokenizer is a callable function
+                tokens = self.tokenizer(text)
+            else:
+                # Tokenizer is an object with .tokenize() method
+                tokens = self.tokenizer.tokenize(text)
         else:
             # Simple word tokenization
             tokens = text.split()
@@ -128,7 +182,15 @@ class TokenBasedChunking(ChunkingStrategy):
             
             # Reconstruct text from tokens
             if self.tokenizer:
-                chunk_text = self.tokenizer.convert_tokens_to_string(chunk_tokens)
+                if callable(self.tokenizer):
+                    # For callable tokenizers, join tokens with space
+                    chunk_text = ' '.join(chunk_tokens)
+                elif hasattr(self.tokenizer, 'convert_tokens_to_string'):
+                    # For tokenizer objects with convert_tokens_to_string method
+                    chunk_text = self.tokenizer.convert_tokens_to_string(chunk_tokens)
+                else:
+                    # For tokenizer objects without convert_tokens_to_string, just join
+                    chunk_text = ' '.join(chunk_tokens)
             else:
                 chunk_text = ' '.join(chunk_tokens)
             
@@ -178,13 +240,13 @@ class SemanticChunking(ChunkingStrategy):
         respect_paragraphs: bool = True
     ):
         """
-        Initialize semantic chunking.
+        Configure a semantic chunking strategy that preserves paragraph and sentence boundaries.
         
-        Args:
-            max_chunk_size: Maximum tokens per chunk
-            min_chunk_size: Minimum tokens per chunk
-            respect_sentences: Keep sentences intact
-            respect_paragraphs: Try to keep paragraphs intact
+        Parameters:
+            max_chunk_size (int): Maximum number of tokens allowed in a chunk; larger paragraphs/sentences will be split.
+            min_chunk_size (int): Minimum number of tokens preferred for a chunk; used to avoid producing overly small chunks.
+            respect_sentences (bool): If True, attempts to keep sentence boundaries intact when splitting oversized paragraphs.
+            respect_paragraphs (bool): If True, prefers to keep paragraphs together when forming chunks.
         """
         self.max_chunk_size = max_chunk_size
         self.min_chunk_size = min_chunk_size
@@ -193,10 +255,19 @@ class SemanticChunking(ChunkingStrategy):
     
     def create_chunks(self, text: str, **kwargs) -> List[TextChunk]:
         """
-        Create semantically meaningful chunks.
+        Create semantically meaningful TextChunk objects from the input text.
         
-        Attempts to preserve natural document boundaries, treating
-        paragraphs and sentences as atomic units when possible.
+        This method preserves natural document boundaries by grouping content into chunks that align with paragraphs and, when enabled, sentences. It:
+        - Splits the cleaned input into paragraphs.
+        - Accumulates paragraphs (and, if a paragraph exceeds max_chunk_size and sentence-respecting is enabled, sentences) into chunks not exceeding self.max_chunk_size tokens.
+        - For paragraphs larger than max_chunk_size, either splits them into sentences (if respect_sentences is True) or force-splits at token boundaries.
+        - Produces a list of TextChunk instances with metadata (e.g., token counts, paragraph/sentence counts). Character offsets are estimated from the segmentation and may be approximate.
+        
+        Parameters:
+            text (str): Raw document text to chunk. It will be normalized by the strategy before splitting.
+        
+        Returns:
+            List[TextChunk]: Ordered list of chunks covering the input text, each with start/end character positions, chunk_index, and metadata.
         """
         text = self._clean_text(text)
         
@@ -272,20 +343,42 @@ class SemanticChunking(ChunkingStrategy):
         return chunks
     
     def _split_paragraphs(self, text: str) -> List[str]:
-        """Split text into paragraphs."""
+        """
+        Split text into non-empty paragraphs.
+        
+        Paragraphs are defined by two or more consecutive newline characters; each returned paragraph is stripped of leading/trailing whitespace and empty segments are omitted. Preserves original order of paragraphs.
+        """
         # Split on double newlines or typical paragraph markers
         paragraphs = re.split(r'\n\n+', text)
         # Filter out empty paragraphs
         return [p.strip() for p in paragraphs if p.strip()]
     
     def _split_sentences(self, text: str) -> List[str]:
-        """Split text into sentences."""
+        """
+        Split text into sentences using a simple end-punctuation heuristic.
+        
+        This performs a lightweight split on whitespace that follows '.', '!' or '?', then strips surrounding whitespace and filters out empty results. It is a simple heuristic and may not correctly handle edge cases such as abbreviations, ellipses, or quoted text.
+        
+        Returns:
+            List[str]: Non-empty sentence strings in original order.
+        """
         # Simple sentence splitting (could use more sophisticated methods)
         sentences = re.split(r'(?<=[.!?])\s+', text)
         return [s.strip() for s in sentences if s.strip()]
     
     def _force_split_text(self, text: str, start_char: int) -> List[TextChunk]:
-        """Force split text that's too large for a single chunk."""
+        """
+        Force-split an oversized text into consecutive TextChunk objects of at most `self.max_chunk_size` tokens.
+        
+        The text is split on whitespace into words and rejoined into chunks of up to `max_chunk_size` words. `start_char` is used as the initial character offset for the first chunk; subsequent chunks' `start_char`/`end_char` are computed by advancing the offset by the length of the produced chunk text plus a single separating space. Character positions are therefore approximate and do not preserve original spacing or punctuation.
+        
+        Parameters:
+            text (str): The input text to split.
+            start_char (int): Character index in the original document corresponding to the start of `text`.
+        
+        Returns:
+            List[TextChunk]: A list of TextChunk objects with metadata containing `strategy='semantic_forced_split'` and `token_count`. Chunk indices are zero-based and reflect the order of the produced chunks.
+        """
         words = text.split()
         chunks = []
         
@@ -308,7 +401,22 @@ class SemanticChunking(ChunkingStrategy):
         return chunks
     
     def _create_chunk(self, text: str, start_char: int, index: int) -> TextChunk:
-        """Create a TextChunk object."""
+        """
+        Create a TextChunk representing a semantic chunk of the original document.
+        
+        Parameters:
+            text (str): Chunk text content.
+            start_char (int): Character index in the original text where this chunk begins.
+            index (int): Sequential chunk index.
+        
+        Returns:
+            TextChunk: A chunk with start/end character offsets, index, and metadata including:
+                - strategy: 'semantic'
+                - max_size, min_size: configured semantic chunk size limits
+                - token_count: approximate token count (whitespace split)
+                - paragraph_count: number of paragraphs in the chunk
+                - sentence_count: number of sentences in the chunk
+        """
         return TextChunk(
             text=text,
             start_char=start_char,
@@ -340,11 +448,14 @@ class SlidingWindowChunking(ChunkingStrategy):
         step_size: int = 256
     ):
         """
-        Initialize sliding window chunking.
+        Create a SlidingWindowChunking instance.
         
-        Args:
-            window_size: Size of the sliding window in tokens
-            step_size: Number of tokens to slide the window
+        Parameters:
+            window_size (int): Number of tokens contained in each sliding window (default 512).
+            step_size (int): Number of tokens to advance the window on each step (default 256).
+        
+        Raises:
+            ValueError: If `step_size` is greater than `window_size`.
         """
         self.window_size = window_size
         self.step_size = step_size
@@ -354,10 +465,15 @@ class SlidingWindowChunking(ChunkingStrategy):
     
     def create_chunks(self, text: str, **kwargs) -> List[TextChunk]:
         """
-        Create chunks using sliding window approach.
+        Create a sequence of overlapping text chunks using a sliding-window token approach.
         
-        High overlap ensures continuity of information across chunks,
-        at the cost of increased redundancy and processing overhead.
+        This produces successive windows of tokens of size `window_size`, advancing by `step_size` tokens each step to preserve continuity between adjacent chunks (higher overlap increases redundancy). Chunks are returned as TextChunk objects and include metadata fields such as `strategy`, `window_size`, `step_size`, `overlap_ratio`, and `token_count`. If a non-trivial trailing segment of tokens remains after the last full window, a final "sliding_window_remainder" chunk is emitted.
+        
+        Parameters:
+            text (str): Input document to chunk. Tokenization is performed by simple whitespace splitting.
+        
+        Returns:
+            List[TextChunk]: Ordered list of chunks covering the input text. `start_char`/`end_char` are estimated from token boundaries (approximate character offsets).
         """
         text = self._clean_text(text)
         tokens = text.split()  # Simple tokenization
@@ -423,14 +539,20 @@ class ChunkingStrategyFactory:
         **kwargs
     ) -> ChunkingStrategy:
         """
-        Create a chunking strategy based on type.
+        Return a ChunkingStrategy instance corresponding to strategy_type.
         
-        Args:
-            strategy_type: Type of strategy ('token', 'semantic', 'sliding')
-            **kwargs: Strategy-specific parameters
-            
+        Creates one of: 'token' -> TokenBasedChunking, 'semantic' -> SemanticChunking,
+        'sliding' or 'sliding_window' -> SlidingWindowChunking. The lookup is case-insensitive.
+        
+        Parameters:
+            strategy_type (str): Name of the strategy to create.
+            **kwargs: Passed to the selected strategy class constructor.
+        
         Returns:
-            ChunkingStrategy instance
+            ChunkingStrategy: An instance of the requested chunking strategy.
+        
+        Raises:
+            ValueError: If strategy_type is not one of the supported names.
         """
         strategies = {
             'token': TokenBasedChunking,

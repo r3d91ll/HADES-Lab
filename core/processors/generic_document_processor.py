@@ -34,6 +34,11 @@ class DocumentTask:
     metadata: Dict[str, Any] = None  # Optional metadata from source
     
     def __post_init__(self):
+        """
+        Ensure the `metadata` field is initialized.
+        
+        If `metadata` was not provided (is None), set it to an empty dictionary on the instance.
+        """
         if self.metadata is None:
             self.metadata = {}
 
@@ -50,11 +55,20 @@ class GenericDocumentProcessor:
     
     def __init__(self, config: Dict[str, Any], collection_prefix: str = "documents"):
         """
-        Initialize processor.
+        Create a GenericDocumentProcessor configured to run extraction, embedding, and storage for a collection of documents.
         
-        Args:
-            config: Configuration dict with extraction, embedding, storage settings
-            collection_prefix: Prefix for ArangoDB collections (e.g., "arxiv", "semantic_scholar")
+        Initializes processor state from `config`, ensures a staging directory exists, and derives ArangoDB collection names using `collection_prefix`.
+        
+        Parameters:
+            config (dict): Configuration dictionary. Expected keys (optional):
+                - "staging.directory": path for temporary per-document staging files (defaults to "/dev/shm/doc_staging").
+                - extraction / phases.extraction, embedding / phases.embedding, and arango-related settings used elsewhere by the processor.
+            collection_prefix (str): Prefix used to construct ArangoDB collection names; resulting collections are
+                "{prefix}_papers", "{prefix}_chunks", "{prefix}_embeddings", and "{prefix}_structures".
+        
+        Notes:
+            - The staging directory is created if it does not exist.
+            - This initializer sets `self.staging_dir`, `self.config`, `self.collection_prefix`, and `self.collections`.
         """
         self.config = config
         self.collection_prefix = collection_prefix
@@ -76,13 +90,19 @@ class GenericDocumentProcessor:
     
     def process_documents(self, tasks: List[DocumentTask]) -> Dict[str, Any]:
         """
-        Process a batch of documents through the full pipeline.
+        Run the full processing pipeline for a batch of DocumentTask items: extraction, then embedding/storage.
         
-        Args:
-            tasks: List of DocumentTask objects to process
-            
+        If extraction produces no staged files the method returns early with extraction details and an empty embedding result.
+        
+        Parameters:
+            tasks (List[DocumentTask]): Documents to process.
+        
         Returns:
-            Processing results with success/failure counts
+            Dict[str, Any]: Summary of the run with keys:
+                - success (bool): overall success (False if extraction produced no staged files).
+                - extraction (dict): results from the extraction phase (includes 'success', 'failed', 'staged_files').
+                - embedding (dict): results from the embedding/storage phase (includes 'success', 'failed', 'chunks_created').
+                - total_processed (int, optional): number of successfully embedded documents (present when success is True).
         """
         logger.info(f"Processing {len(tasks)} documents")
         
@@ -108,7 +128,27 @@ class GenericDocumentProcessor:
         }
     
     def _extraction_phase(self, tasks: List[DocumentTask]) -> Dict[str, Any]:
-        """Extract documents to staging area."""
+        """
+        Run extraction for a batch of documents and write per-document staging JSONs.
+        
+        This method dispatches DocumentTask items to a pool of worker processes (with GPU device
+        assignment taken from the configured extraction settings) to extract each document into
+        the processor's staging directory. Extraction is performed per-task and collected into an
+        aggregation of results; failures for individual documents are handled per-task so the
+        overall phase continues.
+        
+        Returns:
+            Dict[str, Any]: A summary dictionary with keys:
+                - "success": List[str] — document_id values that were successfully extracted.
+                - "failed": List[str] — document_id values that failed extraction.
+                - "staged_files": List[str] — filesystem paths to the created staging JSON files
+                  for successful extractions.
+        
+        Side effects:
+            - Writes one staging JSON file per successfully extracted document under the
+              instance's staging_dir.
+            - Uses worker processes and may set CUDA_VISIBLE_DEVICES for GPU assignment.
+        """
         logger.info(f"EXTRACTION PHASE: {len(tasks)} documents")
         
         # Check both 'extraction' and 'phases.extraction' for config compatibility
@@ -157,7 +197,22 @@ class GenericDocumentProcessor:
         return results
     
     def _embedding_phase(self, staged_files: List[str]) -> Dict[str, Any]:
-        """Embed and store documents."""
+        """
+        Run embedding and storage for a set of staged document JSON files.
+        
+        This method reads embedding configuration from self.config (preferring `phases.embedding` and falling back to `embedding`),
+        spawns a pool of embedding worker processes (initialized via _init_embedding_worker), and dispatches _embed_and_store
+        for each path in staged_files. It aggregates per-document outcomes into a summary dictionary.
+        
+        Parameters:
+            staged_files (List[str]): Paths to per-document staging JSON files produced during extraction.
+        
+        Returns:
+            Dict[str, Any]: A summary with keys:
+                - 'success' (List[str]): document_ids that were embedded and stored successfully.
+                - 'failed' (List[str]): staging file paths for documents that failed to embed/store.
+                - 'chunks_created' (int): total number of chunks created across all successfully processed documents.
+        """
         logger.info(f"EMBEDDING PHASE: {len(staged_files)} documents")
         
         # Check both 'embedding' and 'phases.embedding' for config compatibility
@@ -214,7 +269,22 @@ WORKER_DB_MANAGER = None
 
 
 def _init_extraction_worker(gpu_devices, extraction_config):
-    """Initialize extraction worker."""
+    """
+    Initialize the extraction worker process.
+    
+    Sets up per-worker GPU visibility and creates the module-level WORKER_DOCLING extractor instance used by extraction tasks.
+    
+    Parameters:
+        gpu_devices (Sequence[int]): List of GPU device indices available to workers. If provided, this worker will set CUDA_VISIBLE_DEVICES to one device chosen by worker index modulo the list length.
+        extraction_config (Mapping): Configuration for extraction. Recognized keys:
+            - 'type': if equal to 'code', a CodeExtractor is created; otherwise a RobustExtractor is used.
+            - 'timeout_seconds': timeout passed to RobustExtractor (default 30).
+            - 'docling': dict with optional keys 'use_ocr', 'extract_tables', and 'use_fallback' used when creating RobustExtractor.
+    
+    Side effects:
+        - Sets the environment variable CUDA_VISIBLE_DEVICES for the current process when gpu_devices is non-empty.
+        - Assigns a process-global extractor to WORKER_DOCLING (either CodeExtractor or RobustExtractor), which the worker relies on for document extraction.
+    """
     global WORKER_DOCLING
     import os
     
@@ -244,7 +314,25 @@ def _init_extraction_worker(gpu_devices, extraction_config):
 
 
 def _extract_document(task: DocumentTask, staging_dir: str) -> Dict[str, Any]:
-    """Extract a single document."""
+    """
+    Extract a single document into a staging JSON file by running the configured extractor and (optionally) attaching LaTeX source.
+    
+    This function uses the module-level extractor instance initialized in worker processes to extract text and structure from task.pdf_path, attempts to read task.latex_path if provided, and writes a staged JSON document into staging_dir. On success it returns the staged file path; on failure it returns an error message.
+    
+    Parameters:
+        task (DocumentTask): The document task containing document_id, pdf_path, optional latex_path, and metadata.
+        staging_dir (str): Directory where the per-document staging JSON will be written.
+    
+    Returns:
+        Dict[str, Any]: A result dictionary with:
+            - 'success' (bool): True on success, False on failure.
+            - 'document_id' (str): The task's document_id.
+            - 'staged_path' (str): Path to the written staging JSON (present when success is True).
+            - 'error' (str): Error message (present when success is False).
+    
+    Raises:
+        RuntimeError: If the module-level extractor worker is not initialized.
+    """
     global WORKER_DOCLING
     
     if WORKER_DOCLING is None:
@@ -296,14 +384,32 @@ def _extract_document(task: DocumentTask, staging_dir: str) -> Dict[str, Any]:
 
 
 def _init_embedding_worker(gpu_devices, arango_config, collections):
-    """Initialize embedding worker."""
+    """
+    Initialize per-process embedding resources.
+    
+    Sets up global WORKER_EMBEDDER and WORKER_DB_MANAGER for the current worker process. This includes:
+    - Selecting and exporting a CUDA_VISIBLE_DEVICES value derived from gpu_devices and the worker's multiprocessing index.
+    - Inserting the repository root into sys.path so local modules can be imported.
+    - Creating a JinaV4Embedder configured for CUDA with FP16 and predetermined chunking parameters.
+    - Creating an ArangoDBManager from arango_config and overriding its collections mapping with the provided collections.
+    
+    Parameters:
+        gpu_devices (Sequence[int] | None): Sequence of GPU device ids available to workers; if provided, one is chosen based on the worker index.
+        arango_config (Mapping): Configuration used to construct the ArangoDBManager.
+        collections (Mapping[str, str]): Mapping of logical collection names to concrete ArangoDB collection names; used to override the manager's collections.
+    
+    Side effects:
+        - Mutates module-level globals WORKER_EMBEDDER and WORKER_DB_MANAGER.
+        - Mutates the process environment variable CUDA_VISIBLE_DEVICES.
+        - Modifies sys.path for imports.
+    """
     global WORKER_EMBEDDER, WORKER_DB_MANAGER
     import os
     from core.framework.embedders import JinaV4Embedder
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+    from core.database.arango_db_manager import ArangoDBManager
     
     # Assign GPU
     worker_info = mp.current_process()
@@ -326,7 +432,23 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
 
 
 def _embed_and_store(staged_path: str) -> Dict[str, Any]:
-    """Embed and store a document."""
+    """
+    Embed the extracted text from a staged document and store paper, chunk, and embedding records in ArangoDB.
+    
+    Loads the staged JSON produced by the extraction phase, generates chunked embeddings via the worker embedder, and writes a paper record plus per-chunk records (text and embedding) inside a single ArangoDB transaction. The function acquires a per-document lock during the write, removes the staging file on success, and clears GPU memory before and after processing.
+    
+    Parameters:
+        staged_path (str): Path to the staging JSON file created by the extraction step (contains keys like `document_id`, `metadata`, and `extracted`).
+    
+    Returns:
+        Dict[str, Any]: Result object containing at minimum:
+          - `success` (bool): True on success, False on error.
+          - On success: `document_id` (str) and `num_chunks` (int).
+          - On failure: `error` (str) with a short description.
+    
+    Raises:
+        RuntimeError: If the module-level embedder or DB manager workers are not initialized.
+    """
     global WORKER_EMBEDDER, WORKER_DB_MANAGER
     import torch
     
@@ -386,8 +508,8 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
             )
             
             try:
-                # Store paper metadata
-                txn_db.collection(collections['papers']).insert({
+                # Store paper metadata with Tree-sitter symbols if available
+                paper_doc = {
                     '_key': sanitized_id,
                     'document_id': document_id,
                     'metadata': doc.get('metadata', {}),
@@ -395,7 +517,24 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
                     'processing_date': datetime.now().isoformat(),
                     'num_chunks': len(chunks),
                     'has_latex': extracted.get('has_latex', False)
-                }, overwrite=True)
+                }
+                
+                # Add repository field if this is GitHub data
+                if doc.get('metadata', {}).get('repo'):
+                    paper_doc['repository'] = doc['metadata']['repo']
+                
+                # Add Tree-sitter symbol data if available
+                if extracted.get('symbols'):
+                    paper_doc['symbols'] = extracted['symbols']
+                    paper_doc['symbol_hash'] = extracted.get('symbol_hash', '')
+                    paper_doc['code_metrics'] = extracted.get('code_metrics', {})
+                    paper_doc['code_structure'] = extracted.get('code_structure', {})
+                    paper_doc['language'] = extracted.get('language')
+                    paper_doc['has_tree_sitter'] = True
+                else:
+                    paper_doc['has_tree_sitter'] = False
+                
+                txn_db.collection(collections['papers']).insert(paper_doc, overwrite=True)
                 
                 # Store chunks and embeddings
                 for i, chunk in enumerate(chunks):
@@ -411,14 +550,29 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
                         'end_char': chunk.end_char
                     }, overwrite=True)
                     
-                    # Store embedding
-                    txn_db.collection(collections['embeddings']).insert({
+                    # Store embedding with symbol metadata for code files
+                    embedding_doc = {
                         '_key': f"{chunk_key}_emb",
                         'document_id': sanitized_id,
                         'chunk_id': chunk_key,
                         'vector': chunk.embedding.tolist(),
                         'model': 'jina-v4'
-                    }, overwrite=True)
+                    }
+                    
+                    # Add symbol metadata if this is code with Tree-sitter data
+                    if extracted.get('symbols'):
+                        embedding_doc['has_symbols'] = True
+                        embedding_doc['language'] = extracted.get('language')
+                        # Store a summary of symbols for this chunk's context
+                        # This helps the Jina v4 coding LoRA understand the code context
+                        embedding_doc['symbol_context'] = {
+                            'total_functions': len(extracted['symbols'].get('functions', [])),
+                            'total_classes': len(extracted['symbols'].get('classes', [])),
+                            'total_imports': len(extracted['symbols'].get('imports', [])),
+                            'complexity': extracted.get('code_metrics', {}).get('complexity', 0)
+                        }
+                    
+                    txn_db.collection(collections['embeddings']).insert(embedding_doc, overwrite=True)
                 
                 # Commit
                 txn_db.commit_transaction()

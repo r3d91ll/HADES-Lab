@@ -51,26 +51,49 @@ ARXIV_LATEX_BASE = Path("/bulk-store/arxiv-data/src")
 ARXIV_METADATA = Path("/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json")
 
 
-def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> List[Tuple[Path, str]]:
+def _normalize_yymm(yymm: str) -> tuple[int, int]:
+    """Normalize YYMM to (year, month) tuple for correct comparison."""
+    if len(yymm) != 4 or not yymm.isdigit():
+        raise ValueError(f"Invalid YYMM: {yymm}")
+    yy, mm = int(yymm[:2]), int(yymm[2:])
+    if not 1 <= mm <= 12:
+        raise ValueError(f"Invalid month in YYMM: {yymm}")
+    # Handle century: 90-99 = 1990s, 00-89 = 2000s
+    year = 1900 + yy if yy >= 90 else 2000 + yy
+    return (year, mm)
+
+
+def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501", seed: int | None = None) -> List[Tuple[Path, str]]:
     """
-    Collect paths to real ArXiv PDFs from the local repository.
+    Collect up to `target_count` ArXiv PDF file paths from the local ARXIV_PDF_BASE directory.
     
-    Args:
-        target_count: Number of papers to collect
-        start_year: YYMM to start from (default: 1501 = January 2015)
-        
+    Searches year-month subdirectories (numeric names) under ARXIV_PDF_BASE starting from `start_year` (YYMM). In each directory it samples PDFs (without replacement) until `target_count` entries are gathered. Each returned tuple contains the Path to the PDF and the arXiv identifier derived from the file stem (e.g., "1501.00001").
+    
+    Parameters:
+        target_count (int): Maximum number of papers to collect.
+        start_year (str): Inclusive YYMM directory name to start searching from (e.g., "1501" = January 2015).
+        seed (int | None): Optional RNG seed for reproducible sampling.
+    
     Returns:
-        List of (pdf_path, arxiv_id) tuples
+        List[Tuple[Path, str]]: List of (pdf_path, arxiv_id) tuples, length <= target_count.
+    
+    Raises:
+        ValueError: If no year-month directories are found at or after `start_year`.
     """
     logger.info(f"Collecting {target_count} ArXiv PDFs from {ARXIV_PDF_BASE}")
     
     papers = []
+    rng = random.Random(seed) if seed is not None else random
     
-    # Iterate through year-month directories
-    yymm_dirs = sorted([d for d in ARXIV_PDF_BASE.iterdir() if d.is_dir() and d.name.isdigit()])
+    # Iterate through year-month directories with proper century handling
+    yymm_dirs = sorted(
+        [d for d in ARXIV_PDF_BASE.iterdir() if d.is_dir() and d.name.isdigit()],
+        key=lambda d: _normalize_yymm(d.name)
+    )
     
-    # Filter to start from specified year
-    yymm_dirs = [d for d in yymm_dirs if d.name >= start_year]
+    # Filter to start from specified year (normalize century)
+    start_cutoff = _normalize_yymm(start_year)
+    yymm_dirs = [d for d in yymm_dirs if _normalize_yymm(d.name) >= start_cutoff]
     
     if not yymm_dirs:
         raise ValueError(f"No ArXiv directories found from {start_year} onwards in {ARXIV_PDF_BASE}")
@@ -87,7 +110,7 @@ def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> 
         if pdf_files:
             # Sample PDFs from this directory
             sample_size = min(len(pdf_files), target_count - len(papers))
-            sampled_pdfs = random.sample(pdf_files, sample_size) if sample_size < len(pdf_files) else pdf_files
+            sampled_pdfs = rng.sample(pdf_files, sample_size) if sample_size < len(pdf_files) else pdf_files
             
             for pdf_path in sampled_pdfs:
                 # Extract ArXiv ID from filename
@@ -105,7 +128,17 @@ def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> 
 
 def check_latex_availability(papers: List[Tuple[Path, str]]) -> Dict[str, Any]:
     """
-    Check how many papers have LaTeX sources available.
+    Return counts and percentage of papers that have LaTeX source directories with `.tex` files.
+    
+    Parameters:
+        papers (List[Tuple[Path, str]]): List of tuples (pdf_path, arxiv_id) where `arxiv_id` begins with YYMM.
+    
+    Returns:
+        dict: {
+            'total': int total number of papers,
+            'with_latex': int number of papers whose LaTeX directory exists and contains at least one `.tex` file,
+            'latex_percentage': float percentage (0-100) of papers with LaTeX sources (0 if papers list is empty)
+        }
     """
     latex_count = 0
     
@@ -126,9 +159,33 @@ def check_latex_availability(papers: List[Tuple[Path, str]]) -> Dict[str, Any]:
     }
 
 
-def run_arxiv_overnight_test(num_docs: int = 2000):
+def run_arxiv_overnight_test(num_docs: int = 2000, start_year: str = "1501"):
     """
-    Run overnight test with real ArXiv PDFs.
+    Run an end-to-end overnight performance and correctness test on real ArXiv PDFs.
+    
+    This function:
+    - Collects up to `num_docs` ArXiv PDF paths from the local ArXiv store.
+    - Optionally detects available LaTeX sources for each paper.
+    - Executes the document processing pipeline under two configurations (traditional chunking and late chunking), processing papers in batches.
+    - Aggregates per-document and per-run metrics (success/failure, chunk counts, processing/extraction/embedding times, throughput).
+    - Persists intermediate and final results to a timestamped JSON results file and emits detailed progress logs.
+    
+    Parameters:
+        num_docs (int): Maximum number of ArXiv papers to include in the test (default 2000).
+    
+    Returns:
+        dict: Aggregated results containing:
+          - 'corpus_info': metadata about the input corpus and LaTeX availability,
+          - 'test_runs': list of per-configuration summaries (metrics, failures, timing),
+          - 'summary': final summary with best configuration, best throughput, timestamps, and file paths.
+    
+    Side effects:
+    - Writes intermediate and final JSON results files and extensive logs.
+    - Reads PDF and optional LaTeX files from the configured ARXIV_PDF_BASE and ARXIV_LATEX_BASE paths.
+    - May perform GPU memory queries if PyTorch is available.
+    
+    Note:
+    - Exceptions raised during paper collection or other unexpected failures will propagate after logging; per-batch processing errors are captured and recorded without aborting the entire test run.
     """
     logger.info("="*70)
     logger.info(f"OVERNIGHT ARXIV TEST - {num_docs} Real PDFs")
@@ -143,7 +200,7 @@ def run_arxiv_overnight_test(num_docs: int = 2000):
     logger.info("="*50)
     
     try:
-        papers = collect_arxiv_papers(num_docs)
+        papers = collect_arxiv_papers(num_docs, start_year=start_year)
     except Exception as e:
         logger.error(f"Failed to collect papers: {e}")
         raise
@@ -417,7 +474,7 @@ if __name__ == "__main__":
             logger.error("Please ensure ArXiv data is mounted at /bulk-store/arxiv-data/")
             sys.exit(1)
         
-        results = run_arxiv_overnight_test(args.docs)
+        results = run_arxiv_overnight_test(args.docs, start_year=args.start_year)
         
         print(f"\n✅ Test completed successfully!")
         print(f"📊 Results: {results['summary']['results_file']}")

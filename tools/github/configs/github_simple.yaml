@@ -42,26 +42,60 @@ staging:
 processing:
   source: 'github'
   
+  # Repositories to process (for word2vec evolution experiment)
+  repositories:
+    - 'dav/word2vec'        # word2vec (2013) - community implementation
+    - 'piskvorky/gensim'    # doc2vec (2014) - pure conveyance (no original code!)
+    - 'tech-srl/code2vec'   # code2vec (2018) - official implementation
+  
   # GitHub-specific settings
   github:
-    clone_dir: '/tmp/github_repos'
-    cleanup_after_processing: true
+    clone_dir: '/bulk-store/git'
+    cleanup_after_processing: false
     
     # File filtering
     code_extensions:
+      # Programming languages
       - .py
       - .js
       - .ts
+      - .jsx
+      - .tsx
       - .java
       - .go
       - .rs
       - .cpp
       - .c
       - .h
-      - .md
+      - .hpp
+      - .cc
+      - .rb
+      - .php
+      - .swift
+      - .kt
+      - .scala
+      - .lua
+      - .r
+      - .m
+      - .mm
+      - .sh
+      - .bash
+      # Config files
+      - .json
       - .yaml
       - .yml
-      - .json
+      - .toml
+      - .xml
+      - .ini
+      - .cfg
+      - .conf
+      - .properties
+      - .env
+      # Documentation
+      - .md
+      - .markdown
+      - .rst
+      - .txt
     
     skip_dirs:
       - .git
