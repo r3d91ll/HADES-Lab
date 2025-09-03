@@ -126,7 +126,7 @@ def test_c_files():
     logger.info(f"Embedding success: {results.get('embedding_success', 0)}")
     
     # Query database for C files with symbols
-    from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+    from core.database.arango_db_manager import ArangoDBManager
     
     db_manager = ArangoDBManager(config['arango'])
     

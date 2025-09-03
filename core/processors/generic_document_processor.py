@@ -409,7 +409,7 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+    from core.database.arango_db_manager import ArangoDBManager
     
     # Assign GPU
     worker_info = mp.current_process()

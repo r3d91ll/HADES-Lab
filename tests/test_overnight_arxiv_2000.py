@@ -51,7 +51,19 @@ ARXIV_LATEX_BASE = Path("/bulk-store/arxiv-data/src")
 ARXIV_METADATA = Path("/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json")
 
 
-def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> List[Tuple[Path, str]]:
+def _normalize_yymm(yymm: str) -> tuple[int, int]:
+    """Normalize YYMM to (year, month) tuple for correct comparison."""
+    if len(yymm) != 4 or not yymm.isdigit():
+        raise ValueError(f"Invalid YYMM: {yymm}")
+    yy, mm = int(yymm[:2]), int(yymm[2:])
+    if not 1 <= mm <= 12:
+        raise ValueError(f"Invalid month in YYMM: {yymm}")
+    # Handle century: 90-99 = 1990s, 00-89 = 2000s
+    year = 1900 + yy if yy >= 90 else 2000 + yy
+    return (year, mm)
+
+
+def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501", seed: int | None = None) -> List[Tuple[Path, str]]:
     """
     Collect up to `target_count` ArXiv PDF file paths from the local ARXIV_PDF_BASE directory.
     
@@ -60,6 +72,7 @@ def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> 
     Parameters:
         target_count (int): Maximum number of papers to collect.
         start_year (str): Inclusive YYMM directory name to start searching from (e.g., "1501" = January 2015).
+        seed (int | None): Optional RNG seed for reproducible sampling.
     
     Returns:
         List[Tuple[Path, str]]: List of (pdf_path, arxiv_id) tuples, length <= target_count.
@@ -70,12 +83,17 @@ def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> 
     logger.info(f"Collecting {target_count} ArXiv PDFs from {ARXIV_PDF_BASE}")
     
     papers = []
+    rng = random.Random(seed) if seed is not None else random
     
-    # Iterate through year-month directories
-    yymm_dirs = sorted([d for d in ARXIV_PDF_BASE.iterdir() if d.is_dir() and d.name.isdigit()])
+    # Iterate through year-month directories with proper century handling
+    yymm_dirs = sorted(
+        [d for d in ARXIV_PDF_BASE.iterdir() if d.is_dir() and d.name.isdigit()],
+        key=lambda d: _normalize_yymm(d.name)
+    )
     
-    # Filter to start from specified year
-    yymm_dirs = [d for d in yymm_dirs if d.name >= start_year]
+    # Filter to start from specified year (normalize century)
+    start_cutoff = _normalize_yymm(start_year)
+    yymm_dirs = [d for d in yymm_dirs if _normalize_yymm(d.name) >= start_cutoff]
     
     if not yymm_dirs:
         raise ValueError(f"No ArXiv directories found from {start_year} onwards in {ARXIV_PDF_BASE}")
@@ -92,7 +110,7 @@ def collect_arxiv_papers(target_count: int = 2000, start_year: str = "1501") -> 
         if pdf_files:
             # Sample PDFs from this directory
             sample_size = min(len(pdf_files), target_count - len(papers))
-            sampled_pdfs = random.sample(pdf_files, sample_size) if sample_size < len(pdf_files) else pdf_files
+            sampled_pdfs = rng.sample(pdf_files, sample_size) if sample_size < len(pdf_files) else pdf_files
             
             for pdf_path in sampled_pdfs:
                 # Extract ArXiv ID from filename
@@ -141,7 +159,7 @@ def check_latex_availability(papers: List[Tuple[Path, str]]) -> Dict[str, Any]:
     }
 
 
-def run_arxiv_overnight_test(num_docs: int = 2000):
+def run_arxiv_overnight_test(num_docs: int = 2000, start_year: str = "1501"):
     """
     Run an end-to-end overnight performance and correctness test on real ArXiv PDFs.
     
@@ -182,7 +200,7 @@ def run_arxiv_overnight_test(num_docs: int = 2000):
     logger.info("="*50)
     
     try:
-        papers = collect_arxiv_papers(num_docs)
+        papers = collect_arxiv_papers(num_docs, start_year=start_year)
     except Exception as e:
         logger.error(f"Failed to collect papers: {e}")
         raise
@@ -456,7 +474,7 @@ if __name__ == "__main__":
             logger.error("Please ensure ArXiv data is mounted at /bulk-store/arxiv-data/")
             sys.exit(1)
         
-        results = run_arxiv_overnight_test(args.docs)
+        results = run_arxiv_overnight_test(args.docs, start_year=args.start_year)
         
         print(f"\n✅ Test completed successfully!")
         print(f"📊 Results: {results['summary']['results_file']}")

@@ -130,11 +130,10 @@ class TokenBasedChunking(ChunkingStrategy):
         
         # Validate tokenizer interface if provided
         if tokenizer is not None:
-            if not (callable(tokenizer) or 
-                    (hasattr(tokenizer, 'tokenize') and hasattr(tokenizer, 'convert_tokens_to_string'))):
+            if not (callable(tokenizer) or hasattr(tokenizer, 'tokenize')):
                 raise TypeError(
                     "Tokenizer must be either a callable that returns List[str], "
-                    "or an object with .tokenize() and .convert_tokens_to_string() methods"
+                    "or an object with .tokenize() method (and optionally .convert_tokens_to_string())"
                 )
         
         self.tokenizer = tokenizer
@@ -186,9 +185,12 @@ class TokenBasedChunking(ChunkingStrategy):
                 if callable(self.tokenizer):
                     # For callable tokenizers, join tokens with space
                     chunk_text = ' '.join(chunk_tokens)
-                else:
-                    # For tokenizer objects, use convert_tokens_to_string method
+                elif hasattr(self.tokenizer, 'convert_tokens_to_string'):
+                    # For tokenizer objects with convert_tokens_to_string method
                     chunk_text = self.tokenizer.convert_tokens_to_string(chunk_tokens)
+                else:
+                    # For tokenizer objects without convert_tokens_to_string, just join
+                    chunk_text = ' '.join(chunk_tokens)
             else:
                 chunk_text = ' '.join(chunk_tokens)
             

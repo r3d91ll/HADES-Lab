@@ -246,9 +246,12 @@ class ArXivDocumentManager:
         if not year_month.isdigit() or len(year_month) != 4:
             return False
         
-        # Check paper number is 4-6 digits (or with version like 12345v2)
-        paper_num_base = paper_num.rstrip('v0123456789')
-        if not paper_num_base.isdigit() or not (4 <= len(paper_num_base) <= 6):
+        # Check paper number is 4-6 digits, optionally followed by version like v2
+        base, _, version = paper_num.partition('v')
+        if not base.isdigit() or not (4 <= len(base) <= 6):
+            return False
+        # If there's a version, validate it's numeric
+        if version and not version.isdigit():
             return False
         
         return True

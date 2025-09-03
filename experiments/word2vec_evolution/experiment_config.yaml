@@ -110,4 +110,3 @@ outputs:
   - bridge_points/      # Detected theory-practice bridges
   - evolution_graph/    # Temporal evolution visualization
   - validation_report/  # Metrics and hypothesis testing results
-  
