@@ -14,7 +14,7 @@ through our processing pipeline.
 
 import re
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable, Union
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import numpy as np
@@ -108,7 +108,7 @@ class TokenBasedChunking(ChunkingStrategy):
         self,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
-        tokenizer: Optional[Any] = None
+        tokenizer: Optional[Union[Callable[[str], List[str]], Any]] = None
     ):
         """
         Initialize a token-based chunking strategy.
@@ -116,13 +116,27 @@ class TokenBasedChunking(ChunkingStrategy):
         Parameters:
             chunk_size (int): Target number of tokens per chunk.
             chunk_overlap (int): Number of tokens to overlap between consecutive chunks; must be less than chunk_size.
-            tokenizer (Optional[Callable[[str], List[str]]]): Optional function that tokenizes input text. If None, a simple whitespace split is used.
+            tokenizer: Optional tokenizer that can be either:
+                - A callable function that takes a string and returns a list of tokens: Callable[[str], List[str]]
+                - A tokenizer-like object with .tokenize(text) and .convert_tokens_to_string(tokens) methods
+                - None (uses simple whitespace split)
         
         Raises:
             ValueError: If `chunk_overlap` is greater than or equal to `chunk_size`.
+            TypeError: If tokenizer is provided but doesn't support either expected interface.
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        
+        # Validate tokenizer interface if provided
+        if tokenizer is not None:
+            if not (callable(tokenizer) or 
+                    (hasattr(tokenizer, 'tokenize') and hasattr(tokenizer, 'convert_tokens_to_string'))):
+                raise TypeError(
+                    "Tokenizer must be either a callable that returns List[str], "
+                    "or an object with .tokenize() and .convert_tokens_to_string() methods"
+                )
+        
         self.tokenizer = tokenizer
         
         if chunk_overlap >= chunk_size:
@@ -145,9 +159,14 @@ class TokenBasedChunking(ChunkingStrategy):
         """
         text = self._clean_text(text)
         
-        # Tokenize text
+        # Tokenize text using appropriate interface
         if self.tokenizer:
-            tokens = self.tokenizer.tokenize(text)
+            if callable(self.tokenizer):
+                # Tokenizer is a callable function
+                tokens = self.tokenizer(text)
+            else:
+                # Tokenizer is an object with .tokenize() method
+                tokens = self.tokenizer.tokenize(text)
         else:
             # Simple word tokenization
             tokens = text.split()
@@ -164,7 +183,12 @@ class TokenBasedChunking(ChunkingStrategy):
             
             # Reconstruct text from tokens
             if self.tokenizer:
-                chunk_text = self.tokenizer.convert_tokens_to_string(chunk_tokens)
+                if callable(self.tokenizer):
+                    # For callable tokenizers, join tokens with space
+                    chunk_text = ' '.join(chunk_tokens)
+                else:
+                    # For tokenizer objects, use convert_tokens_to_string method
+                    chunk_text = self.tokenizer.convert_tokens_to_string(chunk_tokens)
             else:
                 chunk_text = ' '.join(chunk_tokens)
             
