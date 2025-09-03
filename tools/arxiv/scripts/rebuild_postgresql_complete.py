@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 class PostgreSQLRebuilder:
     def __init__(self):
+        """
+        Initialize the PostgreSQLRebuilder instance.
+        
+        Sets PostgreSQL connection configuration (reads password from the PGPASSWORD environment variable), default file system paths for the metadata JSONL snapshot, PDF archive, and LaTeX archive, and initializes run statistics counters (metadata_imported, pdfs_found, latex_found, signal_files, errors, start_time, end_time). Logs an initialization message.
+        """
         self.pg_config = {
             'host': 'localhost',
             'database': 'arxiv', 
@@ -56,11 +61,30 @@ class PostgreSQLRebuilder:
         logger.info("PostgreSQL Rebuilder initialized with complete metadata support")
     
     def get_database_connection(self):
-        """Get PostgreSQL database connection."""
+        """
+        Return a new psycopg2 connection to the configured PostgreSQL database.
+        
+        Uses the rebuilder's stored pg_config to open the connection. The caller is
+        responsible for closing the returned connection.
+        """
         return psycopg2.connect(**self.pg_config)
     
     def parse_date(self, date_str: str) -> Optional[datetime.date]:
-        """Parse various date formats from ArXiv data."""
+        """
+        Parse a date string from ArXiv metadata into a datetime.date.
+        
+        Accepts common ArXiv date representations and returns a date object on success.
+        Handled inputs include:
+        - ISO date: "YYYY-MM-DD"
+        - GMT timestamps like "Mon, 2 Apr 2007 19:18:42 GMT"
+        The function also attempts to handle other common variants (e.g. "YYYY-MM-DD HH:MM:SS", "YYYY/MM/DD", "MM/DD/YYYY") but will return None if parsing fails.
+        
+        Parameters:
+            date_str (str): Date/time string from metadata; falsy values return None.
+        
+        Returns:
+            datetime.date | None: Parsed date or None when input is falsy or cannot be parsed.
+        """
         if not date_str:
             return None
         
@@ -88,13 +112,24 @@ class PostgreSQLRebuilder:
         return None
     
     def extract_primary_category(self, categories: str) -> Optional[str]:
-        """Extract primary category (first category) from categories string."""
+        """
+        Return the first (primary) category token from a space-delimited categories string.
+        
+        If `categories` is falsy or contains no tokens, returns None. Example input: "cs.CL cs.AI".
+        """
         if not categories:
             return None
         return categories.split()[0] if categories.split() else None
     
     def import_metadata_from_snapshot(self):
-        """Import all metadata from arxiv-metadata-oai-snapshot.json with complete fields."""
+        """
+        Import arXiv metadata from the JSONL snapshot file (self.metadata_file) and upsert records into the papers table.
+        
+        Reads the line-delimited JSON snapshot file, parses each paper record, derives submission/update dates, primary category, version counts, authors_parsed, and partitioning fields (year, month, yymm). Records are batched and bulk-upserted into the database; PDF/LaTeX fields are left as placeholders for later phases. Updates self.stats (including 'metadata_imported' and increments 'errors' for malformed or processing failures).
+        
+        Returns:
+            bool: True on successful completion, False if the metadata file is missing or a fatal error occurs during import.
+        """
         logger.info("Starting complete metadata import...")
         
         if not self.metadata_file.exists():
@@ -193,7 +228,30 @@ class PostgreSQLRebuilder:
         return True
     
     def _insert_metadata_batch(self, conn, batch):
-        """Insert a batch of metadata records."""
+        """
+        Insert or update a batch of paper metadata rows into the `papers` table.
+        
+        Performs a bulk upsert: inserts each record in `batch` and, on arxiv_id conflict,
+        updates the existing row's metadata fields. The operation is executed inside a
+        transaction using the provided database connection.
+        
+        Parameters:
+            batch (Iterable[tuple]): Iterable of tuples whose values must match the
+                following column order:
+                (arxiv_id, title, abstract, primary_category,
+                 submission_date, update_date, year, month, yymm,
+                 doi, license, journal_ref,
+                 authors, categories, comments, report_number,
+                 versions_count, latest_version, authors_parsed,
+                 has_pdf, pdf_path, has_latex, latex_path)
+        
+        Notes:
+            - `conn` is expected to be a psycopg2 connection and is used as the
+              transactional context; it is intentionally not documented as a parameter
+              here because it represents the database client/service.
+            - The function does not return a value; database errors propagate from the
+              underlying DB driver.
+        """
         insert_sql = """
             INSERT INTO papers (
                 arxiv_id, title, abstract, primary_category,
@@ -229,7 +287,14 @@ class PostgreSQLRebuilder:
                 execute_values(cur, insert_sql, batch, template=None, page_size=100)
     
     def scan_and_update_pdfs(self):
-        """Scan PDF directory and update database."""
+        """
+        Scan the configured PDF directory tree and update the papers table with PDF presence, path, and size.
+        
+        Walks year-month subdirectories under self.pdf_dir, finds files ending with `.pdf`, derives the arXiv identifier by stripping version suffix (e.g. `1234.5678v2 -> 1234.5678`), and batches updates to the database via self._update_pdf_batch. Updates self.stats['pdfs_found'] as batches are applied.
+        
+        Returns:
+            bool: True on successful scan and update, False if the configured PDF directory does not exist.
+        """
         logger.info("Scanning PDFs and updating database...")
         
         if not self.pdf_dir.exists():
@@ -265,7 +330,21 @@ class PostgreSQLRebuilder:
         return True
     
     def _update_pdf_batch(self, pdf_updates):
-        """Update PDF information for a batch."""
+        """
+        Update a batch of papers' PDF metadata in the database.
+        
+        Parameters:
+            pdf_updates (Iterable[tuple]): An iterable of 4-tuples (has_pdf, pdf_path, pdf_size_bytes, arxiv_id)
+                where `has_pdf` is a bool, `pdf_path` is the storage path or None, `pdf_size_bytes` is an int
+                (or None), and `arxiv_id` is the paper identifier.
+        
+        Behavior:
+            - Performs a grouped UPDATE for each tuple, upserting the has_pdf, pdf_path, and pdf_size_bytes
+              fields on the papers table by arxiv_id.
+            - Increments self.stats['pdfs_found'] by the number of updates applied.
+            - On exception, increments self.stats['errors'] and does not re-raise.
+            - Always closes the database connection before returning.
+        """
         conn = self.get_database_connection()
         try:
             with conn:
@@ -288,7 +367,22 @@ class PostgreSQLRebuilder:
             conn.close()
     
     def parse_latex_filename(self, filename: str, directory: str) -> Optional[str]:
-        """Parse LaTeX filename to extract ArXiv ID across all format changes."""
+        """
+        Extract an arXiv identifier from a LaTeX-related filename, supporting legacy and modern naming schemes.
+        
+        Detailed behavior:
+        - Accepts filenames ending with ".gz" (LaTeX source) or ".pdf" (signal file).
+        - If the name uses the old pre-2007 concatenated form (e.g. "astro-ph0001001"), converts it to the canonical slash form ("astro-ph/0001.001").
+        - Leaves already-modern forms (e.g. "YYMM.NNNN" or "category/YYMM.NNNN") unchanged.
+        - Returns None for filenames that do not end with ".gz" or ".pdf" or cannot be parsed.
+        
+        Parameters:
+        - filename: The file's basename (including extension) to parse.
+        - directory: The containing directory path (provided for context; not required for parsing).
+        
+        Returns:
+        - The normalized arXiv identifier string on success, or None if the filename cannot be interpreted as an arXiv ID.
+        """
         
         if filename.endswith('.gz'):
             # LaTeX source available
@@ -326,7 +420,14 @@ class PostgreSQLRebuilder:
         return None
 
     def scan_and_update_latex(self):
-        """Scan LaTeX directory and update database with proper format handling."""
+        """
+        Scan the LaTeX data directory, detect LaTeX source files and "signal" PDFs, and update the papers table accordingly.
+        
+        This scans year-month subdirectories under self.latex_dir. Files ending with `.gz` are treated as LaTeX sources (sets has_latex and latex_path); files ending with `.pdf` are treated as signals that no LaTeX source is available (sets has_latex=False). Records are accumulated and applied in batches via self._update_latex_batch; counters in self.stats ('latex_found' and 'signal_files') are updated by those batch calls.
+        
+        Returns:
+            bool: True on successful completion; False if the configured LaTeX directory does not exist.
+        """
         logger.info("Scanning LaTeX files and updating database...")
         
         if not self.latex_dir.exists():
@@ -382,7 +483,24 @@ class PostgreSQLRebuilder:
         return True
     
     def _update_latex_batch(self, updates, is_latex: bool):
-        """Update LaTeX information for a batch."""
+        """
+        Apply a batch of LaTeX presence/path updates to the papers table.
+        
+        Parameters:
+            updates (Iterable[tuple]): Iterable of tuples matching the SQL UPDATE parameters:
+                (has_latex: bool, latex_path: Optional[str], arxiv_id: str).
+                For LaTeX source files use (True, '<path>', '<id>'); for signal PDF-only markers use (False, None, '<id>').
+            is_latex (bool): True when the batch represents actual LaTeX sources (increments latex_found),
+                False when the batch represents signal files with no LaTeX (increments signal_files).
+        
+        Side effects:
+            - Updates rows in the database table `papers` setting has_latex and latex_path by arxiv_id.
+            - Increments self.stats['latex_found'] or self.stats['signal_files'] by the batch size.
+            - On error logs the exception and increments self.stats['errors'].
+        
+        Returns:
+            None
+        """
         conn = self.get_database_connection()
         try:
             with conn:
@@ -406,7 +524,16 @@ class PostgreSQLRebuilder:
             conn.close()
     
     def print_final_summary(self):
-        """Print comprehensive rebuild summary."""
+        """
+        Print a concise end-of-run summary for the rebuild and record its end time.
+        
+        Updates self.stats['end_time'], computes total duration from self.stats['start_time'], prints a human-readable summary of counts collected during the run (metadata imported, PDFs found, LaTeX found, signal files, errors), and queries the database for final aggregate counts (total papers, papers with PDF, with/without LaTeX, computer-science papers, and papers from 2020 onward) which it prints with percentages.
+        
+        Side effects:
+        - Mutates self.stats by setting 'end_time'.
+        - Writes summary output to stdout.
+        - Opens a database connection to read final aggregate statistics; logs an error on exception but does not raise it.
+        """
         self.stats['end_time'] = datetime.now()
         duration = self.stats['end_time'] - self.stats['start_time'] if self.stats['start_time'] else None
         
@@ -484,6 +611,14 @@ class PostgreSQLRebuilder:
 
 
 def main():
+    """
+    Entry point for the PostgreSQL ArXiv rebuild CLI.
+    
+    Checks that the PGPASSWORD environment variable is set, constructs a PostgreSQLRebuilder, prints startup guidance, runs the full rebuild (metadata import, PDF scan, LaTeX scan), and prints a final success/failure message.
+    
+    Returns:
+        int: Process exit code — 0 on success, 1 on failure or when required environment is missing.
+    """
     if not os.getenv('PGPASSWORD'):
         print("❌ PGPASSWORD environment variable required")
         return 1

@@ -24,6 +24,15 @@ logger = logging.getLogger(__name__)
 
 class PDFScanner:
     def __init__(self, pdf_base_dir: str = "/bulk-store/arxiv-data/pdf"):
+        """
+        Initialize a PDFScanner.
+        
+        Parameters:
+            pdf_base_dir (str): Path to the root directory containing PDFs organized by year/month (default "/bulk-store/arxiv-data/pdf").
+        
+        Description:
+            Sets the base directory (as a Path), prepares an empty mapping `pdf_map` that will map arXiv IDs to file metadata, and initializes `scan_stats` counters and timestamp placeholders used to track progress and results of a directory scan.
+        """
         self.pdf_base_dir = Path(pdf_base_dir)
         self.pdf_map = {}
         self.scan_stats = {
@@ -36,12 +45,13 @@ class PDFScanner:
 
     def extract_arxiv_id_from_filename(self, filename: str) -> str:
         """
-        Extract ArXiv ID from PDF filename.
-
-        Expected formats:
-        - 2508.21038.pdf -> 2508.21038
-        - 1234.5678v1.pdf -> 1234.5678
-        - cs-LG-0012345.pdf -> cs-LG/0012345 (old format)
+        Return the normalized ArXiv identifier derived from a PDF filename.
+        
+        Recognizes common filename patterns and normalizes them to canonical ArXiv IDs:
+        - Modern numeric IDs like `2508.21038.pdf` or `1234.56789v1.pdf` -> `2508.21038`, `1234.56789` (strips `.pdf` and trailing `vN`).
+        - Legacy category-style names like `cs-LG-0012345.pdf` -> `cs-LG/0012345` (joins category parts with `-` and replaces final `-` with `/`).
+        
+        If the filename does not match a recognized pattern, the function logs a warning and returns the filename base (filename with `.pdf` removed and any trailing `vN` stripped).
         """
         # Remove .pdf extension
         base_name = filename.replace('.pdf', '')
@@ -67,10 +77,22 @@ class PDFScanner:
 
     def scan_pdf_directory(self) -> dict[str, dict]:
         """
-        Scan the PDF directory structure and build a map of available PDFs.
-
+        Scan the configured PDF base directory and build a map of discovered PDFs keyed by ArXiv ID.
+        
+        Scans each subdirectory of self.pdf_base_dir whose name matches four digits (YYMM), enumerates files with a .pdf extension, and extracts an ArXiv ID from each filename. For each unique ArXiv ID it records a metadata entry in self.pdf_map with keys:
+          - path: string filesystem path to the PDF
+          - size: file size in bytes
+          - size_mb: file size in megabytes (rounded to 2 decimals)
+          - year_month: the scanned subdirectory name
+          - filename: the original PDF filename
+        
+        Side effects:
+          - Updates self.pdf_map with discovered entries.
+          - Updates self.scan_stats: increments 'directories_scanned', 'pdfs_found', sets 'scan_start_time' and 'scan_end_time', and increments 'invalid_filenames' when a file cannot be processed.
+          - Skips non-directory entries, subdirectories not matching the YYMM pattern, and duplicate ArXiv IDs (duplicates are not added).
+        
         Returns:
-            Dictionary mapping arxiv_id -> {path, size, year_month, filename}
+          dict: Mapping from arxiv_id (str) to the metadata dict described above.
         """
         logger.info(f"Starting PDF scan of {self.pdf_base_dir}")
         self.scan_stats['scan_start_time'] = datetime.now()
@@ -122,7 +144,20 @@ class PDFScanner:
         return self.pdf_map
 
     def save_pdf_map(self, output_file: str = "pdf_scan_results.json"):
-        """Save the PDF map to a JSON file for later use."""
+        """
+        Serialize the current PDF scan results to a JSON file and return the written path.
+        
+        The JSON contains:
+        - scan_timestamp: current time in timezone-aware ISO format,
+        - scan_stats: a copy of the scanner's stats with scan_start_time and scan_end_time converted to timezone-aware ISO strings (if present),
+        - pdf_map: the in-memory mapping of arXiv IDs to file metadata.
+        
+        Parameters:
+            output_file (str): Path where the JSON will be written (default: "pdf_scan_results.json").
+        
+        Returns:
+            Path: Path object for the file that was written.
+        """
         output_path = Path(output_file)
 
         # Convert datetime objects to timezone-aware ISO format strings for JSON serialization
@@ -145,7 +180,13 @@ class PDFScanner:
         return output_path
 
     def get_year_month_distribution(self) -> dict[str, int]:
-        """Get distribution of papers by year-month."""
+        """
+        Return a mapping of year-month to the count of PDFs found for that period.
+        
+        Returns:
+            dict[str, int]: Sorted dictionary where keys are year-month strings (as stored in each PDF entry's 'year_month')
+                            and values are the number of PDFs for that year-month.
+        """
         distribution = {}
         for arxiv_id, info in self.pdf_map.items():
             year_month = info['year_month']
@@ -154,7 +195,14 @@ class PDFScanner:
         return dict(sorted(distribution.items()))
 
     def print_scan_summary(self):
-        """Print a summary of the scan results."""
+        """
+        Print a human-readable summary of the most recent scan to standard output.
+        
+        Includes totals (PDFs found, directories scanned, invalid filenames), scan duration
+        (if start and end times are available), distribution of PDFs by year-month, and
+        size statistics (total size in GB and average PDF size in MB). Uses the
+        instance's scan_stats and pdf_map for its calculations. Does not return a value.
+        """
         print(f"\n{'='*60}")
         print("PDF SCAN SUMMARY")
         print(f"{'='*60}")
@@ -183,6 +231,13 @@ class PDFScanner:
 
 
 def main():
+    """
+    Run a full PDFScanner workflow: scan the PDF repository, print a summary, and persist results.
+    
+    This entry-point creates a PDFScanner with the module's default base directory, performs a directory scan to build the map of discovered PDFs, prints a human-readable summary of the scan, and saves the serialized scan results to a fixed JSON path (/home/todd/olympus/HADES-Lab/tools/arxiv/logs/pdf_scan_results.json). It also prints the output file path and the count of unique PDFs found.
+    
+    No parameters and no return value; side effects include logging, console output, and writing the JSON results file.
+    """
     scanner = PDFScanner()
 
     # Scan the PDF directory

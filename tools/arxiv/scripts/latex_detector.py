@@ -45,18 +45,29 @@ class LaTeXStatus:
 
 class LaTeXDetector:
     def __init__(self, latex_base_dir: str = "/bulk-store/arxiv-data/latex"):
+        """
+        Initialize the LaTeXDetector.
+        
+        Parameters:
+            latex_base_dir (str): Path to the root directory that contains LaTeX archives organized by year/month (default: "/bulk-store/arxiv-data/latex"). Converted to a pathlib.Path.
+        
+        Notes:
+            - api_delay (float) is set to the number of seconds to wait between ArXiv API calls (defaults to 3.0).
+            - last_api_call is initialized to 0 and used to enforce rate limiting.
+        """
         self.latex_base_dir = Path(latex_base_dir)
         self.api_delay = 3.0  # Respect ArXiv API rate limits
         self.last_api_call = 0
         
     def check_local_latex_status(self, arxiv_id: str, year_month: str) -> LaTeXStatus:
         """
-        Check local LaTeX status for a paper.
+        Determine local LaTeX availability for a given arXiv paper.
         
-        Returns LaTeXStatus with:
-        - has_latex=True if .tar.gz exists locally
-        - has_latex=False if .pdf signal file exists (no LaTeX upstream)
-        - has_latex=None if no local information available
+        Checks the detector's latex_base_dir/year_month for two local indicators:
+        - a LaTeX archive named "{arxiv_id}.tar.gz" — returns LaTeXStatus with has_latex=True, latex_path set, status_source="local_file", and file_size populated.
+        - a signal file named "{arxiv_id}.pdf" — interpreted as "no LaTeX upstream"; returns has_latex=False and status_source="signal_file".
+        
+        If neither file is present, returns LaTeXStatus with has_latex=None and status_source="unknown".
         """
         latex_dir = self.latex_base_dir / year_month
         
@@ -90,7 +101,16 @@ class LaTeXDetector:
     
     def check_arxiv_api_latex(self, arxiv_id: str) -> LaTeXStatus:
         """
-        Check ArXiv API to see if LaTeX source is available for a paper.
+        Check the arXiv API to determine whether source (LaTeX) tarball is available for the given paper.
+        
+        Performs a rate-limited HTTP query to the arXiv Atom API for the provided arXiv identifier, parses the returned entry (if any) and inspects its links for a MIME type of "application/x-eprint-tar". Behavior summary:
+        - If a 200 response contains an entry and a link with type "application/x-eprint-tar" is present, returns has_latex=True and status_source="api_check".
+        - If a 200 response contains an entry but no such link, returns has_latex=False and status_source="api_check".
+        - If the paper is not found in the API response, returns has_latex=False, status_source="api_check", and an explanatory error_message.
+        - If the HTTP response status is not 200 or an exception occurs (including network or XML parse errors), returns has_latex=None, status_source="api_unavailable", and an error_message describing the problem.
+        
+        Returns:
+            LaTeXStatus: Result object containing arxiv_id, has_latex (True/False/None), status_source, and optional error_message.
         """
         # Rate limiting
         now = time.time()
@@ -152,14 +172,20 @@ class LaTeXDetector:
     
     def detect_latex_status_batch(self, pdf_list: List[Dict], max_api_calls: int = 200) -> Dict[str, LaTeXStatus]:
         """
-        Detect LaTeX status for a batch of PDFs.
+        Detect LaTeX availability for a batch of papers by performing local checks first and optional ArXiv API queries for unresolved items.
         
-        Args:
-            pdf_list: List of PDF info dicts with 'arxiv_id' and 'year_month'
-            max_api_calls: Maximum number of API calls to make (for rate limiting)
+        This performs a two-phase detection:
+        1. Local check: inspects local LaTeX archives and signal files for each entry in pdf_list.
+        2. API check: for items still unknown, queries the ArXiv API up to max_api_calls to determine LaTeX availability.
+        
+        Parameters:
+            pdf_list (List[Dict]): Iterable of dicts describing papers. Each dict must contain:
+                - 'arxiv_id' (str): the paper identifier
+                - 'year_month' (str): the year/month folder name used for local lookup
+            max_api_calls (int): Maximum number of ArXiv API requests to perform for unknown papers.
         
         Returns:
-            Dictionary mapping arxiv_id -> LaTeXStatus
+            Dict[str, LaTeXStatus]: Mapping from arXiv_id to the detected LaTeXStatus. Statuses come from either local checks or API checks (when performed).
         """
         results = {}
         api_calls_made = 0
@@ -197,7 +223,19 @@ class LaTeXDetector:
         return results
     
     def save_latex_status_results(self, results: Dict[str, LaTeXStatus], output_file: str):
-        """Save LaTeX status results to JSON file."""
+        """
+        Write LaTeX detection results to a JSON file and print a concise summary.
+        
+        Parameters:
+            results (Dict[str, LaTeXStatus]): Mapping from arXiv identifier to LaTeXStatus objects describing availability,
+                source, local path, file size, and any error message.
+            output_file (str): Path to the JSON file to write.
+        
+        Description:
+            Serializes the provided results to JSON (including a detection timestamp), computes summary statistics
+            (counts of total, has_latex, no_latex, unknown, and source breakdowns), writes the JSON to `output_file`,
+            and prints a human-readable summary to stdout.
+        """
         
         # Convert LaTeXStatus objects to dict
         serializable_results = {}
@@ -251,6 +289,21 @@ class LaTeXDetector:
 
 def main():
     # Load the PDF sample
+    """
+    Main entry point for the LaTeX Status Detector script.
+    
+    Loads a JSON sample of PDFs, runs the LaTeX detection workflow, and writes a JSON report.
+    
+    Behavior:
+    - Expects a sample file at /home/todd/olympus/HADES-Lab/tools/arxiv/logs/pdf_sample_2000.json containing a "sample_pdfs" list; logs an error and returns early if the file is missing.
+    - Instantiates LaTeXDetector and runs detect_latex_status_batch on the loaded list (allows up to 500 ArXiv API checks).
+    - Persists results to /home/todd/olympus/HADES-Lab/tools/arxiv/logs/latex_status_results.json via LaTeXDetector.save_latex_status_results.
+    - Prints completion messages to stdout.
+    
+    Side effects:
+    - Reads from and writes to fixed filesystem paths described above.
+    - May perform network requests when querying the arXiv API during detection.
+    """
     sample_file = "/home/todd/olympus/HADES-Lab/tools/arxiv/logs/pdf_sample_2000.json"
     if not Path(sample_file).exists():
         logger.error(f"PDF sample file not found: {sample_file}")
