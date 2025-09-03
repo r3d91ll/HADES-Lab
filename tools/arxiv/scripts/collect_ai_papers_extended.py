@@ -97,6 +97,13 @@ class ExtendedArXivCollector:
                 data = json.load(f)
                 if 'papers' in data:
                     self.existing_collection = data['papers']
+                    # Merge paper IDs from existing collection into dedupe set
+                    for paper in self.existing_collection:
+                        # Check for different possible ID field names
+                        paper_id = paper.get('id') or paper.get('arxiv_id')
+                        if paper_id:
+                            self.collected_ids.add(paper_id)
+                    logger.info(f"Added {len(self.existing_collection)} papers from existing collection to dedupe set")
         
         # Check PDF availability for loaded IDs
         self._check_pdf_availability()
