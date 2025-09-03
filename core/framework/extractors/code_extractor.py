@@ -99,7 +99,7 @@ class CodeExtractor:
             tree_sitter_data = {}
             if self.use_tree_sitter and self.tree_sitter:
                 try:
-                    tree_sitter_data = self.tree_sitter.extract_symbols(file_path, content)
+                    tree_sitter_data = self.tree_sitter.extract_symbols(str(file_path), content)
                     logger.debug(f"Extracted Tree-sitter symbols for {file_path}")
                 except Exception as e:
                     logger.warning(f"Tree-sitter extraction failed for {file_path}: {e}")
