@@ -82,7 +82,10 @@ processing:
   
   # Specific list source
   specific_list:
-    arxiv_ids: []  # Fill in as needed
+    arxiv_ids:
+      - '1301.3781'  # word2vec
+      - '1405.4053'  # doc2vec  
+      - '1803.09473' # code2vec
 
 # Performance Configuration
 performance:
