@@ -10,10 +10,9 @@ We have successfully implemented the ArXiv Metadata Service as specified in the 
 
 - **Schema Migration**: Added columns for compute cost assessment
   - `pdf_size_bytes`: Track actual PDF file sizes
-  - `processing_complexity`: Estimate processing difficulty
-  - `estimated_tokens`: Token count for LLM processing
-  - `created_at`, `modified_at`: Timestamps with triggers
-
+  - `processing_complexity`: Estimates processing difficulty
+  - `estimated_tokens`: Estimated token count for LLM processing
+  - `created_at`, `modified_at`: Timestamps managed by triggers
 - **Migration Script**: `migrations/add_compute_assessment_columns.sql`
   - Successfully applied to existing database with 2.7M papers
   - Includes indexes for performance
