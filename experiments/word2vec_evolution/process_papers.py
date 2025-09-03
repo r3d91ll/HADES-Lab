@@ -12,8 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Set environment
-os.environ['ARANGO_PASSWORD'] = 'root_password'
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'  # Use both GPUs if available
+# Env configuration (do not hard-code secrets)
+if 'ARANGO_PASSWORD' not in os.environ:
+    print("Warning: ARANGO_PASSWORD not set; configure via environment or secure config.", file=sys.stderr)
+# Respect existing GPU selection
+os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0,1')  # Use both GPUs if not predefined
 
 # Import pipeline
 from tools.arxiv.pipelines.arxiv_pipeline import ACIDPipeline, ProcessingTask
