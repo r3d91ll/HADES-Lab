@@ -28,7 +28,7 @@ from core.processors.document_processor import (
     ProcessingConfig,
     ProcessingResult
 )
-from tools.arxiv.pipelines.arango_db_manager import ArangoDBManager
+from core.database.arango_db_manager import ArangoDBManager
 
 logger = logging.getLogger(__name__)
 
@@ -436,7 +436,7 @@ class ArXivManager:
             }
             
             # Store main paper document
-            await self.db_manager.insert_document('arxiv_papers', arxiv_doc)
+            self.db_manager.insert_document('arxiv_papers', arxiv_doc)
             
             # Store chunks with embeddings
             for chunk in result.chunks:
@@ -451,7 +451,7 @@ class ArXivManager:
                     'end_char': chunk.end_char,
                     'context_window_used': chunk.context_window_used
                 }
-                await self.db_manager.insert_document('arxiv_embeddings', chunk_doc)
+                self.db_manager.insert_document('arxiv_embeddings', chunk_doc)
             
             # Store structures if present
             if result.extraction.tables or result.extraction.equations or result.extraction.images:
@@ -463,7 +463,7 @@ class ArXivManager:
                     'images': result.extraction.images,
                     'figures': result.extraction.figures
                 }
-                await self.db_manager.insert_document('arxiv_structures', structures_doc)
+                self.db_manager.insert_document('arxiv_structures', structures_doc)
             
             logger.info(f"Stored ArXiv paper {paper_info.arxiv_id} in database")
             
