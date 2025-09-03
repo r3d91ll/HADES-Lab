@@ -2,12 +2,12 @@
 
 server:
   name: "hades-arxiv"
-  host: "localhost"
+  host: "192.168.1.69"
   port: 8080
   log_level: "INFO"
 
 database:
-  host: "${ARANGO_HOST:-localhost}"
+  host: "${ARANGO_HOST:-192.168.1.69}"
   port: 8529
   username: "${ARANGO_USERNAME:-root}"
   password: "${ARANGO_PASSWORD}"

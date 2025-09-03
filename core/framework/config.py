@@ -22,7 +22,7 @@ load_dotenv()
 
 class DatabaseConfig(BaseModel):
     """Database configuration."""
-    host: str = Field(default="localhost", description="Database host")
+    host: str = Field(default="192.168.1.69", description="Database host")
     port: int = Field(default=8529, description="Database port")
     username: str = Field(default="root", description="Database username")
     password: str = Field(default="", description="Database password")

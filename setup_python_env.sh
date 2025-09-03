@@ -92,7 +92,7 @@ if [ ! -f ".env" ]; then
 # Database Configuration
 PGPASSWORD=your-postgres-password
 ARANGO_PASSWORD=your-arango-password
-ARANGO_HOST=localhost
+ARANGO_HOST=192.168.1.69
 ARANGO_PORT=8529
 
 # GPU Configuration

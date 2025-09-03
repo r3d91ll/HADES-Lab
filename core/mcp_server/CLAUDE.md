@@ -22,7 +22,7 @@ pip install -r core/mcp_server/requirements.txt
 Ensure ArangoDB is running and set credentials:
 
 ```bash
-export ARANGO_HOST="localhost"
+export ARANGO_HOST="192.168.1.69"
 export ARANGO_PASSWORD="your-password"
 ```
 
@@ -36,7 +36,7 @@ There are three ways to add the server to Claude Code:
 # Add to current project only
 claude mcp add hades-arxiv python /home/todd/olympus/HADES-Lab/core/mcp_server/launch.py \
   -e ARANGO_PASSWORD="your-password" \
-  -e ARANGO_HOST="localhost"
+  -e ARANGO_HOST="192.168.1.69"
 ```
 
 #### Option B: Shared Project Configuration
@@ -127,7 +127,7 @@ server:
   log_level: "INFO"
 
 database:
-  host: "${ARANGO_HOST:-localhost}"
+  host: "${ARANGO_HOST:-192.168.1.69}"
   port: 8529
   username: "${ARANGO_USERNAME:-root}"
   password: "${ARANGO_PASSWORD}"

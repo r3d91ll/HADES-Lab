@@ -3,7 +3,7 @@
 
 # ArangoDB Configuration
 arango:
-  host: 'http://localhost:8529'
+  host: 'http://192.168.1.69:8529'
   database: 'academy_store'
   username: 'root'
   # password provided via environment variable ARANGO_PASSWORD

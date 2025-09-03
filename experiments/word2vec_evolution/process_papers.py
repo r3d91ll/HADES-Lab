@@ -69,7 +69,7 @@ def main():
         },
         'storage': {
             'arango': {
-                'host': 'localhost',
+                'host': '192.168.1.69',
                 'port': 8529,
                 'database': 'academy_store',
                 'collections': {

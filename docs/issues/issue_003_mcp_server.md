@@ -88,7 +88,7 @@ async def cleanup_staging()
 ### Configuration
 ```yaml
 mcp_server:
-  host: localhost
+  host: 192.168.1.69
   port: 8765
   auth_token: ${MCP_AUTH_TOKEN}
   pipeline_config: tools/arxiv/configs/acid_pipeline_phased.yaml

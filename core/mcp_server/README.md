@@ -42,7 +42,7 @@ server:
   port: 8080
   
 database:
-  host: "localhost"
+  host: "192.168.1.69"
   port: 8529
   username: "root"
   password: "${ARANGO_PASSWORD}"
@@ -71,7 +71,7 @@ python mcp_server/launch.py --port 8081 --log-level DEBUG
 
 ```bash
 # Connect to the MCP server
-mcp connect hades://localhost:8080
+mcp connect hades://192.168.1.69:8080
 
 # List available tools
 mcp tools
