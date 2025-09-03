@@ -498,13 +498,56 @@ class PostgreSQLMetadataSync:
     async def store_metadata_entities_and_clusters(self, entities: List[Dict], clusters: List[Dict]) -> bool:
         """Store entities and clusters in ArangoDB."""
         try:
-            # Clear existing
+            # Clear existing data with safety checks
+            environment = os.getenv('ENVIRONMENT', 'development').lower()
+            force_truncate = os.getenv('FORCE_TRUNCATE', '').lower() == 'true'
+            dry_run = os.getenv('DRY_RUN', '').lower() == 'true'
+            
+            if dry_run:
+                # Report what would be truncated
+                collections = ["entities", "clusters", "cluster_edges", "paper_entities"]
+                logger.info("DRY RUN MODE - Would truncate the following collections:")
+                for coll_name in collections:
+                    count = self.arango_db.collection(coll_name).count()
+                    logger.info(f"  - {coll_name}: {count} documents")
+                return True
+            
+            if environment == 'production' and not force_truncate:
+                raise RuntimeError(
+                    "Destructive operation blocked in production environment. "
+                    "Set FORCE_TRUNCATE=true environment variable to override."
+                )
+            
+            # Create timestamped backups before truncation
+            if force_truncate or environment != 'production':
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                collections = ["entities", "clusters", "cluster_edges", "paper_entities"]
+                
+                logger.info(f"Creating backups before truncation (timestamp: {timestamp})")
+                for coll_name in collections:
+                    backup_name = f"{coll_name}_backup_{timestamp}"
+                    try:
+                        # Create backup collection
+                        backup_coll = self.arango_db.create_collection(backup_name)
+                        # Copy documents
+                        source_coll = self.arango_db.collection(coll_name)
+                        cursor = source_coll.all()
+                        backup_docs = list(cursor)
+                        if backup_docs:
+                            backup_coll.insert_many(backup_docs)
+                        logger.info(f"Backed up {len(backup_docs)} documents to {backup_name}")
+                    except Exception as backup_error:
+                        logger.warning(f"Failed to backup {coll_name}: {backup_error}")
+            
+            # Log and perform truncation
+            logger.info(f"Truncating collections in {environment} environment (force_truncate={force_truncate})")
+            
             self.arango_db.collection("entities").truncate()
             self.arango_db.collection("clusters").truncate()
             self.arango_db.collection("cluster_edges").truncate()
             self.arango_db.collection("paper_entities").truncate()
             
-            logger.info("Cleared existing HiRAG data")
+            logger.info("Successfully cleared existing HiRAG data")
             
             # Store entities
             entity_docs = []

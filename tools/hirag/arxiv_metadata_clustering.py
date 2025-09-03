@@ -45,11 +45,20 @@ class ArXivMetadataClustering:
     institutional classifications rather than imposing our own.
     """
     
-    def __init__(self, host: str = "192.168.1.69", port: int = 8529, 
+    def __init__(self, host: str = None, port: int = 8529, 
                  username: str = "root", password: str = None):
         """Initialize metadata-driven clustering."""
-        self.password = password or os.getenv('ARANGO_PASSWORD', 'root_password')
-        self.client = ArangoClient(hosts=f"http://{host}:{port}")
+        # Load configuration from environment
+        self.host = host or os.getenv('ARANGO_HOST', 'localhost')
+        self.password = password or os.getenv('ARANGO_PASSWORD')
+        
+        if not self.password:
+            raise ValueError(
+                "ArangoDB password required. Set ARANGO_PASSWORD environment variable "
+                "or pass password parameter."
+            )
+            
+        self.client = ArangoClient(hosts=f"http://{self.host}:{port}")
         self.db: Optional[StandardDatabase] = None
         
         # ArXiv category mapping
@@ -131,19 +140,40 @@ class ArXivMetadataClustering:
             # 1. Extract category-based entities
             if paper.get('categories'):
                 categories = paper['categories']
+                # Robustly normalize categories to a flat list of strings
+                cat_list = []
+                
                 if isinstance(categories, str):
                     # Parse category string like "cs.AI cs.LG"
                     cat_list = categories.strip().split()
-                    for cat in cat_list:
-                        if cat in self.arxiv_categories:
-                            entities.append({
-                                'name': self.arxiv_categories[cat],
-                                'type': 'research_area',
-                                'source': 'arxiv_category',
-                                'category_code': cat,
-                                'paper_id': paper_id,
-                                'confidence': 0.95  # High confidence for official categories
-                            })
+                elif isinstance(categories, (list, tuple, set)):
+                    # Handle iterable of categories
+                    for item in categories:
+                        if isinstance(item, str):
+                            cat_list.extend(item.strip().split())
+                        elif hasattr(item, '__iter__') and not isinstance(item, str):
+                            # Nested iterable, flatten to strings
+                            cat_list.extend([str(x) for x in item])
+                        else:
+                            cat_list.append(str(item))
+                elif categories is None:
+                    cat_list = []
+                else:
+                    # Unexpected type, log and treat as empty
+                    logger.warning(f"Unexpected categories type {type(categories)} for paper {paper_id}: {categories}")
+                    cat_list = []
+                
+                # Process normalized category list
+                for cat in cat_list:
+                    if cat and cat in self.arxiv_categories:
+                        entities.append({
+                            'name': self.arxiv_categories[cat],
+                            'type': 'research_area',
+                            'source': 'arxiv_category',
+                            'category_code': cat,
+                            'paper_id': paper_id,
+                            'confidence': 0.95  # High confidence for official categories
+                        })
             
             # 2. Extract title-based concepts
             if paper.get('title'):
@@ -477,13 +507,28 @@ class ArXivMetadataClustering:
     async def store_metadata_entities_and_clusters(self, entities: List[Dict], clusters: List[Dict]) -> bool:
         """Store metadata-based entities and clusters."""
         try:
-            # Clear existing entities and clusters
-            self.db.collection("entities").truncate()
-            self.db.collection("clusters").truncate() 
-            self.db.collection("cluster_edges").truncate()
-            self.db.collection("paper_entities").truncate()
+            # Clear existing entities and clusters (with safety checks)
+            environment = os.getenv('ENVIRONMENT', 'development').lower()
+            force_truncate = os.getenv('FORCE_TRUNCATE', '').lower() == 'true'
             
-            logger.info("Cleared existing data")
+            if environment == 'production' and not force_truncate:
+                raise RuntimeError(
+                    "Destructive operation blocked in production environment. "
+                    "Set FORCE_TRUNCATE=true environment variable to override."
+                )
+            
+            # Log the operation for audit trail
+            logger.info(f"Truncating collections in {environment} environment (force_truncate={force_truncate})")
+            
+            try:
+                self.db.collection("entities").truncate()
+                self.db.collection("clusters").truncate() 
+                self.db.collection("cluster_edges").truncate()
+                self.db.collection("paper_entities").truncate()
+                logger.info("Successfully cleared existing data")
+            except Exception as e:
+                logger.error(f"Failed to truncate collections: {e}")
+                raise
             
             # Store entities
             entities_collection = self.db.collection("entities")

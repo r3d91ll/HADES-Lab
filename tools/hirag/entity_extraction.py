@@ -139,12 +139,46 @@ class HiRAGEntityExtractor:
         }
     
     def _compile_person_patterns(self) -> List[re.Pattern]:
-        """Compile patterns for person name extraction."""
+        """Compile robust patterns for person name extraction with Unicode support."""
         return [
-            re.compile(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b'),  # First Last
-            re.compile(r'\b[A-Z]\. [A-Z][a-z]+\b'),       # F. Last
-            re.compile(r'\b[A-Z][a-z]+ et al\.\b'),       # First et al.
+            # Title + Full names with middle initials/names, hyphens, apostrophes
+            re.compile(r'\b(?:Dr\.?|Prof\.?|Mr\.?|Ms\.?|Mrs\.?)\s+[\p{Lu}][\p{Ll}\-\']*(?:\s+[\p{Lu}]\.?\s+)?[\p{Lu}][\p{Ll}\-\']+(?:\s+[\p{Lu}][\p{Ll}\-\']+)*\b', re.UNICODE),
+            # Full names (2+ capitalized words, allowing hyphens/apostrophes)  
+            re.compile(r'\b[\p{Lu}][\p{Ll}\-\']+(?:\s+[\p{Lu}][\p{Ll}\-\']+)+\b', re.UNICODE),
+            # Initials + Last name (F. Last, F.M. Last)
+            re.compile(r'\b[\p{Lu}]\.(?:\s*[\p{Lu}]\.)?\s+[\p{Lu}][\p{Ll}\-\']+\b', re.UNICODE),
+            # Et al. patterns
+            re.compile(r'\b[\p{Lu}][\p{Ll}\-\']+(?:\s+[\p{Lu}][\p{Ll}\-\']+)*\s+et\s+al\.?\b', re.UNICODE),
         ]
+    
+    def _filter_person_names(self, candidates: List[str]) -> List[str]:
+        """Filter person name candidates to remove false positives."""
+        # Common stopwords and false positives
+        stopwords = {
+            'The', 'This', 'That', 'These', 'Those', 'Our', 'We', 'They', 'It', 'Is', 'Are',
+            'Figure', 'Table', 'Section', 'Chapter', 'Appendix', 'References', 'Abstract',
+            'Neural Network', 'Machine Learning', 'Deep Learning', 'Computer Vision',
+            'Natural Language', 'Data Science', 'Artificial Intelligence', 'Big Data'
+        }
+        
+        filtered = []
+        for name in candidates:
+            # Skip if in stopwords
+            if name in stopwords:
+                continue
+                
+            # Skip single tokens (too ambiguous)
+            if len(name.split()) < 2:
+                continue
+                
+            # Skip if all tokens are short (likely abbreviations)
+            tokens = name.split()
+            if all(len(token) <= 2 for token in tokens):
+                continue
+                
+            filtered.append(name)
+            
+        return filtered
     
     async def connect(self, database_name: str = "academy_store") -> bool:
         """Connect to the ArangoDB database."""

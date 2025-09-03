@@ -40,11 +40,20 @@ class ScalableHiRAGClustering:
     thousands of entities within reasonable memory constraints.
     """
     
-    def __init__(self, host: str = "192.168.1.69", port: int = 8529, 
+    def __init__(self, host: str = None, port: int = 8529, 
                  username: str = "root", password: str = None):
         """Initialize the scalable clustering system."""
-        self.password = password or os.getenv('ARANGO_PASSWORD', 'root_password')
-        self.client = ArangoClient(hosts=f"http://{host}:{port}")
+        # Load configuration from environment
+        self.host = host or os.getenv('ARANGO_HOST', 'localhost')
+        self.password = password or os.getenv('ARANGO_PASSWORD')
+        
+        if not self.password:
+            raise ValueError(
+                "ArangoDB password required. Set ARANGO_PASSWORD environment variable "
+                "or pass password parameter."
+            )
+            
+        self.client = ArangoClient(hosts=f"http://{self.host}:{port}")
         self.db: Optional[StandardDatabase] = None
         
         # Scalable clustering parameters
@@ -284,14 +293,22 @@ class ScalableHiRAGClustering:
         
         dominant_type = max(type_counts.keys(), key=type_counts.get)
         
-        # Get most frequent entities
+        # Get most frequent entities with guaranteed fallback
         entity_names = [e['name'].lower() for e in entities]
         name_counts = {}
+        
         for name in entity_names:
-            words = name.split()[:2]  # First 2 words
-            for word in words:
-                if len(word) > 2:
-                    name_counts[word] = name_counts.get(word, 0) + 1
+            tokens = name.split()[:2]  # First 2 words
+            # Filter tokens by length, but guarantee at least one token
+            filtered = [w for w in tokens if len(w) > 2]
+            
+            # Fallback: if no long words, use shorter ones or original name
+            if not filtered:
+                filtered = tokens if tokens else [name]
+            
+            # Count words for cluster naming
+            for word in filtered:
+                name_counts[word] = name_counts.get(word, 0) + 1
         
         top_words = sorted(name_counts.keys(), key=name_counts.get, reverse=True)[:2]
         

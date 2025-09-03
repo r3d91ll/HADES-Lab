@@ -23,9 +23,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 import re
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.append(str(project_root))
+# Use absolute imports - no sys.path manipulation needed
 
 from arango import ArangoClient
 from arango.database import StandardDatabase
@@ -77,17 +75,27 @@ class HiRetrievalEngine:
     preserving the relational context that gives information its meaning.
     """
     
-    def __init__(self, host: str = "192.168.1.69", port: int = 8529, 
+    def __init__(self, host: str = None, port: int = 8529, 
                  username: str = "root", password: str = None):
         """Initialize the HiRAG retrieval engine."""
-        self.password = password or os.getenv('ARANGO_PASSWORD', 'root_password')
-        self.client = ArangoClient(hosts=f"http://{host}:{port}")
+        # Load configuration from environment
+        self.host = host or os.getenv('ARANGO_HOST', 'localhost')
+        self.password = password or os.getenv('ARANGO_PASSWORD')
+        
+        if not self.password:
+            raise ValueError(
+                "ArangoDB password required. Set ARANGO_PASSWORD environment variable "
+                "or pass password parameter."
+            )
+            
+        self.client = ArangoClient(hosts=f"http://{self.host}:{port}")
         self.db: Optional[StandardDatabase] = None
         
         # Query processing components
         self.vectorizer: Optional[TfidfVectorizer] = None
         self.entity_embeddings: Optional[np.ndarray] = None
         self.entity_index: Optional[Dict] = None
+        self.entity_index_reverse: Optional[Dict] = None
         
         # Performance tracking
         self.query_cache: Dict = {}
@@ -148,8 +156,9 @@ class HiRetrievalEngine:
             
             self.entity_embeddings = self.vectorizer.fit_transform(texts).toarray()
             
-            # Create entity index for fast lookup
+            # Create entity index for fast lookup (bidirectional)
             self.entity_index = {key: i for i, key in enumerate(entity_keys)}
+            self.entity_index_reverse = {i: key for key, i in self.entity_index.items()}
             
             logger.info(f"✅ Initialized embeddings for {len(entities)} entities")
         else:
@@ -177,8 +186,8 @@ class HiRetrievalEngine:
             return entities
             
         except Exception as e:
-            logger.error(f"Failed to load entities: {e}")
-            return []
+            logger.error(f"Failed to load entity list for embedding initialization: {e.__class__.__name__}")
+            raise RuntimeError("Entity loading failed during initialization") from e
     
     async def retrieve_local_entities(self, query_context: QueryContext) -> List[Dict]:
         """
@@ -206,7 +215,7 @@ class HiRetrievalEngine:
             local_entities = []
             for idx in top_indices:
                 if similarities[idx] >= query_context.similarity_threshold:
-                    entity_key = list(self.entity_index.keys())[list(self.entity_index.values()).index(idx)]
+                    entity_key = self.entity_index_reverse[idx]
                     entity_details = await self._get_entity_details(entity_key)
                     
                     if entity_details:
@@ -272,6 +281,7 @@ class HiRetrievalEngine:
                         name: cluster.name,
                         layer: cluster.layer,
                         member_count: cluster.member_count,
+                        members: cluster.members,
                         summary: cluster.summary,
                         key_concepts: cluster.key_concepts,
                         cohesion_score: cluster.cohesion_score,
@@ -528,8 +538,12 @@ class HiRetrievalEngine:
         try:
             # W: Semantic Quality (0-1)
             if local_entities:
-                avg_similarity = np.mean([e.get('similarity_score', 0.5) for e in local_entities])
-                avg_confidence = np.mean([e.get('confidence', 0.5) for e in local_entities])
+                similarities = [e.get('similarity_score', 0.5) for e in local_entities]
+                confidences = [e.get('confidence', 0.5) for e in local_entities]
+                
+                avg_similarity = np.mean(similarities) if similarities else 0.5
+                avg_confidence = np.mean(confidences) if confidences else 0.5
+                
                 W = (avg_similarity + avg_confidence) / 2
             else:
                 W = 0.0

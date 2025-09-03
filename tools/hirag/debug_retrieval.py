@@ -19,9 +19,18 @@ logger = logging.getLogger(__name__)
 
 def test_data_connectivity():
     """Test basic data connectivity"""
+    # Load configuration from environment
+    arango_host = os.getenv('ARANGO_HOST', '192.168.1.69')
+    arango_password = os.getenv('ARANGO_PASSWORD')
+    
+    if not arango_password:
+        raise ValueError(
+            "ARANGO_PASSWORD environment variable is required for database connection"
+        )
+    
     # Connect to database
-    client = ArangoClient(hosts='http://localhost:8529')
-    db = client.db('academy_store', username='root', password=os.getenv('ARANGO_PASSWORD', '1luv93ngu1n$'))
+    client = ArangoClient(hosts=f'http://{arango_host}:8529')
+    db = client.db('academy_store', username='root', password=arango_password)
     
     # Test entity retrieval for "computer vision"
     print("🔍 Testing Local Entity Retrieval")

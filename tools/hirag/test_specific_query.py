@@ -2,15 +2,12 @@
 """Test specific HiRAG query patterns"""
 
 import os
-import sys
 import asyncio
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.append(str(project_root))
+# Use absolute imports - no sys.path manipulation needed
 
-from hiretrieval_engine import HiRetrievalEngine, QueryContext
+from tools.hirag.hiretrieval_engine import HiRetrievalEngine
 
 async def test_specific_queries():
     """Test HiRAG with specific successful patterns"""
@@ -34,14 +31,6 @@ async def test_specific_queries():
         print(f"\n🔍 Query: '{query_text}' (mode: {mode})")
         print(f"📋 Expected: {expectation}")
         print("-" * 60)
-        
-        # Create query context
-        context = QueryContext(
-            query_text=query_text,
-            query_type=mode,
-            top_k_entities=10,
-            top_m_clusters=5
-        )
         
         # Execute query
         result = await engine.hierarchical_query(query_text, mode)

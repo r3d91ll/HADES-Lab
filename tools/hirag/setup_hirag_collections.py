@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import logging
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.append(str(project_root))
+# Use absolute imports - no sys.path manipulation needed
 
 from arango import ArangoClient
 from arango.database import StandardDatabase
@@ -33,7 +31,7 @@ class HiRAGCollectionSetup:
     creating a rational-legal authority structure for information retrieval.
     """
     
-    def __init__(self, host: str = "192.168.1.69", port: int = 8529, 
+    def __init__(self, host: str = None, port: int = 8529, 
                  username: str = "root", password: str = None):
         """
         Initialize ArangoDB connection.
@@ -42,8 +40,17 @@ class HiRAGCollectionSetup:
         the database becomes the mediator through which all knowledge
         flows must pass.
         """
-        self.password = password or os.getenv('ARANGO_PASSWORD', 'root_password')
-        self.client = ArangoClient(hosts=f"http://{host}:{port}")
+        # Load configuration from environment
+        self.host = host or os.getenv('ARANGO_HOST', 'localhost')
+        self.password = password or os.getenv('ARANGO_PASSWORD')
+        
+        if not self.password:
+            raise ValueError(
+                "ArangoDB password required. Set ARANGO_PASSWORD environment variable "
+                "or pass password parameter."
+            )
+            
+        self.client = ArangoClient(hosts=f"http://{self.host}:{port}")
         self.db: Optional[StandardDatabase] = None
         
     def connect(self, database_name: str = "academy_store") -> bool:
@@ -334,10 +341,10 @@ class HiRAGCollectionSetup:
         logger.info("Starting HiRAG ArangoDB collection setup...")
         
         success = True
-        success &= self.create_document_collections()
-        success &= self.create_edge_collections() 
-        success &= self.create_graph()
-        success &= self.insert_weight_config()
+        success = success and self.create_document_collections()
+        success = success and self.create_edge_collections() 
+        success = success and self.create_graph()
+        success = success and self.insert_weight_config()
         
         if success:
             logger.info("✅ HiRAG collection setup completed successfully!")

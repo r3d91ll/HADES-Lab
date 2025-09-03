@@ -178,9 +178,11 @@ class HiRAGHierarchicalClustering:
             logger.info(f"Generated TF-IDF embeddings: {embeddings.shape}")
             return embeddings
         except Exception as e:
-            logger.error(f"Failed to generate embeddings: {e}")
-            # Fallback to random embeddings for testing
-            return np.random.rand(len(entities), 100)
+            logger.error(f"Failed to generate TF-IDF embeddings: {e}")
+            raise RuntimeError(
+                f"TF-IDF embedding generation failed: {str(e)}. "
+                "Cannot proceed with clustering without proper embeddings."
+            ) from e
     
     def create_level1_clusters(self, entities: List[Dict], embeddings: np.ndarray) -> List[ClusterInfo]:
         """
@@ -503,7 +505,7 @@ class HiRAGHierarchicalClustering:
                     edge_doc = {
                         "_from": f"clusters/{l1_cluster_id}",
                         "_to": f"clusters/{l2_cluster.generate_id()}",
-                        "type": "subcuster_of",
+                        "type": "subcluster_of",
                         "aggregation_weight": 0.8,
                         "created": datetime.now(timezone.utc).isoformat(),
                         "clustering_round": 2
