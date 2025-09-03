@@ -11,8 +11,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .tree_sitter_extractor import TreeSitterExtractor
-
+from core.framework.extractors.tree_sitter_extractor import TreeSitterExtractor
 logger = logging.getLogger(__name__)
 
 
