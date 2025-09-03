@@ -1,12 +1,14 @@
+---
 # Word2Vec Evolution Experiment Configuration
 # Testing theory-practice bridges across word2vec → doc2vec → code2vec
 
 experiment:
   name: "Word2Vec Evolution Analysis"
   description: |
-    Analyze the evolution of embedding techniques from word2vec to doc2vec to code2vec
-    by examining theory-practice bridges between papers and their implementation repositories.
-    Test hypotheses about entropy patterns at bridge points and temporal evolution.
+    Analyze the evolution of embedding techniques from word2vec to
+    doc2vec to code2vec by examining theory-practice bridges between
+    papers and their implementation repositories. Test hypotheses about
+    entropy patterns at bridge points and temporal evolution.
 
 papers:
   word2vec:
@@ -14,13 +16,13 @@ papers:
     title: "Efficient Estimation of Word Representations in Vector Space"
     year: 2013
     github_repo: "https://github.com/dav/word2vec"
-    
+
   doc2vec:
     arxiv_id: "1405.4053"
     title: "Distributed Representations of Sentences and Documents"
     year: 2014
     github_repo: "https://github.com/bnosac/doc2vec"
-    
+
   code2vec:
     arxiv_id: "1803.09473"
     title: "code2vec: Learning Distributed Representations of Code"
@@ -31,16 +33,16 @@ analysis:
   # Semantic mapping configuration
   embedding_model: "jina-v4"
   embedding_dimensions: 2048
-  
+
   # Chunking strategy
   chunk_size: 512
   chunk_overlap: 50
-  
+
   # Entropy analysis
   entropy_window_size: 100
   entropy_threshold_low: 0.3   # Low entropy = high clarity/bridge point
   entropy_threshold_high: 0.7  # High entropy = conceptual complexity
-  
+
   # Bridge detection
   bridge_criteria:
     semantic_similarity_threshold: 0.85
@@ -57,7 +59,7 @@ hypotheses:
     validation: |
       Measure entropy at points of high semantic similarity between paper
       and code. Expect entropy < 0.3 at true bridge points.
-      
+
   h2:
     name: "Temporal Evolution Pattern"
     description: |
@@ -66,7 +68,7 @@ hypotheses:
     validation: |
       Track specific concepts (e.g., "skip-gram", "negative sampling") across
       all three paper-code pairs. Measure semantic drift and entropy changes.
-      
+
   h3:
     name: "Citation Network Alignment"
     description: |
@@ -82,22 +84,22 @@ pipeline:
       - Download papers from ArXiv
       - Clone GitHub repositories
       - Extract text content from both sources
-      
+
     2_embed:
       - Generate embeddings for paper sections
       - Generate embeddings for code modules
       - Store in ArangoDB with metadata
-      
+
     3_analyze:
       - Calculate entropy maps for each document
       - Identify low/high entropy regions
       - Detect bridge points between paper-code pairs
-      
+
     4_compare:
       - Overlay semantic maps for each pair
       - Identify common bridge patterns
       - Track concept evolution across timeline
-      
+
     5_validate:
       - Extract citation network
       - Compare with detected patterns
