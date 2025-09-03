@@ -125,9 +125,12 @@ def main():
         embedding_results = pipeline.phase_manager.run_embedding_phase()
         print(f"Embedding complete: {len([r for r in embedding_results if r['success']])} successful")
         
-        # Save checkpoint
-        pipeline._save_checkpoint()
-        
+        # Save checkpoint (consider exposing a public method)
+        pipeline._save_checkpoint({
+            "tasks": [t.to_dict() for t in tasks],
+            "extraction": extraction_results,
+            "embedding": embedding_results
+        })
         print("\n" + "=" * 80)
         print("✓ PROCESSING COMPLETE")
         print("=" * 80)
