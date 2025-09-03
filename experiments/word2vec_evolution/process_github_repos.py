@@ -7,6 +7,7 @@ import os
 import sys
 import subprocess
 import json
+import yaml
 from pathlib import Path
 from datetime import datetime
 import logging
@@ -21,59 +22,47 @@ logger = logging.getLogger(__name__)
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-def process_repository(repo_url: str, name: str):
+# Import GitHub pipeline manager for direct use
+from tools.github.github_pipeline_manager import GitHubPipelineManager
+
+def process_repository(repo_url: str, name: str, manager: GitHubPipelineManager):
     """
     Process a single GitHub repository using the GitHub pipeline.
     
     Args:
         repo_url: GitHub URL (owner/repo format)
         name: Friendly name for logging
+        manager: GitHubPipelineManager instance
     """
     logger.info(f"Processing {name} ({repo_url})...")
     
-    # Path to GitHub pipeline
-    pipeline_script = Path(__file__).parent.parent.parent / 'tools' / 'github' / 'github_pipeline_manager.py'
-    
-    # Command to run
-    cmd = [
-        sys.executable,
-        str(pipeline_script),
-        '--repo', repo_url
-    ]
-    
-    logger.info(f"  Command: {' '.join(cmd)}")
-    
     try:
-        # Run the pipeline
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(pipeline_script.parent),
-            timeout=300  # 5 minute timeout per repo
-        )
+        # Process the repository directly using the manager
+        results = manager.process_repository(repo_url)
         
-        if result.returncode == 0:
+        # Check results
+        if results and 'stored' in results:
+            stored_count = results.get('stored', 0)
             logger.info(f"  ✓ {name} processed successfully")
+            logger.info(f"    Stored {stored_count} embeddings")
             
-            # Log any important output
-            if "stored" in result.stdout.lower():
-                for line in result.stdout.split('\n'):
-                    if 'stored' in line.lower() or 'success' in line.lower():
-                        logger.info(f"    {line.strip()}")
+            # Log additional stats if available
+            if 'repository' in results:
+                repo_info = results['repository']
+                logger.info(f"    Repository: {repo_info.get('full_name', repo_url)}")
+                if 'stats' in repo_info:
+                    stats = repo_info['stats']
+                    logger.info(f"    Files: {stats.get('file_count', 'N/A')}")
+                    logger.info(f"    Chunks: {stats.get('chunk_count', 'N/A')}")
             
             return True
         else:
-            logger.error(f"  ✗ {name} failed with return code: {result.returncode}")
-            if result.stderr:
-                logger.error(f"    Error: {result.stderr[:500]}")
+            logger.error(f"  ✗ {name} processing returned no results")
             return False
             
-    except subprocess.TimeoutExpired:
-        logger.error(f"  ✗ {name} timed out after 5 minutes")
-        return False
     except Exception as e:
         logger.error(f"  ✗ {name} failed with error: {e}")
+        logger.error(f"    Error details: {str(e)}")
         return False
 
 def main():
@@ -118,8 +107,49 @@ def main():
             text=True,
             cwd=str(setup_script.parent)
         )
+        
+        # Check return code first
+        if result.returncode != 0:
+            logger.error("Failed to setup GitHub graph collections!")
+            logger.error(f"Return code: {result.returncode}")
+            if result.stderr:
+                logger.error(f"Error output: {result.stderr}")
+            if result.stdout:
+                logger.error(f"Standard output: {result.stdout}")
+            sys.exit(1)
+        
+        # Only check for success messages after confirming return code is 0
         if "created" in result.stdout.lower() or "already exists" in result.stdout.lower():
             logger.info("  ✓ GitHub graph collections ready")
+        else:
+            logger.warning("  GitHub graph setup completed but status unclear")
+            logger.debug(f"  Output: {result.stdout[:500]}")
+    
+    # Load config and initialize manager
+    logger.info("\nInitializing GitHub pipeline manager...")
+    config_path = Path(__file__).parent.parent.parent / 'tools' / 'github' / 'configs' / 'github_simple.yaml'
+    
+    if not config_path.exists():
+        logger.error(f"Config file not found: {config_path}")
+        sys.exit(1)
+    
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    
+    # Set ArangoDB password from environment
+    arango_password = os.getenv('ARANGO_PASSWORD')
+    if not arango_password:
+        logger.error("ARANGO_PASSWORD environment variable is required but not set")
+        sys.exit(1)
+    config['arango']['password'] = arango_password
+    
+    # Create manager instance
+    try:
+        manager = GitHubPipelineManager(config)
+        logger.info("  ✓ Pipeline manager initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize GitHub pipeline manager: {e}")
+        sys.exit(1)
     
     # Process each repository
     logger.info("\n" + "-" * 80)
@@ -131,7 +161,7 @@ def main():
     
     for repo_info in repositories:
         logger.info(f"\n[{len(results)+1}/{len(repositories)}] {repo_info['name'].upper()}")
-        success = process_repository(repo_info['repo'], repo_info['name'])
+        success = process_repository(repo_info['repo'], repo_info['name'], manager)
         results.append({
             'repo': repo_info['repo'],
             'name': repo_info['name'],
