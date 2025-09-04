@@ -214,8 +214,8 @@ def main():
     if all_good:
         print("✅ ALL CHECKS PASSED - Pipeline ready for testing!")
         print("\nNext steps:")
-        print("1. Run: cd tools/arxiv/scripts")
-        print("2. Run: python collect_ai_papers.py")
+        print("1. Run: cd tools/arxiv/utils")
+        print("2. Run: python lifecycle.py process [arxiv_id]")
         print("3. Run: cd ../tests")
         print("4. Run: ./run_large_scale_test.sh")
         return 0

@@ -35,8 +35,7 @@ HADES-Lab/
 │   │   ├── pipelines/         # ACID-compliant pipelines
 │   │   ├── monitoring/        # Real-time monitoring
 │   │   ├── database/          # Database utilities
-│   │   ├── scripts/           # Utility scripts
-│   │   ├── utils/             # Database utilities
+│   │   ├── utils/             # Utility scripts
 │   │   ├── tests/             # Integration tests
 │   │   ├── configs/           # Pipeline configurations
 │   │   └── logs/              # ArXiv processing logs
@@ -202,7 +201,7 @@ aws s3 sync s3://arxiv/src/ /bulk-store/arxiv-data/tars/latex_src/ \
     --region us-east-1
 
 # Extract LaTeX files to expected location
-cd tools/arxiv/scripts/
+cd tools/arxiv/utils/
 python extract_latex_archives.py  # Script processes .tar files
 ```
 
@@ -210,9 +209,9 @@ python extract_latex_archives.py  # Script processes .tar files
 
 ```bash
 # Run the complete database rebuild (includes all 3 phases)
-cd tools/arxiv/scripts/
+cd tools/arxiv/utils/
 export PGPASSWORD="your-postgres-password"
-python rebuild_postgresql_complete.py
+python rebuild_database.py
 
 # This script:
 # 1. Imports 2.7M papers metadata from Kaggle JSON
@@ -338,10 +337,10 @@ The ArXiv Lifecycle Manager automatically populates HiRAG collections:
 
 ```bash
 # Process papers with HiRAG entity extraction
-python lifecycle_cli.py process 2503.10150
+python lifecycle.py process 2503.10150
 
 # Batch processing with hierarchical extraction
-python lifecycle_cli.py batch paper_list.txt --hirag-extraction
+python lifecycle.py batch paper_list.txt --hirag-extraction
 ```
 
 ### Research Applications

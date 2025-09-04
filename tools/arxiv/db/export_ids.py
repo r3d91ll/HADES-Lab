@@ -303,7 +303,7 @@ def main() -> None:
     parser.add_argument(
         "--out-dir",
         type=str,
-        default="tools/arxiv/scripts/data/arxiv_collections/",
+        default="data/arxiv_collections/",
     )
     parser.add_argument("--write-monthly-lists", action="store_true")
     args = parser.parse_args()

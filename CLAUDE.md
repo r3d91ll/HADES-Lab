@@ -194,7 +194,7 @@ python check_db_status.py --detailed
 nvidia-smi
 
 # Clear ArangoDB collections (nuclear option)
-cd ../scripts/
+cd ../utils/
 # Use ArangoDB web interface or arangosh to clear collections
 ```
 
@@ -366,8 +366,8 @@ from .utils import helper_function
 1. **Setup database** (one-time):
 
    ```bash
-   cd tools/arxiv/scripts/
-   python rebuild_postgresql_complete.py
+   cd tools/arxiv/utils/
+   python rebuild_database.py
    ```
 
 2. **Run ACID pipeline**:

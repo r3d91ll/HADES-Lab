@@ -41,7 +41,7 @@ search:
 # Output configuration  
 output:
   # Base directory for output files
-  base_dir: tools/arxiv/scripts/data/arxiv_collections
+  base_dir: data/arxiv_collections
   
   # Output options
   write_monthly_lists: false   # Skip for speed

@@ -7,14 +7,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Most Common Commands
 
 ```bash
-# NEW: ArXiv Lifecycle Manager (Recommended)
-cd scripts/
-python lifecycle_cli.py process 2508.21038  # Single paper
-python lifecycle_cli.py batch papers.txt    # Multiple papers
-python lifecycle_cli.py status 2508.21038   # Check status
+# ArXiv Lifecycle Manager (Recommended - Primary Interface)
+cd utils/
+python lifecycle.py process 2508.21038  # Single paper
+python lifecycle.py batch papers.txt    # Multiple papers
+python lifecycle.py status 2508.21038   # Check status
+
+# Database operations (All in utils/ for discoverability)
+python rebuild_database.py --detailed   # Full database rebuild
+python check_db_status.py --detailed    # Database status
+python check_papers.py                  # Validate papers in ArangoDB
 
 # Traditional: ACID pipeline with phase separation
-cd pipelines/
+cd ../pipelines/
 python arxiv_pipeline.py \
     --config ../configs/acid_pipeline_phased.yaml \
     --count 1000 \
@@ -22,11 +27,6 @@ python arxiv_pipeline.py \
 
 # Monitor processing in real-time
 tail -f ../logs/acid_phased.log
-
-# Database operations
-cd ../utils/
-python check_db_status.py --detailed  # Database status
-python rebuild_postgresql_complete.py # Full database rebuild
 
 # Check GPU usage
 nvidia-smi
@@ -65,7 +65,7 @@ The **ArXiv Lifecycle Manager** replaces scattered single-purpose scripts with a
 
 ```bash
 # Complete paper lifecycle in one command
-python lifecycle_cli.py process 2508.21038
+python lifecycle.py process 2508.21038
 ```
 
 **What it does:**
@@ -89,16 +89,16 @@ python lifecycle_cli.py process 2508.21038
 
 ```bash
 # Process single paper
-python lifecycle_cli.py process 2508.21038
+python lifecycle.py process 2508.21038
 
 # Check paper status  
-python lifecycle_cli.py status 2508.21038 --json
+python lifecycle.py status 2508.21038 --json
 
 # Process batch of papers
-python lifecycle_cli.py batch paper_list.txt --output results.json
+python lifecycle.py batch paper_list.txt --output results.json
 
 # Fetch metadata only (no processing)
-python lifecycle_cli.py metadata 2508.21038
+python lifecycle.py metadata 2508.21038
 ```
 
 ### Status Levels

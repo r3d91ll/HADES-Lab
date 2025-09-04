@@ -376,10 +376,15 @@ tests/*.log
 tests/.cache/
 tests/__pycache__/
 tests/*.pyc
-tools/arxiv/scripts/data/*
-tools/arxiv/scripts/data/arxiv_collections/
+# Note: Data has been moved to data/arxiv_collections/
+# These lines kept for historical reference
+# tools/arxiv/scripts/data/*
+# tools/arxiv/scripts/data/arxiv_collections/
 # Pipeline result files
 *_results_*.json
 tools/arxiv/pipelines/*_results_*.json
 tools/github/*_results_*.json
 arxiv_pipeline_v2_results_*.json
+tools/arxiv/REORGANIZATION_NOTICE.md
+tools/arxiv/SCRIPT_REORGANIZATION_ANALYSIS.md
+tools/arxiv/utils/SCRIPT_ANALYSIS.md
