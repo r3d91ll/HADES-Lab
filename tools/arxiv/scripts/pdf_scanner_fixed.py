@@ -10,9 +10,9 @@ import os
 import json
 import random
 from pathlib import Path
-from typing import Dict, List
+from typing import TYPE_CHECKING
 
-def quick_pdf_sample(pdf_base_dir: str = "/bulk-store/arxiv-data/pdf", sample_size: int = 2000):
+def quick_pdf_sample(pdf_base_dir: str = "/bulk-store/arxiv-data/pdf", sample_size: int = 2000) -> dict[str, list[dict]]:
     """
     Quick scan to get a random sample of PDFs for processing.
     """

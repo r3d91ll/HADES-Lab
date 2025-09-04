@@ -190,8 +190,8 @@ python acid_monitoring.py
 cd tools/arxiv/utils/
 python check_db_status.py --detailed
 
-# Verify Jina v4 deployment (if script exists)
-python verify_jina_v4_deployment.py
+# GPU verification
+nvidia-smi
 
 # Clear ArangoDB collections (nuclear option)
 cd ../scripts/
