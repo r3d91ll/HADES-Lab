@@ -15,7 +15,21 @@ from arango import ArangoClient
 from ..academic_citation_toolkit import create_arxiv_citation_toolkit
 
 def main():
-    """Extract citations from our word2vec evolution papers."""
+    """
+    Extract and store bibliography entries for a small set of ArXiv papers.
+    
+    This is an example command-line entry point that:
+    - Requires the ARANGO_PASSWORD environment variable; exits early if not set.
+    - Connects to a hard-coded ArangoDB host and builds an ArXiv citation toolkit
+      via create_arxiv_citation_toolkit(client).
+    - Extracts bibliography entries for a predefined set of "core" paper IDs,
+      reports per-paper and aggregated confidence and identifier statistics,
+      and attempts to persist the collected entries using storage.store_bibliography_entries().
+    - Prints progress, summary statistics, and next steps to stdout.
+    
+    No return value. Side effects: reads environment, connects to ArangoDB, prints to stdout,
+    and writes bibliography entries to the ArangoDB collection (via the storage component).
+    """
     
     print("🕸️ ArXiv Citation Extraction Example")
     print("=" * 50)

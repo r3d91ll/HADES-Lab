@@ -89,12 +89,20 @@ class DocumentProvider(ABC):
     
     @abstractmethod
     def get_document_text(self, document_id: str) -> Optional[str]:
-        """Get full text of a document by ID."""
+        """
+        Return the full text of a document identified by document_id, or None if the document is not found or cannot be retrieved.
+        
+        Implementations should accept a provider-specific document identifier (e.g., paper id, filename, or database key) and return the document's complete text as a single string. If the document does not exist or an error occurs while fetching it, return None.
+        """
         pass
     
     @abstractmethod
     def get_document_chunks(self, document_id: str) -> List[str]:
-        """Get text chunks of a document by ID."""
+        """
+        Return the document's text split into sequential text chunks (paragraph-like segments).
+        
+        The implementation is expected to return a list of non-empty, stripped string chunks representing the document's text (e.g., paragraph or section fragments) in their original order. If the document cannot be found or an error occurs, implementations should return an empty list.
+        """
         pass
 
 class ArangoDocumentProvider(DocumentProvider):
@@ -103,6 +111,21 @@ class ArangoDocumentProvider(DocumentProvider):
     """
     
     def __init__(self, arango_client, db_name: str = 'academy_store', username: str = None):
+        """
+        Initialize the ArangoDocumentProvider and establish a connection to the ArangoDB database.
+        
+        Parameters:
+            db_name (str): Name of the ArangoDB database to connect to (default: 'academy_store').
+            username (str | None): Optional username to authenticate with; if omitted, the `ARANGO_USERNAME`
+                environment variable is used (defaults to 'root' when that variable is not set).
+        
+        Raises:
+            ValueError: If the `ARANGO_PASSWORD` environment variable is not set.
+        
+        Side effects:
+            - Stores the provided Arango client on `self.client`.
+            - Opens and stores a database connection on `self.db`.
+        """
         self.client = arango_client
         username = username or os.getenv('ARANGO_USERNAME', 'root')
         password = os.getenv('ARANGO_PASSWORD')
@@ -116,7 +139,13 @@ class ArangoDocumentProvider(DocumentProvider):
         return ' '.join(chunks) if chunks else None
     
     def get_document_chunks(self, document_id: str) -> List[str]:
-        """Get document chunks from ArangoDB."""
+        """
+        Retrieve ordered text chunks for a paper from the ArangoDB `arxiv_chunks` collection.
+        
+        Given a paper identifier, queries the `arxiv_chunks` collection for documents with matching
+        `paper_id`, sorts results by `chunk_index` ascending, and returns the list of chunk texts.
+        On any error (including query failure) an empty list is returned.
+        """
         try:
             cursor = self.db.aql.execute("""
             FOR chunk IN arxiv_chunks
@@ -136,10 +165,21 @@ class FileSystemDocumentProvider(DocumentProvider):
     """
     
     def __init__(self, base_path: str):
+        """
+        Initialize the FileSystemDocumentProvider.
+        
+        Parameters:
+            base_path (str): Filesystem directory containing text documents (each document expected as `<document_id>.txt`).
+        """
         self.base_path = base_path
     
     def get_document_text(self, document_id: str) -> Optional[str]:
-        """Read full text from file."""
+        """
+        Return the full text of a document read from the filesystem or None if unavailable"""
+        Return the full text of a document stored as "<document_id>.txt" under the provider's base path.
+        
+        If the file is found and readable, returns its contents as a UTF-8 string. If the file cannot be opened or read, logs the error and returns None.
+        """
         try:
             file_path = f"{self.base_path}/{document_id}.txt"
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -149,7 +189,11 @@ class FileSystemDocumentProvider(DocumentProvider):
             return None
     
     def get_document_chunks(self, document_id: str) -> List[str]:
-        """Split document into chunks by paragraphs."""
+        """
+        Return the document split into paragraph chunks.
+        
+        Each chunk is produced by splitting the document text on double newlines, stripping surrounding whitespace, and discarding empty paragraphs. If the document text is unavailable or empty, returns an empty list.
+        """
         text = self.get_document_text(document_id)
         if not text:
             return []
@@ -171,18 +215,51 @@ class CitationStorage(ABC):
     
     @abstractmethod
     def store_bibliography_entries(self, entries: List[BibliographyEntry]) -> bool:
-        """Store bibliography entries."""
+        """
+        Persist a list of BibliographyEntry records to the configured backend.
+        
+        Implementations should attempt to store all provided entries and return True if the operation completed successfully (entries persisted or already present), or False if the storage failed.
+        
+        Parameters:
+            entries (List[BibliographyEntry]): Bibliography entries to persist; may be empty.
+        
+        Returns:
+            bool: True on successful storage, False on failure.
+        """
         pass
     
     @abstractmethod
     def store_citations(self, citations: List[InTextCitation]) -> bool:
-        """Store in-text citations."""
+        """
+        Persist a list of in-text citation records to the storage backend.
+        
+        Parameters:
+            citations (List[InTextCitation]): List of in-text citation dataclass instances to persist.
+        
+        Returns:
+            bool: True if all citations were stored successfully, False on any failure.
+        """
         pass
 
 class ArangoCitationStorage(CitationStorage):
     """Citation storage for ArangoDB."""
     
     def __init__(self, arango_client, db_name: str = 'academy_store', username: str = None):
+        """
+        Initialize the ArangoDocumentProvider and establish a connection to the ArangoDB database.
+        
+        Parameters:
+            db_name (str): Name of the ArangoDB database to connect to (default: 'academy_store').
+            username (str | None): Optional username to authenticate with; if omitted, the `ARANGO_USERNAME`
+                environment variable is used (defaults to 'root' when that variable is not set).
+        
+        Raises:
+            ValueError: If the `ARANGO_PASSWORD` environment variable is not set.
+        
+        Side effects:
+            - Stores the provided Arango client on `self.client`.
+            - Opens and stores a database connection on `self.db`.
+        """
         self.client = arango_client
         username = username or os.getenv('ARANGO_USERNAME', 'root')
         password = os.getenv('ARANGO_PASSWORD')
@@ -191,7 +268,12 @@ class ArangoCitationStorage(CitationStorage):
         self.db = arango_client.db(db_name, username=username, password=password)
     
     def store_bibliography_entries(self, entries: List[BibliographyEntry]) -> bool:
-        """Store bibliography entries in ArangoDB."""
+        """
+        Persist a list of BibliographyEntry objects into the ArangoDB `bibliography_entries` collection.
+        
+        If `entries` is empty this is a no-op and returns True. Each entry is stored as a document with a generated `_key` of the form
+        `{source_paper_id}_{entry_number or 'unknown'}`. Documents are inserted; on unique-key conflicts the existing document is updated. Returns True on successful completion, or False if an error occurs while accessing or writing to the database.
+        """
         if not entries:
             return True
         
@@ -230,7 +312,23 @@ class ArangoCitationStorage(CitationStorage):
             return False
     
     def store_citations(self, citations: List[InTextCitation]) -> bool:
-        """Store in-text citations in ArangoDB."""
+        """
+        Store a list of in-text citation records in ArangoDB.
+        
+        This method is intended to persist each InTextCitation (typically by constructing
+        a document keyed from the citation's source_paper_id and citation span or id)
+        and to upsert on unique-key conflicts. It returns True on successful storage
+        and False on failure.
+        
+        Currently implemented as a placeholder that does not perform any persistence
+        and always returns True.
+        
+        Parameters:
+            citations (List[InTextCitation]): List of in-text citation dataclass instances to store.
+        
+        Returns:
+            bool: True if storage succeeded (placeholder currently always returns True), False on error.
+        """
         # Implementation similar to bibliography storage
         return True
 
@@ -238,11 +336,23 @@ class JSONCitationStorage(CitationStorage):
     """Citation storage to JSON files."""
     
     def __init__(self, output_dir: str):
+        """
+        Initialize the JSONCitationStorage.
+        
+        Creates the output directory if it does not already exist.
+        
+        Parameters:
+            output_dir (str): Path to the directory where JSON files (e.g., bibliography.json and citations.json) will be written.
+        """
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
     
     def store_bibliography_entries(self, entries: List[BibliographyEntry]) -> bool:
-        """Store bibliography entries to JSON."""
+        """
+        Write a list of BibliographyEntry objects to a JSON file named `bibliography.json` under the instance's output directory.
+        
+        The entries are serialized (by their dataclass attributes) and written with indentation; non-JSON-serializable values are converted using `str`. Returns True on successful write, False if an error occurs.
+        """
         import json
         
         try:
@@ -255,7 +365,15 @@ class JSONCitationStorage(CitationStorage):
             return False
     
     def store_citations(self, citations: List[InTextCitation]) -> bool:
-        """Store citations to JSON."""
+        """
+        Serialize a list of InTextCitation objects and write them to <output_dir>/citations.json.
+        
+        Parameters:
+            citations (List[InTextCitation]): List of in-text citation dataclass instances; each will be converted with dataclasses.asdict() before serialization.
+        
+        Returns:
+            bool: True on successful write, False if an error occurred while writing the file.
+        """
         try:
             data = [asdict(citation) for citation in citations]
             with open(f"{self.output_dir}/citations.json", 'w') as f:
@@ -274,14 +392,24 @@ class UniversalBibliographyExtractor:
     """
     
     def __init__(self, document_provider: DocumentProvider):
+        """
+        Initialize the UniversalBibliographyExtractor with a document provider.
+        
+        The provider is used to fetch full paper text and text chunks for bibliography section detection and entry parsing.
+        """
         self.document_provider = document_provider
     
     def extract_bibliography_section(self, paper_id: str) -> Optional[str]:
         """
-        Extract bibliography/references section from any academic paper.
+        Locate and return the bibliography/references section text for a given paper, if present.
         
-        Uses multiple strategies to identify reference sections regardless
-        of the source format or academic discipline.
+        Attempts multiple, source-agnostic strategies to find a references block:
+        1. Search for explicit section headers (e.g., "References", "Bibliography", "Works Cited") and return the following content when substantial.
+        2. Search near the end of the document for numbered reference lists (e.g., entries starting with `[n]`).
+        3. Search near the end of the document for author–year style reference blocks (repeated "Lastname, YYYY" lines).
+        
+        Returns:
+            The raw text of the detected bibliography/references section, or None if no suitable section is found or the document text is unavailable.
         """
         try:
             full_text = self.document_provider.get_document_text(paper_id)
@@ -333,13 +461,16 @@ class UniversalBibliographyExtractor:
     
     def parse_bibliography_entries(self, bibliography_text: str, paper_id: str) -> List[BibliographyEntry]:
         """
-        Parse bibliography entries from any academic format.
+        Parse a bibliography section into a list of BibliographyEntry objects.
         
-        Works with:
-        - Numbered references [1], [2], etc.
-        - Author-year references
-        - Mixed formats
-        - Different academic disciplines
+        Attempts multiple tolerant strategies to handle common bibliography formats (numbered entries like "[1]", paragraph-separated entries, and multi-line author-year or prose-style entries). For each detected entry it calls _parse_single_entry; entries with very short content are skipped. Entry numbering is preserved from numbered lists when present or generated sequentially for paragraph/split strategies. On error the function returns an empty list.
+        
+        Parameters:
+            bibliography_text (str): The raw text of a paper's bibliography/references section (as extracted by extract_bibliography_section).
+            paper_id (str): Identifier of the source paper; assigned to each returned BibliographyEntry as source_paper_id.
+        
+        Returns:
+            List[BibliographyEntry]: Parsed bibliography entries (may be empty). Entries are filtered to remove trivial/too-short items; ordering follows the order found in the input.
         """
         entries = []
         
@@ -402,7 +533,20 @@ class UniversalBibliographyExtractor:
     
     def _parse_single_entry(self, entry_text: str, paper_id: str, entry_number: str = None) -> Optional[BibliographyEntry]:
         """
-        Parse a single bibliography entry - works with any academic format.
+        Parse a single bibliography entry string into a BibliographyEntry dataclass.
+        
+        This attempts to extract common bibliographic fields (arXiv ID, DOI, PMID, SSRN ID, year,
+        title, authors, venue) from a free-form entry line or paragraph. A numeric confidence
+        score (0.0–1.0) is computed based on which fields were found to indicate parsing quality.
+        
+        Parameters:
+            entry_text: The raw bibliography entry text to parse.
+            paper_id: The identifier of the source paper; stored as `source_paper_id` on the result.
+            entry_number: Optional original entry number or label from the bibliography (if available).
+        
+        Returns:
+            A BibliographyEntry populated with any extracted fields and a confidence score,
+            or None if the input is too short to parse or an error occurs.
         """
         if len(entry_text.strip()) < 20:
             return None
@@ -511,11 +655,17 @@ class UniversalBibliographyExtractor:
     
     def extract_paper_bibliography(self, paper_id: str) -> List[BibliographyEntry]:
         """
-        Extract complete bibliography for a single paper.
+        Extract the bibliography for a single paper and return parsed entries.
         
-        This is the main entry point for bibliography extraction,
-        combining section identification with entry parsing to produce
-        a complete formal citation network for the paper.
+        Given a paper ID, locate the paper's bibliography/references section and parse it into
+        a list of BibliographyEntry objects. If no bibliography section can be found or an error
+        occurs during extraction, an empty list is returned.
+        
+        Parameters:
+            paper_id (str): Identifier of the source paper (e.g., arXiv ID or local document ID).
+        
+        Returns:
+            List[BibliographyEntry]: Parsed bibliography entries (may be empty if none found).
         """
         logger.info(f"Extracting bibliography for paper {paper_id}")
         
@@ -539,13 +689,25 @@ class UniversalCitationExtractor:
     """
     
     def __init__(self, document_provider: DocumentProvider):
+        """
+        Initialize the UniversalBibliographyExtractor with a document provider.
+        
+        The provider is used to fetch full paper text and text chunks for bibliography section detection and entry parsing.
+        """
         self.document_provider = document_provider
     
     def extract_citations(self, paper_id: str, bibliography_entries: List[BibliographyEntry]) -> List[InTextCitation]:
         """
-        Extract in-text citations and map them to bibliography entries.
+        Extract in-text citations from a paper and attempt to link each citation to a parsed bibliography entry.
         
-        This is the second step after bibliography extraction.
+        This method scans the full text of the paper identified by `paper_id` (via the provider attached to the extractor) to locate in-text citation tokens (e.g., numbered forms like “[1]”, parenthetical numeric lists, and author–year forms like “(Smith, 2020)”). For each detected citation it produces an InTextCitation containing the citation text, its span (start_pos, end_pos), surrounding context, a best-effort `bibliography_ref` that refers to the matched BibliographyEntry (if resolvable), and a confidence score reflecting match quality.
+        
+        Parameters:
+            paper_id (str): Identifier of the source paper whose text will be scanned for citations.
+            bibliography_entries (List[BibliographyEntry]): Parsed bibliography entries for `paper_id` used to resolve and disambiguate in-text mentions.
+        
+        Returns:
+            List[InTextCitation]: A list of discovered in-text citations. If no citations are found, returns an empty list. The method does not raise on missing data; unresolved citations have `bibliography_ref = None` and a lower confidence.
         """
         # Implementation for extracting [1], [2], (Author, Year) citations
         # and mapping them to bibliography entries
@@ -553,14 +715,28 @@ class UniversalCitationExtractor:
 
 # Factory functions for easy setup
 def create_arxiv_citation_toolkit(arango_client) -> Tuple[UniversalBibliographyExtractor, ArangoCitationStorage]:
-    """Create citation toolkit for ArXiv papers in ArangoDB."""
+    """
+    Create a toolkit configured to extract bibliographies from ArXiv papers and store results in ArangoDB.
+    
+    Returns:
+        Tuple[UniversalBibliographyExtractor, ArangoCitationStorage]: A tuple containing a bibliography extractor wired to an ArangoDocumentProvider and an Arango-backed citation storage instance.
+    """
     document_provider = ArangoDocumentProvider(arango_client)
     storage = ArangoCitationStorage(arango_client)
     extractor = UniversalBibliographyExtractor(document_provider)
     return extractor, storage
 
 def create_filesystem_citation_toolkit(file_path: str, output_path: str) -> Tuple[UniversalBibliographyExtractor, JSONCitationStorage]:
-    """Create citation toolkit for local files with JSON output."""
+    """
+    Create a filesystem-backed citation toolkit that reads papers from plain-text files and writes results as JSON.
+    
+    Parameters:
+        file_path (str): Directory containing paper text files (each expected as "<paper_id>.txt").
+        output_path (str): Directory where JSON output files (bibliography.json, citations.json) will be written; created if missing.
+    
+    Returns:
+        Tuple[UniversalBibliographyExtractor, JSONCitationStorage]: A bibliography extractor configured with a FileSystemDocumentProvider and a JSONCitationStorage for persisting results.
+    """
     document_provider = FileSystemDocumentProvider(file_path)
     storage = JSONCitationStorage(output_path)
     extractor = UniversalBibliographyExtractor(document_provider)
@@ -568,7 +744,24 @@ def create_filesystem_citation_toolkit(file_path: str, output_path: str) -> Tupl
 
 # Main function to test the toolkit
 def main():
-    """Test the universal citation toolkit."""
+    """
+    Run a simple CLI test/demo of the Universal Academic Citation Toolkit.
+    
+    This convenience entrypoint exercises the extractor and storage components against a small
+    set of example paper IDs. It:
+    - Creates an Arango-backed toolkit using create_arxiv_citation_toolkit.
+    - For each test paper, attempts to extract the bibliography section, parse bibliography
+      entries, prints a short human-readable summary to stdout, and persists parsed entries
+      via the configured storage backend.
+    
+    Notes:
+    - Intended for local/manual testing and demonstration only (prints to stdout and performs
+      network and file I/O).
+    - Expects an ArangoDB instance reachable at the configured host in the code; ARANGO_PASSWORD
+      may be read from the environment in some setups.
+    - Side effects: network access to ArangoDB, console output, and storage writes via the
+      chosen CitationStorage implementation.
+    """
     import os
     from arango import ArangoClient
     

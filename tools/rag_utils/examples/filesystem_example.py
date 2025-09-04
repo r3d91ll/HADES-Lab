@@ -22,7 +22,13 @@ except ImportError as e:
     raise
 
 def create_sample_paper(file_path: str):
-    """Create a sample academic paper for testing."""
+    """
+    Create a small synthetic academic paper and write it to the given path.
+    
+    The file contains a multi-section example (title, Abstract, Introduction, Related Work, Methodology,
+    Results, Conclusion) and a References section with five bibliographic entries. The file is written
+    using UTF-8 encoding; any existing file at file_path will be overwritten.
+    """
     sample_content = """
 # Advances in Natural Language Processing
 
@@ -61,7 +67,23 @@ This work presents a novel contribution to natural language processing.
         f.write(sample_content.strip())
 
 def main():
-    """Demonstrate citation extraction from local files."""
+    """
+    Demonstrates extracting bibliographic entries from a local text file and storing results as JSON.
+    
+    This example:
+    - Creates /tmp/sample_papers and /tmp/citation_results (if missing) and writes a sample paper to
+      /tmp/sample_papers/sample_nlp_paper.txt.
+    - Instantiates a filesystem-backed citation toolkit (via create_filesystem_citation_toolkit),
+      extracts bibliography entries for the sample paper (paper_id "sample_nlp_paper"), prints a
+      concise per-entry summary (title, arXiv/DOI, author preview, venue, year, confidence, raw text
+      snippet), and attempts to store the extracted entries to output_dir/bibliography.json.
+    - On successful storage, loads the JSON to print a small storage summary (entry count, file size,
+      and a sample stored entry).
+    
+    Side effects:
+    - Creates filesystem paths and files described above.
+    - Prints progress and diagnostic information to stdout.
+    """
     
     print("📁 Filesystem Citation Extraction Example")
     print("=" * 50) 

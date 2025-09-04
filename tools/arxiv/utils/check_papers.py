@@ -23,13 +23,33 @@ from core.database.arango_db_manager import ArangoDBManager
 
 def check_existing_papers(paper_list_file: str = None) -> Dict:
     """
-    Check which papers from a list are already in ArangoDB.
+    Determine which ArXiv paper IDs from a list are already present in ArangoDB and classify their processing status.
     
-    Args:
-        paper_list_file: Path to file with ArXiv IDs (one per line)
-        
+    Reads a newline-separated file of ArXiv IDs (one ID per line). If no path is provided, the function selects the latest matching file named "arxiv_ids*.txt" from the project's data/arxiv_collections directory (resolved relative to the repository root). Connects to ArangoDB using the ARANGO_PASSWORD environment variable (and ARANGO_HOST if set), inspects the "arxiv_papers" collection for documents whose keys are the paper IDs with dots replaced by underscores, and classifies IDs as:
+    - processed (document exists and status == "PROCESSED"),
+    - failed (status == "FAILED"),
+    - unprocessed (not present or not marked as processed/failed).
+    
+    Side effects:
+    - Prints progress and a summary to stdout.
+    - If any unprocessed IDs are found, writes them to a timestamped file arxiv_ids_unprocessed_<timestamp>.txt in data/arxiv_collections and prints the suggested CLI command to process that file.
+    
+    Parameters:
+        paper_list_file (str, optional): Path to a text file with ArXiv IDs (one per line). If None, the function attempts to locate the latest arxiv_ids*.txt in the project's data/arxiv_collections directory.
+    
     Returns:
-        Dictionary with statistics
+        dict: A dictionary with keys:
+            - total (int): total IDs read from the input list.
+            - processed (int): count of IDs already processed.
+            - failed (int): count of IDs with status FAILED.
+            - unprocessed (int): count of IDs not processed (total - processed - failed).
+            - existing_ids (set): set of IDs classified as processed.
+            - failed_ids (set): set of IDs classified as failed.
+            - unprocessed_ids (list): list of IDs that are not processed.
+    
+    Notes:
+        - The function requires ARANGO_PASSWORD to be set in the environment; if missing or if a DB error occurs, the function prints an error and returns an empty dict.
+        - Collection names checked for statistics include "arxiv_papers", "arxiv_embeddings", and "arxiv_chunks".
     """
     # Get ArangoDB password
     arango_password = os.getenv('ARANGO_PASSWORD')

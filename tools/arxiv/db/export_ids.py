@@ -288,6 +288,11 @@ def collect_stats(cfg: ArxivDBConfig, where_sql: str, params: list[Any]) -> dict
 
 
 def main() -> None:
+    """
+    CLI entrypoint: parse arguments, query the database for arXiv IDs, gather stats, and write export files.
+    
+    Parses command-line options (filters, caps, PDF flags, output directory, and whether to write monthly lists), builds the SQL needed to select matching arXiv IDs, executes that query to collect IDs, computes summary statistics, optionally collects per-month ID lists, and writes the resulting ID lists and stats to disk. Errors while querying or computing statistics are logged and cause safe fallbacks (empty ID list or minimal stats); failures collecting monthly lists disable monthly output. Uses the loaded DB configuration and the module's helper functions for query construction, database access, and file output. Returns None.
+    """
     parser = argparse.ArgumentParser(description="Export arXiv ID lists and stats from Postgres")
     parser.add_argument("--config", type=str, default="tools/arxiv/configs/db.yaml")
     parser.add_argument("--start-year", type=int, default=None)

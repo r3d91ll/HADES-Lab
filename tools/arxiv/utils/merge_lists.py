@@ -22,17 +22,22 @@ logger = logging.getLogger(__name__)
 
 def merge_id_files(*id_files, output_dir: str = "../../../data/arxiv_collections") -> Path:
     """
-    Merge multiple ID text files into a single file.
+    Merge multiple text files of ArXiv IDs into a single deduplicated, timestamped file.
     
-    Args:
-        *id_files: Paths to ID files to merge
-        output_dir: Output directory for merged file
-        
+    Reads each provided input path as a UTF-8 text file (one arXiv ID per line), collects non-empty IDs,
+    deduplicates them, sorts them for deterministic ordering, and writes them to
+    `arxiv_ids_merged_<timestamp>.txt` in the specified output directory.
+    
+    Parameters:
+        *id_files: One or more paths to text files containing arXiv IDs (one ID per line).
+        output_dir (str): Directory where the merged file will be written; created if it does not exist.
+    
     Returns:
-        Path to merged file
+        pathlib.Path: Path to the written merged ID file.
     
     Raises:
-        ValueError: If no valid ID files provided or no valid IDs found
+        ValueError: If no id_files are provided, if the output directory cannot be created/written,
+                    or if no valid IDs are found in any input files.
     """
     # Validate at least one input file provided
     if not id_files:
@@ -89,14 +94,22 @@ def merge_id_files(*id_files, output_dir: str = "../../../data/arxiv_collections
 
 def merge_json_collections(*json_files, output_dir: str = "../../../data/arxiv_collections") -> Path:
     """
-    Merge multiple JSON collection files.
+    Merge multiple ArXiv JSON collection files into a single deduplicated collection file.
     
-    Args:
-        *json_files: Paths to JSON collection files
-        output_dir: Output directory for merged file
-        
+    Merges the `papers` sections from the provided JSON files, deduplicating entries by each paper's `arxiv_id`. Input files that do not exist are skipped (a warning is logged). The output directory is created if it does not exist. Produces two outputs in the output directory with a timestamped basename:
+    - A merged JSON file (returned Path) containing:
+      - `collection_date` (ISO timestamp),
+      - `total_papers` (int),
+      - `topics` (mapping topic -> paper count),
+      - `papers` (mapping topic -> list of paper objects).
+    - A plaintext ID file listing the sorted unique arXiv IDs, one per line.
+    
+    Parameters:
+        *json_files: One or more paths to JSON collection files. Each file is expected to contain a top-level `papers` mapping of topic -> list of paper objects, where each paper object includes an `arxiv_id`.
+        output_dir: Directory where the merged JSON and ID files will be written; created if necessary.
+    
     Returns:
-        Path to merged file
+        Path: Path to the created merged JSON file.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -183,7 +196,18 @@ def print_collection_stats(json_file: str):
 
 
 def main():
-    """Example usage."""
+    """
+    Command-line entry point for merging ArXiv ID lists or JSON collections and for printing collection statistics.
+    
+    When run as a script, parses command-line arguments and dispatches to one of three actions:
+    - --id-files <files...>: merge text files containing ArXiv IDs into a single deduplicated, timestamped file in the output directory.
+    - --json-files <files...>: merge JSON collection files into a single deduplicated collection JSON (and an accompanying IDs file) in the output directory.
+    - --stats <file>: print human-readable statistics for the specified collection JSON.
+    
+    If multiple action flags are supplied, precedence is: --stats, then --id-files, then --json-files. If no action flag is provided, prints usage information.
+    
+    The default output directory is "../../../data/arxiv_collections".
+    """
     import argparse
     
     parser = argparse.ArgumentParser(description="Merge ArXiv paper lists")
