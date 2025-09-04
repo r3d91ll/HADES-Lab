@@ -9,16 +9,16 @@ status checking, and system reporting.
 
 Usage Examples:
     # Process a single paper
-    python lifecycle_cli.py process 2508.21038
+    python lifecycle.py process 2508.21038
     
     # Check status of a paper
-    python lifecycle_cli.py status 2508.21038
+    python lifecycle.py status 2508.21038
     
     # Process multiple papers
-    python lifecycle_cli.py batch papers.txt
+    python lifecycle.py batch papers.txt
     
     # Force reprocessing
-    python lifecycle_cli.py process 2508.21038 --force
+    python lifecycle.py process 2508.21038 --force
 """
 
 import os
@@ -29,12 +29,9 @@ import logging
 from pathlib import Path
 from typing import List
 
-# Add utils directory to path for imports
-utils_dir = Path(__file__).parent.parent / "utils"
-sys.path.insert(0, str(utils_dir))
-
-from arxiv_lifecycle_manager import ArXivLifecycleManager, PaperStatus, LifecycleResult
-from arxiv_api_client import ArXivAPIClient
+# Use proper relative imports within utils package
+from .arxiv_lifecycle_manager import ArXivLifecycleManager, PaperStatus, LifecycleResult
+from .arxiv_api_client import ArXivAPIClient
 
 logger = logging.getLogger(__name__)
 

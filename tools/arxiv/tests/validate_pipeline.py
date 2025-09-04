@@ -172,7 +172,14 @@ def check_pipeline() -> Tuple[bool, List[str]]:
 
 
 def main():
-    """Run all validation checks."""
+    """
+    Run all validation checks and print a human-readable summary.
+    
+    Executes the Environment, Dependencies, Database, and Pipeline readiness checks in sequence, collects any reported issues, prints per-check results and a final summary to stdout, and suggests next steps when all checks pass.
+    
+    Returns:
+        int: Exit code 0 when all checks pass; 1 when any check fails or an exception occurs during checking.
+    """
     print("="*60)
     print("ArXiv Pipeline Validation")
     print("="*60)
@@ -214,8 +221,8 @@ def main():
     if all_good:
         print("✅ ALL CHECKS PASSED - Pipeline ready for testing!")
         print("\nNext steps:")
-        print("1. Run: cd tools/arxiv/scripts")
-        print("2. Run: python collect_ai_papers.py")
+        print("1. Run: cd tools/arxiv/utils")
+        print("2. Run: python lifecycle.py process [arxiv_id]")
         print("3. Run: cd ../tests")
         print("4. Run: ./run_large_scale_test.sh")
         return 0

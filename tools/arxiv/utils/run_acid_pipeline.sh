@@ -4,6 +4,10 @@
 # Achieves 6.2 papers/minute with 100% success rate
 #
 
+# Enable strict error handling
+set -euo pipefail
+IFS=$'\n\t'
+
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/../../../.." && pwd )"
@@ -67,6 +71,7 @@ echo
 
 python arxiv_pipeline.py \
     --config "$CONFIG_FILE" \
+    --arango-password "$ARANGO_PASSWORD" \
     2>&1 | tee "$LOG_FILE"
 
 # Check exit status

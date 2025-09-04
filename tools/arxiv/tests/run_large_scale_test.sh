@@ -46,32 +46,31 @@ echo "Working directory: $PROJECT_ROOT"
 echo -e "\n${GREEN}Step 1: Collecting papers from ArXiv API${NC}"
 echo "This will search for papers on AI, RAG, LLMs, and Actor Network Theory"
 
-cd "$ARXIV_TOOLS/scripts"
+cd "$ARXIV_TOOLS/utils"
 
-if [ ! -f "data/arxiv_collections/arxiv_ids_*.txt" ]; then
-    echo "Running paper collection script..."
-    python collect_ai_papers.py
-    
-    # Check if we got enough papers
-    PAPER_COUNT=$(wc -l < data/arxiv_collections/arxiv_ids_*.txt | head -1)
-    echo -e "${GREEN}Collected $PAPER_COUNT unique papers${NC}"
-    
-    if [ "$PAPER_COUNT" -lt 5000 ]; then
-        echo -e "${YELLOW}Warning: Only collected $PAPER_COUNT papers (target: 5000+)${NC}"
-        echo "Consider adjusting search queries or date ranges"
-    fi
+# Use compgen to safely check for matching files
+PAPER_LIST_FILES=($(compgen -G "../../../data/arxiv_collections/arxiv_ids_*.txt"))
+
+if [ ${#PAPER_LIST_FILES[@]} -eq 0 ]; then
+    echo "No existing paper lists found. You need to create a paper list first."
+    echo -e "${YELLOW}Note: Use the lifecycle manager to process papers:${NC}"
+    echo "python lifecycle.py batch <paper_list.txt>"
+    exit 1
 else
-    echo "Using existing paper collection"
-    PAPER_FILE=$(ls -t data/arxiv_collections/arxiv_ids_*.txt | head -1)
-    PAPER_COUNT=$(wc -l < "$PAPER_FILE")
-    echo -e "${GREEN}Found $PAPER_COUNT papers in $PAPER_FILE${NC}"
+    # Use the most recent file by modification time
+    PAPER_LIST=$(ls -t "${PAPER_LIST_FILES[@]}" | head -1)
+    PAPER_COUNT=$(wc -l < "$PAPER_LIST")
+    echo -e "${GREEN}Found $PAPER_COUNT papers in $PAPER_LIST${NC}"
+    
+    if [ "$PAPER_COUNT" -lt 100 ]; then
+        echo -e "${YELLOW}Warning: Only found $PAPER_COUNT papers (recommended: 100+)${NC}"
+        echo "Consider creating a larger paper list for comprehensive testing"
+    fi
 fi
 
-# Get the latest paper list file
-PAPER_LIST=$(ls -t data/arxiv_collections/arxiv_ids_*.txt 2>/dev/null | head -1)
-
-if [ -z "$PAPER_LIST" ]; then
-    echo -e "${RED}Error: No paper list found${NC}"
+# Validate paper list was properly set
+if [ -z "$PAPER_LIST" ] || [ ! -f "$PAPER_LIST" ]; then
+    echo -e "${RED}Error: No valid paper list found${NC}"
     exit 1
 fi
 

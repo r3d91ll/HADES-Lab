@@ -28,7 +28,7 @@ search:
 
 # Output configuration  
 output:
-  base_dir: tools/arxiv/scripts/data/arxiv_collections
+  base_dir: data/arxiv_collections
   write_monthly_lists: false
   write_stats: true
   write_with_pdf_list: true

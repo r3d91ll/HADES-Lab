@@ -23,9 +23,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Add utils directory to path for imports
-utils_dir = Path(__file__).parent.parent / "utils"
-sys.path.insert(0, str(utils_dir))
+# No sys.path manipulation needed - use proper package imports
 
 # Setup logging
 logging.basicConfig(

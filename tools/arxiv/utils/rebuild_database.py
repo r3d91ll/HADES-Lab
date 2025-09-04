@@ -17,15 +17,43 @@ from datetime import datetime
 from typing import Dict, Set, Optional, List
 import re
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/home/todd/olympus/HADES-Lab/tools/arxiv/logs/postgresql_rebuild_complete.log'),
-        logging.StreamHandler()
-    ]
-)
+# Setup logging with configurable path
+def setup_logging():
+    """
+    Configure application logging and return the resolved log file path.
+    
+    If the environment variable REBUILD_LOG_PATH is set, its value is used as the log file path;
+    otherwise a project-relative "logs/postgresql_rebuild.log" under the package parent is used.
+    The function ensures the log directory exists, installs a FileHandler (to the resolved path)
+    and a StreamHandler, and sets the global logging level and format.
+    
+    Returns:
+        pathlib.Path: The resolved log file path that was configured for the FileHandler.
+    """
+    # Use project-relative path or environment variable
+    log_path = os.getenv('REBUILD_LOG_PATH')
+    if not log_path:
+        script_dir = Path(__file__).parent.resolve()
+        log_dir = script_dir.parent / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        log_path = log_dir / 'postgresql_rebuild.log'
+    
+    # Ensure log directory exists
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_path),
+            logging.StreamHandler()
+        ]
+    )
+    return log_path
+
+# Initialize logging
+log_path = setup_logging()
 logger = logging.getLogger(__name__)
 
 class PostgreSQLRebuilder:
@@ -71,18 +99,17 @@ class PostgreSQLRebuilder:
     
     def parse_date(self, date_str: str) -> Optional[datetime.date]:
         """
-        Parse an arXiv metadata date/time string and return a datetime.date or None.
+        Normalize arXiv metadata date/time strings to a datetime.date.
         
-        Accepts several common representations produced in arXiv metadata, including:
-        - ISO dates: "YYYY-MM-DD"
-        - RFC-style GMT timestamps: "Mon, 2 Apr 2007 19:18:42 GMT"
-        - Some common variants such as "YYYY-MM-DD HH:MM:SS", "YYYY/MM/DD", and "MM/DD/YYYY"
+        Accepts common arXiv formats such as "YYYY-MM-DD", RFC-style GMT timestamps like
+        "Mon, 2 Apr 2007 19:18:42 GMT", and variants including "YYYY-MM-DD HH:MM:SS",
+        "YYYY/MM/DD", and "MM/DD/YYYY". Returns None for falsy inputs or when parsing fails.
         
         Parameters:
-            date_str (str): Date/time string from metadata. Falsy values (None, empty string) return None.
+            date_str: Date/time string from metadata.
         
         Returns:
-            datetime.date | None: Parsed date on success; None if input is falsy or cannot be parsed.
+            A datetime.date on successful parse, or None if input is falsy or cannot be parsed.
         """
         if not date_str:
             return None
@@ -101,7 +128,7 @@ class PostgreSQLRebuilder:
             # Try other common formats
             for fmt in ['%Y-%m-%d %H:%M:%S', '%Y/%m/%d', '%m/%d/%Y']:
                 try:
-                    return datetime.strptime(date_str[:10], '%Y-%m-%d').date()
+                    return datetime.strptime(date_str, fmt).date()
                 except:
                     continue
         
@@ -291,12 +318,12 @@ class PostgreSQLRebuilder:
     
     def scan_and_update_pdfs(self):
         """
-        Scan the configured PDF directory tree and update the papers table with PDF presence, path, and size.
+        Scan the configured PDF directory tree and update papers with PDF presence, path, and size.
         
-        Walks year-month subdirectories under self.pdf_dir, finds files ending with `.pdf`, derives the arXiv identifier by stripping version suffix (e.g. `1234.5678v2 -> 1234.5678`), and batches updates to the database via self._update_pdf_batch. Updates self.stats['pdfs_found'] as batches are applied.
+        Searches year-month subdirectories under self.pdf_dir for files ending with `.pdf`. For each file, derives the arXiv identifier by removing a trailing version suffix (e.g., `1234.5678v2` → `1234.5678`) and submits batched updates to the database via self._update_pdf_batch. Updates self.stats['pdfs_found'] as batches are applied.
         
         Returns:
-            bool: True on successful scan and update, False if the configured PDF directory does not exist.
+            bool: True if the scan completed (even if some batch updates logged errors), False if the configured PDF directory does not exist.
         """
         logger.info("Scanning PDFs and updating database...")
         
@@ -315,7 +342,8 @@ class PostgreSQLRebuilder:
             logger.info(f"Scanning PDF directory: {year_month}")
             
             for pdf_file in year_month_dir.glob("*.pdf"):
-                arxiv_id = pdf_file.stem.split('v')[0]  # Remove version
+                # Remove version suffix if present (e.g., '1234.5678v2' -> '1234.5678')
+                arxiv_id = re.sub(r'v\d+$', '', pdf_file.stem)
                 pdf_path = str(pdf_file)
                 file_size = pdf_file.stat().st_size
                 
@@ -572,11 +600,20 @@ class PostgreSQLRebuilder:
                     
                     print(f"\nFinal Database Status:")
                     print(f"  Total papers: {total:,}")
-                    print(f"  Papers with PDF: {with_pdf:,} ({with_pdf/total*100:.1f}%)")
-                    print(f"  Papers with LaTeX: {with_latex:,} ({with_latex/total*100:.1f}%)")
-                    print(f"  Papers without LaTeX: {no_latex:,} ({no_latex/total*100:.1f}%)")
-                    print(f"  Computer Science papers: {cs_papers:,} ({cs_papers/total*100:.1f}%)")
-                    print(f"  Papers from 2020+: {recent_papers:,} ({recent_papers/total*100:.1f}%)")
+                    
+                    # Guard against division by zero
+                    if total > 0:
+                        print(f"  Papers with PDF: {with_pdf:,} ({with_pdf/total*100:.1f}%)")
+                        print(f"  Papers with LaTeX: {with_latex:,} ({with_latex/total*100:.1f}%)")
+                        print(f"  Papers without LaTeX: {no_latex:,} ({no_latex/total*100:.1f}%)")
+                        print(f"  Computer Science papers: {cs_papers:,} ({cs_papers/total*100:.1f}%)")
+                        print(f"  Papers from 2020+: {recent_papers:,} ({recent_papers/total*100:.1f}%)")
+                    else:
+                        print(f"  Papers with PDF: {with_pdf:,} (N/A)")
+                        print(f"  Papers with LaTeX: {with_latex:,} (N/A)")
+                        print(f"  Papers without LaTeX: {no_latex:,} (N/A)")
+                        print(f"  Computer Science papers: {cs_papers:,} (N/A)")
+                        print(f"  Papers from 2020+: {recent_papers:,} (N/A)")
             
             conn.close()
             
