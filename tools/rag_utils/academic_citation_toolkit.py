@@ -112,19 +112,18 @@ class ArangoDocumentProvider(DocumentProvider):
     
     def __init__(self, arango_client, db_name: str = 'academy_store', username: str = None):
         """
-        Initialize the ArangoDocumentProvider and establish a connection to the ArangoDB database.
+        Initialize the ArangoDocumentProvider and open a connection to the specified ArangoDB database.
         
         Parameters:
-            db_name (str): Name of the ArangoDB database to connect to (default: 'academy_store').
-            username (str | None): Optional username to authenticate with; if omitted, the `ARANGO_USERNAME`
-                environment variable is used (defaults to 'root' when that variable is not set).
+            db_name (str): Database name to connect to. Defaults to 'academy_store'.
+            username (str | None): Optional username to authenticate with. If None, the ARANGO_USERNAME
+                environment variable is used (defaults to 'root').
         
         Raises:
-            ValueError: If the `ARANGO_PASSWORD` environment variable is not set.
+            ValueError: If the ARANGO_PASSWORD environment variable is not set.
         
         Side effects:
-            - Stores the provided Arango client on `self.client`.
-            - Opens and stores a database connection on `self.db`.
+            Stores the provided Arango client on self.client and the opened database connection on self.db.
         """
         self.client = arango_client
         username = username or os.getenv('ARANGO_USERNAME', 'root')
@@ -134,7 +133,14 @@ class ArangoDocumentProvider(DocumentProvider):
         self.db = arango_client.db(db_name, username=username, password=password)
     
     def get_document_text(self, document_id: str) -> Optional[str]:
-        """Get full document text by combining all chunks."""
+        """
+        Return the full text for the given document by concatenating its ordered text chunks.
+        
+        Fetches chunked paragraphs via get_document_chunks(document_id) and joins them with single spaces. Returns None if no chunks are available or the document cannot be retrieved.
+         
+        Returns:
+            Optional[str]: Concatenated document text, or None when unavailable.
+        """
         chunks = self.get_document_chunks(document_id)
         return ' '.join(chunks) if chunks else None
     
@@ -166,16 +172,21 @@ class FileSystemDocumentProvider(DocumentProvider):
     
     def __init__(self, base_path: str):
         """
-        Initialize the FileSystemDocumentProvider.
+        File-system based DocumentProvider initializer.
         
+        Initialize with the base directory where text documents are stored; documents are expected to be UTF-8 text files named "<document_id>.txt".
+          
         Parameters:
-            base_path (str): Filesystem directory containing text documents (each document expected as `<document_id>.txt`).
+            base_path (str): Path to the directory containing document files.
         """
         self.base_path = base_path
     
     def get_document_text(self, document_id: str) -> Optional[str]:
         """
-        Return the full text of a document read from the filesystem or None if unavailable"""
+        Return the file contents of "<document_id>.txt" under the provider's base path or None if unavailable.
+        
+        Attempts to open and read the file as UTF-8 and returns its full text as a string. If the file does not exist or cannot be read, returns None.
+        """
         Return the full text of a document stored as "<document_id>.txt" under the provider's base path.
         
         If the file is found and readable, returns its contents as a UTF-8 string. If the file cannot be opened or read, logs the error and returns None.
