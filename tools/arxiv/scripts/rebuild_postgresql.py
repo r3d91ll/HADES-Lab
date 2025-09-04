@@ -31,7 +31,23 @@ try:
 except Exception:
     # Fallback: local extractor kept in sync with PDFScanner
     def _id_extractor(filename: str) -> str:
-        """Extract ArXiv ID from PDF filename (fallback implementation)."""
+        """
+        Extract an arXiv identifier from a PDF filename (fallback).
+        
+        Removes a trailing ".pdf" and a trailing version suffix like "v2" before parsing.
+        Recognizes and returns:
+        - legacy category-style names converted to modern form: filenames with at least
+          three hyphen-separated parts where the final part is a numeric paper id
+          (e.g. "category-subcat-1234.pdf" -> "category/subcat/1234");
+        - modern numeric arXiv IDs of the form "YYYY.NNNN" or "YYYY.NNNNN" (returned unchanged).
+        For any other filename, returns the cleaned base filename (without ".pdf" or version suffix).
+        
+        Parameters:
+            filename (str): PDF filename (may include ".pdf" and a version suffix like "v2").
+        
+        Returns:
+            str: Extracted arXiv identifier or the cleaned base filename when no pattern matches.
+        """
         base_name = filename.replace(".pdf", "")
         base_name = re.sub(r"v\d+$", "", base_name)
 
@@ -49,7 +65,14 @@ except Exception:
 
 
 def get_log_file_path() -> Path:
-    """Get the log file path from environment variable or default location."""
+    """
+    Return the absolute path to the rebuild log file.
+    
+    Looks for the ARXIV_POSTGRESQL_REBUILD_LOG environment variable and, if present, uses its value (expanded and resolved). If the environment variable is not set, returns the default ../logs/postgresql_rebuild.log path relative to the script. Ensures the log file's parent directory exists before returning.
+    
+    Returns:
+        pathlib.Path: Resolved path to the log file.
+    """
     # Check environment variable first
     env_log_path = os.getenv("ARXIV_POSTGRESQL_REBUILD_LOG")
     if env_log_path:
@@ -95,6 +118,11 @@ class RebuildStats:
 
 class PostgreSQLRebuilder:
     def __init__(self):
+        """
+        Initialize the PostgreSQLRebuilder.
+        
+        Sets up the PostgreSQL connection configuration (host, database, user; password read from the PGPASSWORD environment variable), initializes RebuildStats, and records absolute default paths for the metadata snapshot, PDF archive, and LaTeX archive. Logs the configured paths.
+        """
         self.pg_config = {
             "host": "localhost",
             "database": "arxiv",
@@ -114,7 +142,17 @@ class PostgreSQLRebuilder:
         logger.info(f"LaTeX directory: {self.latex_dir}")
 
     def get_database_connection(self):
-        """Get PostgreSQL database connection with error handling."""
+        """
+        Return a new psycopg2 PostgreSQL connection configured from the instance's pg_config.
+        
+        Uses the instance's pg_config (host, database, user, password, etc.) and a 10-second connect timeout. On failure, raises ConnectionError wrapping the underlying error.
+         
+        Returns:
+            psycopg2.extensions.connection: An open connection to the PostgreSQL server.
+        
+        Raises:
+            ConnectionError: If the connection attempt fails.
+        """
         try:
             return psycopg2.connect(connect_timeout=10, **self.pg_config)
         except psycopg2.OperationalError as e:
@@ -129,7 +167,12 @@ class PostgreSQLRebuilder:
 
     def import_metadata_from_snapshot(self):
         """
-        Phase 1: Import all metadata from arxiv-metadata-oai-snapshot.json
+        Import paper metadata from the arxiv-metadata-oai-snapshot.json file into the PostgreSQL `papers` table.
+        
+        Reads the snapshot file line-by-line, parses each JSON record into the expected paper fields (arXiv id, title, abstract, authors, categories, doi, journal-ref, comments, submission and update dates) and performs batched upserts into the database. Updates the instance RebuildStats (metadata_imported and errors) as it processes records.
+        
+        Returns:
+            bool: True if the import completed and the transaction committed successfully; False if the metadata file is missing or a database/processing error occurred (the operation is rolled back on failure).
         """
         logger.info("Phase 1: Starting metadata import from snapshot...")
 
@@ -235,7 +278,30 @@ class PostgreSQLRebuilder:
         return True
 
     def _insert_paper_batch(self, cursor, batch):
-        """Insert a batch of papers into PostgreSQL."""
+        """
+        Bulk upsert a batch of paper records into the `papers` table.
+        
+        Each entry in `batch` must be an iterable with values in this exact order:
+        (arxiv_id, title, abstract, authors, categories, submission_date, update_date,
+         doi, journal_ref, comments, has_pdf, has_latex, pdf_path, latex_path).
+        
+        Performs an INSERT ... ON CONFLICT (arxiv_id) DO UPDATE, inserting new rows and
+        replacing the textual/metadata fields of existing rows (title, abstract, authors,
+        categories, submission_date, update_date, doi, journal_ref, comments).
+        
+        Parameters:
+            batch: iterable
+                Batch of records as described above. (The `cursor` parameter is a DB cursor
+                provided by the caller and is intentionally not documented as a service.)
+        
+        Side effects:
+            Executes SQL using the supplied `cursor`. Does not commit the transaction;
+            commit/rollback is the caller's responsibility.
+        
+        Exceptions:
+            Database exceptions raised by the underlying DB driver (e.g., psycopg2) will
+            propagate to the caller.
+        """
         insert_sql = """
             INSERT INTO papers (
                 arxiv_id, title, abstract, authors, categories,
@@ -258,7 +324,12 @@ class PostgreSQLRebuilder:
 
     def scan_and_update_pdfs(self):
         """
-        Phase 2: Scan local PDF directory and update has_pdf/pdf_path flags
+        Scan the local PDF archive, set has_pdf and pdf_path for found papers, and apply updates to the database in batches.
+        
+        This method walks numeric year-month subdirectories under self.pdf_dir, derives an arXiv identifier for each PDF using the module's ID extractor, and updates corresponding rows (has_pdf=True, pdf_path) in the database via batched calls to self._update_pdf_batch. Progress is accumulated in self.stats.pdfs_found.
+        
+        Returns:
+            bool: True on successful completion; False if the configured PDF directory does not exist.
         """
         logger.info("Phase 2: Scanning local PDFs and updating database...")
 
@@ -297,7 +368,18 @@ class PostgreSQLRebuilder:
         return True
 
     def _update_pdf_batch(self, pdf_updates):
-        """Update PDF flags for a batch of papers."""
+        """
+        Update database rows for a batch of PDF presence/path updates.
+        
+        This performs a transactional UPDATE on the papers table for each entry in pdf_updates,
+        increments the internal pdfs_found counter by the batch size, and closes the database
+        connection when finished. Errors during execution are caught; on failure the method
+        increments the internal error counter and does not re-raise.
+        
+        Parameters:
+            pdf_updates (Iterable[tuple]): An iterable of 3-tuples matching the SQL parameters:
+                (has_pdf: bool, pdf_path: str | None, arxiv_id: str).
+        """
         conn = self.get_database_connection()
         try:
             with conn:
@@ -322,7 +404,12 @@ class PostgreSQLRebuilder:
 
     def scan_and_update_latex(self):
         """
-        Phase 3: Scan local LaTeX directory and update has_latex/latex_path flags
+        Scan the local LaTeX archive tree and update papers' LaTeX availability in the database.
+        
+        Traverses numeric year-month subdirectories under self.latex_dir. For each *.tar.gz archive found the function marks the corresponding paper as having LaTeX (sets has_latex=True and records latex_path); for each *.pdf found in these directories the function treats it as a "no LaTeX" signal (sets has_latex=False and clears latex_path). ArXiv IDs for archives are derived from the archive filename (version suffix stripped); IDs for signal PDFs are derived using the module's _id_extractor. Updates are applied in batches by calling self._update_latex_batch(...), which performs the database writes and updates RebuildStats counters (latex_found or signal_files_found).
+        
+        Returns:
+            bool: False if the configured latex_dir does not exist; otherwise True on completion.
         """
         logger.info("Phase 3: Scanning local LaTeX files and updating database...")
 
@@ -373,7 +460,24 @@ class PostgreSQLRebuilder:
         return True
 
     def _update_latex_batch(self, latex_updates, is_latex: bool):
-        """Update LaTeX flags for a batch of papers."""
+        """
+        Update the database in a single transaction for a batch of LaTeX-related records.
+        
+        Parameters:
+            latex_updates (Sequence[Tuple[bool, Optional[str], str]]): Sequence of parameter tuples for executemany(),
+                each tuple is (has_latex, latex_path, arxiv_id).
+            is_latex (bool): True when the batch represents found LaTeX archives (increments latex_found);
+                False when the batch represents signal files indicating absence of LaTeX (increments signal_files_found).
+        
+        Side effects:
+            - Executes UPDATE statements against the papers table to set has_latex and latex_path.
+            - Increments the appropriate counter on self.stats.
+            - Logs errors and increments self.stats.errors on failure.
+            - Closes the database connection before returning.
+        
+        Returns:
+            None
+        """
         conn = self.get_database_connection()
         try:
             with conn:
@@ -398,7 +502,16 @@ class PostgreSQLRebuilder:
             conn.close()
 
     def print_final_summary(self):
-        """Print final rebuild summary."""
+        """
+        Print a concise final report of the rebuild run and query final database statistics.
+        
+        Sets self.stats.end_time (and computes duration if start_time exists), prints a human-readable
+        summary of counters gathered during the run (metadata imported, PDFs found, LaTeX found,
+        signal files indicating no LaTeX, and errors), then queries the database for totals and
+        percentages for papers, papers with PDFs, papers with LaTeX, and papers confirmed without LaTeX.
+        Any exceptions raised while querying the database are logged and swallowed; this method does not
+        propagate database query errors.
+        """
         self.stats.end_time = datetime.now()
         duration = self.stats.end_time - self.stats.start_time if self.stats.start_time else None
 
@@ -454,7 +567,22 @@ class PostgreSQLRebuilder:
             logger.error(f"Error querying final stats: {e}")
 
     def run_complete_rebuild(self):
-        """Run the complete PostgreSQL rebuild process."""
+        """
+        Orchestrates the full three-phase PostgreSQL rebuild and returns success status.
+        
+        Runs in order:
+        1. Import metadata from the snapshot (phase 1) — aborts the rebuild and returns False if this phase fails.
+        2. Scan and update PDFs (phase 2) — logs an error on failure but continues to phase 3.
+        3. Scan and update LaTeX sources and signal files (phase 3).
+        
+        Side effects:
+        - Updates the database via the phase methods.
+        - Updates self.stats.start_time (set before running) and final statistics via print_final_summary().
+        - Emits log messages describing progress and errors.
+        
+        Returns:
+            bool: True if the rebuild completed (phase 1 succeeded and phases 2/3 were attempted), False if phase 1 failed and the rebuild was aborted.
+        """
         self.stats.start_time = datetime.now()
         logger.info("Starting complete PostgreSQL ArXiv database rebuild...")
 
@@ -480,6 +608,16 @@ class PostgreSQLRebuilder:
 
 def main():
     # Verify environment variables
+    """
+    Run the full three-phase PostgreSQL ArXiv database rebuild from the command line.
+    
+    Performs environment validation, constructs a PostgreSQLRebuilder, and runs the end-to-end
+    rebuild (metadata import, PDF scan/update, LaTeX scan/update). Prints short progress
+    hints to stdout and returns an exit code suitable for use from a shell.
+    
+    Returns:
+        int: 0 on success; 1 on failure or if required environment variables are missing.
+    """
     if not os.getenv("PGPASSWORD"):
         print("❌ PGPASSWORD environment variable is required")
         print("   Set it with: export PGPASSWORD='your-password'")

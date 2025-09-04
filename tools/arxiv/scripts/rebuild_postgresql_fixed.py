@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 
 class PostgreSQLRebuilder:
     def __init__(self):
+        """
+        Initialize the rebuilder with default PostgreSQL connection settings and the metadata file path.
+        
+        Sets:
+        - self.pg_config: dict with connection parameters used to open new psycopg2 connections. Defaults are host 'localhost', database 'arxiv', user 'postgres', and password taken from the PGPASSWORD environment variable (empty string if unset).
+        - self.metadata_file: Path to the expected arXiv metadata JSONL snapshot (/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json).
+        """
         self.pg_config = {
             'host': 'localhost',
             'database': 'arxiv', 
@@ -35,11 +42,27 @@ class PostgreSQLRebuilder:
         self.metadata_file = Path("/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json")
         
     def get_database_connection(self):
-        """Get PostgreSQL database connection."""
+        """
+        Return a new psycopg2 database connection using the instance's configured pg_config.
+        
+        The caller is responsible for closing the returned connection (e.g., using a context manager or conn.close()).
+        Raises psycopg2.OperationalError if a connection cannot be established.
+        """
         return psycopg2.connect(**self.pg_config)
     
     def test_single_insert(self):
-        """Test inserting a single record to identify the issue."""
+        """
+        Attempt to insert a few sample records from the metadata file to verify basic write capability.
+        
+        Reads up to the first five JSON lines from the configured metadata file, parses each line, and for each record attempts a minimal INSERT into the `papers` table (columns: arxiv_id, title, has_pdf, has_latex). Titles are sanitized (newlines removed, trimmed) and truncated to 500 characters. The INSERT uses `ON CONFLICT (arxiv_id) DO NOTHING` to avoid duplicate-key failures.
+        
+        Returns:
+            bool: True if all tested inserts completed without error; False if any JSON decode error or any database insert/transaction error occurs.
+        
+        Side effects:
+        - Opens a new database connection for each tested record and closes it afterwards.
+        - May create new rows in `papers` (or do nothing for conflicts).
+        """
         logger.info("Testing single record insert...")
         
         # Read first few lines to test
@@ -88,7 +111,17 @@ class PostgreSQLRebuilder:
         return True
     
     def check_database_schema(self):
-        """Check database schema and constraints."""
+        """
+        Inspect the PostgreSQL "papers" table schema and constraints, logging discovered columns and table-level constraints.
+        
+        This method connects to the configured database, queries information_schema.columns for the
+        'papers' table (name, data type, character maximum length, nullability) and information_schema.table_constraints
+        for associated constraints, and logs the results for human inspection. The database connection is closed
+        before the method returns.
+        
+        Returns:
+            bool: True if the inspection completed without error; False if any exception occurred (the error is logged).
+        """
         logger.info("Checking database schema...")
         
         conn = self.get_database_connection()
@@ -130,7 +163,11 @@ class PostgreSQLRebuilder:
         return True
     
     def analyze_metadata_sample(self):
-        """Analyze a sample of metadata to understand the data structure."""
+        """
+        Inspect a small sample (up to three records) from the configured metadata JSONL file and log key fields and anomalies.
+        
+        Reads up to the first three lines of the metadata file and, for each successfully parsed record, logs: record id, title length, abstract length, type of the authors field, categories, and the first version's created date when present. Emits a warning if a title exceeds 500 characters. JSON decode errors for individual lines are logged and do not stop processing. This function has no return value; its observable effects are log messages.
+        """
         logger.info("Analyzing metadata sample...")
         
         with open(self.metadata_file, 'r') as f:
@@ -165,6 +202,14 @@ class PostgreSQLRebuilder:
 
 def main():
     # Verify environment variables
+    """
+    Entry point for the PostgreSQL rebuild diagnostics.
+    
+    Checks that the PGPASSWORD environment variable is set, instantiates PostgreSQLRebuilder, runs three diagnostic steps (schema check, metadata sample analysis, and a single-record insert test), prints human-readable status messages, and returns an exit code.
+    
+    Returns:
+        int: 0 on normal completion; 1 if the required PGPASSWORD environment variable is missing.
+    """
     if not os.getenv('PGPASSWORD'):
         print("❌ PGPASSWORD environment variable is required")
         return 1
