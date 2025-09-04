@@ -31,9 +31,9 @@ phases:
   
   # Phase 2: EMBEDDING (GPU-only)
   embedding:
-    workers: 6  # Back to 8 - 4 per GPU with proper cleanup
+    workers: 8  # Target ~7-8GB VRAM usage per worker
     gpu_devices: [0, 1]  # Both A6000s
-    workers_per_gpu: 3  # 4 workers per GPU - should be stable with cleanup
+    workers_per_gpu: 4  # 4 workers per GPU - should be stable with cleanup
     
     # Jina v4 settings
     jina:
@@ -82,7 +82,10 @@ processing:
   
   # Specific list source
   specific_list:
-    arxiv_ids: []  # Fill in as needed
+    arxiv_ids:
+      - '1301.3781'  # word2vec
+      - '1405.4053'  # doc2vec  
+      - '1803.09473' # code2vec
 
 # Performance Configuration
 performance:

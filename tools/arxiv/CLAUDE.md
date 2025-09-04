@@ -7,7 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Most Common Commands
 
 ```bash
-# Run ACID pipeline with phase separation
+# NEW: ArXiv Lifecycle Manager (Recommended)
+cd scripts/
+python lifecycle_cli.py process 2508.21038  # Single paper
+python lifecycle_cli.py batch papers.txt    # Multiple papers
+python lifecycle_cli.py status 2508.21038   # Check status
+
+# Traditional: ACID pipeline with phase separation
 cd pipelines/
 python arxiv_pipeline.py \
     --config ../configs/acid_pipeline_phased.yaml \
@@ -17,9 +23,10 @@ python arxiv_pipeline.py \
 # Monitor processing in real-time
 tail -f ../logs/acid_phased.log
 
-# Check database status
+# Database operations
 cd ../utils/
-python check_db_status.py --detailed
+python check_db_status.py --detailed  # Database status
+python rebuild_postgresql_complete.py # Full database rebuild
 
 # Check GPU usage
 nvidia-smi
@@ -50,26 +57,85 @@ ps aux | grep python | grep worker | wc -l
 5. **Direct PDF processing** - No database dependencies, straight from filesystem
 6. **ArangoDB only** - All storage goes to ArangoDB collections
 
+## ArXiv Lifecycle Manager (NEW)
+
+### Unified Paper Processing Workflow
+
+The **ArXiv Lifecycle Manager** replaces scattered single-purpose scripts with a comprehensive workflow that handles:
+
+```bash
+# Complete paper lifecycle in one command
+python lifecycle_cli.py process 2508.21038
+```
+
+**What it does:**
+1. **Checks PostgreSQL** - Queries database for existing metadata and files
+2. **Downloads missing content** - Fetches PDF/LaTeX from ArXiv API if needed
+3. **Updates databases** - Keeps PostgreSQL and ArangoDB synchronized  
+4. **Processes through ACID** - Extracts text, equations, tables, images
+5. **Generates embeddings** - Creates Jina v4 vectors with late chunking
+6. **Integrates HiRAG** - Updates hierarchical retrieval collections
+
+### Key Features
+
+- **Idempotent operations** - Safe to run multiple times
+- **Complete audit trail** - Track what was processed when
+- **LaTeX intelligence** - Automatically detects and downloads LaTeX sources
+- **Batch processing** - Handle hundreds of papers efficiently
+- **Status tracking** - Monitor paper processing states
+- **Error recovery** - Resume from failures
+
+### Commands
+
+```bash
+# Process single paper
+python lifecycle_cli.py process 2508.21038
+
+# Check paper status  
+python lifecycle_cli.py status 2508.21038 --json
+
+# Process batch of papers
+python lifecycle_cli.py batch paper_list.txt --output results.json
+
+# Fetch metadata only (no processing)
+python lifecycle_cli.py metadata 2508.21038
+```
+
+### Status Levels
+
+- **NOT_FOUND**: Paper not in system
+- **METADATA_ONLY**: Metadata available, no files
+- **DOWNLOADED**: PDF/LaTeX downloaded, not processed
+- **PROCESSED**: Fully processed through ACID pipeline  
+- **HIRAG_INTEGRATED**: Available in HiRAG collections
+
 ## Project Overview
 
-ArXiv Tools provides infrastructure for processing ArXiv papers directly from the filesystem through ArangoDB, implementing the mathematical framework where **C = (W·R·H)/T · Ctx^α**. Following Actor-Network Theory principles, these tools process PDFs directly without intermediate databases, optimizing for maximum conveyance while minimizing time T.
+ArXiv Tools provides infrastructure for processing ArXiv papers with dual storage (PostgreSQL + ArangoDB), implementing the mathematical framework where **C = (W·R·H)/T · Ctx^α**. Following Actor-Network Theory principles, the system maintains complete metadata in PostgreSQL while storing embeddings and extracted structures in ArangoDB.
 
 ## High-Level Architecture
 
-### Streamlined Pipeline Architecture
+### Dual Storage Architecture
 
-1. **Local PDF Repository** (`/bulk-store/arxiv-data/pdf/`)
-   - Direct access to ArXiv papers
-   - Organized by YYMM/arxiv_id.pdf structure
-   - No database dependencies for processing
-   - Optional SQLite cache for indexing
+1. **PostgreSQL** (`arxiv` database) - Complete Metadata Repository
+   - 2.7M papers with full ArXiv metadata (Kaggle dataset)
+   - Authors, categories, abstracts, submission dates, versions
+   - File tracking: `has_pdf`, `pdf_path`, `has_latex`, `latex_path`
+   - Query interface for creating targeted paper lists
 
-2. **ArangoDB Graph Store** (`academy_store` database)
-   - Collections for all extracted data:
-     - `arxiv_embeddings`: Jina v4 embeddings with late chunking
-     - `arxiv_chunks`: Text chunks with context windows
-     - `arxiv_papers`: Paper metadata and processing status
-     - `arxiv_structures`: Equations, tables, images from PDFs
+2. **Local File Storage** (`/bulk-store/arxiv-data/`)
+   - `pdf/YYMM/`: 1.8M+ PDF files organized by year-month
+   - `latex/YYMM/`: LaTeX source files (.tar.gz format)  
+   - `metadata/`: Kaggle ArXiv metadata snapshot (4.5GB JSON)
+
+3. **ArangoDB Graph Store** (`academy_store` database) - Processed Knowledge
+   - `arxiv_papers`: Paper processing status and document embeddings
+   - `arxiv_chunks`: Text segments with context preservation
+   - `arxiv_embeddings`: Jina v4 vectors (2048-dim) with late chunking
+   - `arxiv_equations`: Mathematical formulas with LaTeX rendering
+   - `arxiv_tables`: Table content and structure
+   - `arxiv_images`: Image metadata and descriptions
+   - `arxiv_structures`: Combined structural elements
    - Atomic transactions ensure consistency
 
 3. **ACID Pipeline** (`arxiv_pipeline.py`)
