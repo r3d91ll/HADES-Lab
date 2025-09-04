@@ -23,11 +23,15 @@ except ImportError as e:
 
 def create_sample_paper(file_path: str):
     """
-    Create a small synthetic academic paper and write it to the given path.
+    Create and write a small synthetic academic paper to the given file path.
     
-    The file contains a multi-section example (title, Abstract, Introduction, Related Work, Methodology,
-    Results, Conclusion) and a References section with five bibliographic entries. The file is written
-    using UTF-8 encoding; any existing file at file_path will be overwritten.
+    The generated document contains a title, Abstract, Introduction, Related Work, Methodology, Results,
+    Conclusion, and a References section with five bibliographic entries. The file is written using UTF-8
+    encoding; an existing file at file_path will be overwritten.
+    
+    Parameters:
+        file_path (str): Path to the output file where the sample paper will be written. The parent
+            directory must exist; this function does not create directories.
     """
     sample_content = """
 # Advances in Natural Language Processing

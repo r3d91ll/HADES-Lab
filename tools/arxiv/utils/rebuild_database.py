@@ -552,14 +552,14 @@ class PostgreSQLRebuilder:
     
     def print_final_summary(self):
         """
-        Print a concise end-of-run summary for the rebuild and record its end time.
+        Record end time and print a concise rebuild summary, then fetch and display final aggregate database statistics.
         
-        Updates self.stats['end_time'], computes total duration from self.stats['start_time'], prints a human-readable summary of counts collected during the run (metadata imported, PDFs found, LaTeX found, signal files, errors), and queries the database for final aggregate counts (total papers, papers with PDF, with/without LaTeX, computer-science papers, and papers from 2020 onward) which it prints with percentages.
+        Sets self.stats['end_time'] and computes run duration from self.stats['start_time']. Prints counts collected during the run (metadata imported, PDFs found, LaTeX found, signal files, errors). Opens a database connection to query and print aggregate counts and percentages for total papers, papers with PDF, with/without LaTeX, computer-science papers, and papers submitted from 2020 onward. If the database query fails, the exception is logged and not re-raised.
         
         Side effects:
         - Mutates self.stats by setting 'end_time'.
-        - Writes summary output to stdout.
-        - Opens a database connection to read final aggregate statistics; logs an error on exception but does not raise it.
+        - Writes human-readable summary to stdout.
+        - Opens a database connection to read final statistics; logs errors on failure.
         """
         self.stats['end_time'] = datetime.now()
         duration = self.stats['end_time'] - self.stats['start_time'] if self.stats['start_time'] else None

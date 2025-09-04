@@ -36,11 +36,14 @@ class WebAPIDocumentProvider(DocumentProvider):
     
     def __init__(self, api_base_url: str, api_key: Optional[str] = None):
         """
-        Create a WebAPIDocumentProvider configured to call the remote document API.
+        Initialize a WebAPIDocumentProvider for fetching documents from a remote API.
+        
+        Strips a trailing slash from api_base_url and, if provided, stores api_key and
+        prepares an Authorization: Bearer <token> header in self.headers for requests.
         
         Parameters:
-            api_base_url (str): Base URL of the document API; trailing slash is removed automatically.
-            api_key (Optional[str]): Optional bearer token used to set the `Authorization: Bearer <token>` header for requests.
+            api_base_url (str): Base URL of the document API; a trailing slash will be removed.
+            api_key (Optional[str]): Optional bearer token to include as `Authorization: Bearer <token>`.
         """
         self.api_base_url = api_base_url.rstrip('/')
         self.api_key = api_key
@@ -112,8 +115,10 @@ class SQLiteCitationStorage(CitationStorage):
         """
         Initialize the SQLiteCitationStorage.
         
+        Creates or opens the SQLite database at db_path and ensures the required tables and indexes exist by calling _init_database.
+        
         Parameters:
-            db_path (str): Filesystem path to the SQLite database file. If the file does not exist, the database schema will be created at this path.
+            db_path (str): Filesystem path to the SQLite database file. If the file does not exist, an on-disk database will be created and initialized with the storage schema.
         """
         self.db_path = db_path
         self._init_database()
@@ -180,19 +185,20 @@ class SQLiteCitationStorage(CitationStorage):
     
     def store_bibliography_entries(self, entries: List[BibliographyEntry]) -> bool:
         """
-        Store a list of BibliographyEntry objects into the configured SQLite database.
+        Store a list of BibliographyEntry objects in the configured SQLite database.
         
-        If `entries` is empty this is a no-op and returns True. Each entry is inserted using
-        `INSERT OR REPLACE` into the `bibliography_entries` table; `entry.authors` is
-        serialized to JSON when present. The function commits the transaction on success
-        and rolls back on any error.
+        This is a no-op that returns True when `entries` is empty. Each entry is persisted with
+        `INSERT OR REPLACE` into the `bibliography_entries` table; the `authors` field is
+        serialized to JSON when present. The operation is committed on success and rolled back
+        on error.
         
         Parameters:
-            entries (List[BibliographyEntry]): Bibliography entries to persist.
+            entries (List[BibliographyEntry]): Bibliography entries to persist; entries should
+                contain at least `source_paper_id` and `entry_number` to maintain uniqueness.
         
         Returns:
-            bool: True if all entries were stored successfully (or the input list was empty),
-                  False if an error occurred and the transaction was rolled back.
+            bool: True if all entries were stored (or the input was empty), False if an error
+            occurred and the transaction was rolled back.
         """
         if not entries:
             return True
@@ -227,16 +233,19 @@ class SQLiteCitationStorage(CitationStorage):
     
     def store_citations(self, citations: List[InTextCitation]) -> bool:
         """
-        Store a list of in-text citation records into the configured SQLite database.
+        Persist a list of in-text citation records into the SQLite database.
+        
+        Each item in `citations` should be an InTextCitation-like object with these attributes:
+        `source_paper_id`, `raw_text`, `citation_type`, `start_pos`, `end_pos`, `context`,
+        `bibliography_ref`, and `confidence`. The function inserts rows into the
+        `in_text_citations` table at self.db_path.
         
         Parameters:
-            citations (List[InTextCitation]): In-text citation objects to persist; each item should contain source_paper_id, raw_text, citation_type, start_pos, end_pos, context, bibliography_ref, and confidence.
+            citations (List[InTextCitation]): In-text citation objects to persist.
         
         Returns:
-            bool: True if all citations were stored successfully or if `citations` is empty; False if a database error occurred.
-        
-        Side effects:
-            Writes rows to the `in_text_citations` table in the SQLite database at `self.db_path`.
+            bool: True if all citations were written successfully or if `citations` is empty;
+            False if a database error occurred (the transaction is rolled back on error).
         """
         if not citations:
             return True
