@@ -10,8 +10,16 @@ Shows how the same toolkit works with any document source.
 import os
 import sys
 
-# Use proper relative import from parent package
-from ..academic_citation_toolkit import create_filesystem_citation_toolkit
+# Prefer package-relative import; provide a helpful message if run as a script
+try:
+    from ..academic_citation_toolkit import create_filesystem_citation_toolkit
+except ImportError as e:
+    if __name__ == "__main__" and (__package__ is None or __package__ == ""):
+        raise SystemExit(
+            "This example must be run as a module:\n"
+            "  python -m tools.rag_utils.examples.filesystem_example"
+        ) from e
+    raise
 
 def create_sample_paper(file_path: str):
     """Create a sample academic paper for testing."""
