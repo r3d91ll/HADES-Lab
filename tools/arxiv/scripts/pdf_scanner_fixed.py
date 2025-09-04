@@ -14,7 +14,25 @@ from typing import TYPE_CHECKING
 
 def quick_pdf_sample(pdf_base_dir: str = "/bulk-store/arxiv-data/pdf", sample_size: int = 2000) -> dict[str, list[dict]]:
     """
-    Quick scan to get a random sample of PDFs for processing.
+    Collect a stratified random sample of PDFs found under pdf_base_dir and save the sample as JSON.
+    
+    Scans year-month subdirectories (names of four digits) under pdf_base_dir for files ending in .pdf, extracts metadata (arXiv id without version, file path, year_month, and size), and builds a stratified sample by year proportional to each year's share of the archive. If the stratified pass produces fewer than sample_size entries, the function fills the remainder by sampling from the remaining PDFs and finally truncates to sample_size.
+    
+    Parameters:
+        pdf_base_dir (str): Root directory containing year-month subdirectories of PDFs.
+        sample_size (int): Desired number of PDFs in the returned sample.
+    
+    Returns:
+        List[dict]: The list of sampled PDF metadata dicts (keys: 'arxiv_id', 'path', 'year_month', 'size').
+    
+    Side effects:
+        - Writes a JSON file with keys 'total_pdfs_available', 'sample_size', and 'sample_pdfs' to
+          /home/todd/olympus/HADES-Lab/tools/arxiv/logs/pdf_sample_2000.json.
+        - Prints progress and summary lines to stdout.
+    
+    Notes:
+        - Sampling uses the random module; set the RNG seed externally for reproducible results.
+        - File-system errors (e.g., permission or missing-directory errors) may propagate from the underlying file operations.
     """
     pdf_base_dir = Path(pdf_base_dir)
     all_pdfs = []

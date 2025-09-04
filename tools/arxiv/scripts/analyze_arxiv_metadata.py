@@ -16,7 +16,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def analyze_arxiv_metadata(metadata_file: str = "/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json"):
-    """Analyze the structure of ArXiv metadata file."""
+    """
+    Analyze the structure of a newline-delimited ArXiv metadata JSON file and print a summary.
+    
+    Reads up to the first 1000 JSON records from the given metadata file, collects the set of observed Python types for each top-level field, captures the keys present in the first element of any non-empty `versions` list (under a `versions_fields` entry), and stores up to three complete sample records for display. Prints a formatted analysis including the number of records analyzed, each field with the observed types, and the sample records (truncating long title/abstract values and summarizing `versions` entries).
+    
+    Parameters:
+        metadata_file (str): Path to a newline-delimited JSON ArXiv metadata file. Defaults to
+            "/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json".
+    
+    Returns:
+        None
+    """
     
     logger.info(f"Analyzing ArXiv metadata file: {metadata_file}")
     
@@ -78,7 +89,20 @@ def analyze_arxiv_metadata(metadata_file: str = "/bulk-store/arxiv-data/metadata
 
 
 def generate_postgresql_schema():
-    """Generate PostgreSQL schema based on ArXiv metadata structure."""
+    """
+    Generate a PostgreSQL schema update SQL script that adds ArXiv metadata columns, indexes, and comments to an existing `papers` table.
+    
+    This function builds a multi-statement SQL script to:
+    - add metadata columns (authors, categories, comments, report_number, msc_class, acm_class, submission_date, update_date, versions_count, latest_version, authors_parsed) to the `papers` table if they do not already exist,
+    - create supporting indexes for text search and date queries,
+    - add comments describing the new columns.
+    
+    Side effects:
+    - Prints the generated SQL to stdout.
+    - Ensures the target directory exists and writes the SQL script to
+      "/home/todd/olympus/HADES-Lab/tools/arxiv/db/add_arxiv_metadata_columns.sql".
+    - Overwrites the target file if it already exists.
+    """
     
     schema_sql = """
 -- Enhanced PostgreSQL schema for ArXiv papers with complete metadata
