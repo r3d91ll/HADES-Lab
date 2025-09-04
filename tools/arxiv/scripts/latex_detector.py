@@ -292,11 +292,11 @@ def main():
     """
     Main entry point for the LaTeX Status Detector script.
     
-    Loads a JSON sample of PDFs, runs the LaTeX detection workflow, and writes a JSON report.
+    Loads a JSON sample of PDFs, runs the two-phase LaTeX detection workflow, and writes a JSON report.
     
     Behavior:
     - Expects a sample file at /home/todd/olympus/HADES-Lab/tools/arxiv/logs/pdf_sample_2000.json containing a "sample_pdfs" list; logs an error and returns early if the file is missing.
-    - Instantiates LaTeXDetector and runs detect_latex_status_batch on the loaded list (allows up to 500 ArXiv API checks).
+    - Instantiates LaTeXDetector and runs detect_latex_status_batch on the loaded list (up to 500 arXiv API checks).
     - Persists results to /home/todd/olympus/HADES-Lab/tools/arxiv/logs/latex_status_results.json via LaTeXDetector.save_latex_status_results.
     - Prints completion messages to stdout.
     
