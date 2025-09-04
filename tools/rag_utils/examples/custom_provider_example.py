@@ -35,6 +35,13 @@ class WebAPIDocumentProvider(DocumentProvider):
     """
     
     def __init__(self, api_base_url: str, api_key: Optional[str] = None):
+        """
+        Create a WebAPIDocumentProvider configured to call the remote document API.
+        
+        Parameters:
+            api_base_url (str): Base URL of the document API; trailing slash is removed automatically.
+            api_key (Optional[str]): Optional bearer token used to set the `Authorization: Bearer <token>` header for requests.
+        """
         self.api_base_url = api_base_url.rstrip('/')
         self.api_key = api_key
         self.headers = {}
@@ -42,7 +49,17 @@ class WebAPIDocumentProvider(DocumentProvider):
             self.headers['Authorization'] = f'Bearer {api_key}'
     
     def get_document_text(self, document_id: str) -> Optional[str]:
-        """Fetch full document text from web API."""
+        """
+        Fetch the full text for a document from the provider's web API.
+        
+        Attempts an HTTP GET to the provider endpoint for the given document identifier and returns the document's full text when available. On success returns the value of the API's `full_text` field, falls back to `content`, and if neither field is present returns an empty string. If the HTTP response is not successful or an error occurs while fetching/parsing, returns None.
+        
+        Parameters:
+            document_id (str): Provider-specific identifier for the document to retrieve.
+        
+        Returns:
+            Optional[str]: The document full text on success, an empty string if the response contains no text fields, or None on HTTP error or exception.
+        """
         try:
             import requests
             
@@ -61,7 +78,17 @@ class WebAPIDocumentProvider(DocumentProvider):
             return None
     
     def get_document_chunks(self, document_id: str) -> List[str]:
-        """Get document text and split into chunks."""
+        """
+        Return the document split into non-empty paragraph chunks.
+        
+        Retrieves the full text for the given document_id and splits it into paragraph-like chunks using double-newline separators. Leading and trailing whitespace is trimmed from each chunk; empty chunks are omitted.
+        
+        Parameters:
+            document_id (str): Provider-specific identifier of the document to fetch.
+        
+        Returns:
+            List[str]: A list of non-empty paragraph chunks (strings). If the document text cannot be retrieved, returns an empty list.
+        """
         full_text = self.get_document_text(document_id)
         if not full_text:
             return []
@@ -82,11 +109,25 @@ class SQLiteCitationStorage(CitationStorage):
     """
     
     def __init__(self, db_path: str):
+        """
+        Initialize the SQLiteCitationStorage.
+        
+        Parameters:
+            db_path (str): Filesystem path to the SQLite database file. If the file does not exist, the database schema will be created at this path.
+        """
         self.db_path = db_path
         self._init_database()
     
     def _init_database(self):
-        """Initialize SQLite database with required tables."""
+        """
+        Initialize the SQLite database schema used by SQLiteCitationStorage.
+        
+        Creates the required tables and indexes if they do not already exist:
+        - bibliography_entries: stores extracted bibliography records with a UNIQUE(source_paper_id, entry_number) constraint and a `created_at` timestamp default.
+        - in_text_citations: stores extracted in-text citation occurrences with a `created_at` timestamp default.
+        
+        This operation is idempotent (uses CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS) and commits the schema changes. The database connection is always closed when finished.
+        """
         conn = sqlite3.connect(self.db_path)
         try:
             # Bibliography entries table
@@ -138,7 +179,21 @@ class SQLiteCitationStorage(CitationStorage):
             conn.close()
     
     def store_bibliography_entries(self, entries: List[BibliographyEntry]) -> bool:
-        """Store bibliography entries in SQLite database."""
+        """
+        Store a list of BibliographyEntry objects into the configured SQLite database.
+        
+        If `entries` is empty this is a no-op and returns True. Each entry is inserted using
+        `INSERT OR REPLACE` into the `bibliography_entries` table; `entry.authors` is
+        serialized to JSON when present. The function commits the transaction on success
+        and rolls back on any error.
+        
+        Parameters:
+            entries (List[BibliographyEntry]): Bibliography entries to persist.
+        
+        Returns:
+            bool: True if all entries were stored successfully (or the input list was empty),
+                  False if an error occurred and the transaction was rolled back.
+        """
         if not entries:
             return True
         
@@ -171,7 +226,18 @@ class SQLiteCitationStorage(CitationStorage):
             conn.close()
     
     def store_citations(self, citations: List[InTextCitation]) -> bool:
-        """Store in-text citations in SQLite database."""
+        """
+        Store a list of in-text citation records into the configured SQLite database.
+        
+        Parameters:
+            citations (List[InTextCitation]): In-text citation objects to persist; each item should contain source_paper_id, raw_text, citation_type, start_pos, end_pos, context, bibliography_ref, and confidence.
+        
+        Returns:
+            bool: True if all citations were stored successfully or if `citations` is empty; False if a database error occurred.
+        
+        Side effects:
+            Writes rows to the `in_text_citations` table in the SQLite database at `self.db_path`.
+        """
         if not citations:
             return True
         
@@ -201,7 +267,21 @@ class SQLiteCitationStorage(CitationStorage):
             conn.close()
     
     def get_bibliography_stats(self) -> dict:
-        """Get statistics about stored bibliography entries."""
+        """
+        Return statistics about bibliography entries stored in the SQLite backend.
+        
+        Returns a dict containing:
+        - total_entries (int): total number of bibliography records.
+        - entries_by_paper (dict[str, int]): mapping from source_paper_id to number of entries for that paper.
+        - with_arxiv_id (int): count of entries that have a non-null arxiv_id.
+        - with_doi (int): count of entries that have a non-null doi.
+        - confidence_distribution (dict): counts partitioned by confidence score:
+            - high (int): confidence >= 0.8
+            - medium (int): 0.6 <= confidence < 0.8
+            - low (int): confidence < 0.6
+        
+        The function always closes the database connection before returning.
+        """
         conn = sqlite3.connect(self.db_path)
         try:
             cursor = conn.cursor()
@@ -256,6 +336,13 @@ class MockAPIDocumentProvider(DocumentProvider):
     
     def __init__(self):
         # Sample academic paper content
+        """
+        Initialize the mock provider and populate self.sample_papers with example paper texts.
+        
+        Creates an in-memory mapping self.sample_papers where keys are document IDs ("paper_001", "paper_002")
+        and values are multi-section markdown-like paper texts (abstract, introduction, sections, and a References
+        list). These samples are intended for testing or demonstration of document retrieval and chunking.
+        """
         self.sample_papers = {
             "paper_001": """
 # Advanced Machine Learning Techniques
@@ -325,18 +412,47 @@ The results suggest that our approach is effective for complex multi-agent scena
         }
     
     def get_document_text(self, document_id: str) -> Optional[str]:
-        """Return sample paper content."""
+        """
+        Get the sample paper text for a mock document ID.
+        
+        Looks up the provided document_id in the provider's in-memory sample_papers mapping and returns the stored text. Returns None if no sample exists for the given ID.
+        
+        Parameters:
+            document_id (str): Identifier of the sample paper to retrieve.
+        
+        Returns:
+            Optional[str]: The full sample paper text, or None if not found.
+        """
         return self.sample_papers.get(document_id)
     
     def get_document_chunks(self, document_id: str) -> List[str]:
-        """Split document into paragraph chunks."""
+        """
+        Return the document split into paragraph chunks.
+        
+        Retrieves the full document text for the given document_id and splits it into paragraphs using a double-newline delimiter. Each returned chunk is stripped of surrounding whitespace and empty chunks are omitted. Returns an empty list if the document is not found or contains no text.
+        """
         text = self.get_document_text(document_id)
         if not text:
             return []
         return [chunk.strip() for chunk in text.split('\n\n') if chunk.strip()]
 
 def main():
-    """Demonstrate custom provider and storage implementations."""
+    """
+    Run a demonstration of custom DocumentProvider and CitationStorage implementations.
+    
+    Performs an end-to-end example that:
+    - Instantiates MockAPIDocumentProvider, SQLiteCitationStorage (at /tmp/custom_citations.db), and UniversalBibliographyExtractor.
+    - Processes two sample papers ("paper_001", "paper_002"), extracts bibliography entries, prints short previews, and aggregates results.
+    - Persists found bibliography entries to the SQLite database and prints basic database statistics (total entries, per-paper counts, ArXiv/DOI presence, and a simple confidence distribution).
+    - Prints examples of extension ideas and the locations of created files.
+    
+    Side effects:
+    - May remove an existing file at /tmp/custom_citations.db and create a new SQLite database with tables `bibliography_entries` and `in_text_citations`.
+    - Writes output to stdout.
+    
+    Returns:
+        None
+    """
     
     print("🔧 Custom Provider & Storage Example")
     print("=" * 50)
