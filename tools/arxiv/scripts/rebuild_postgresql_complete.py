@@ -71,19 +71,18 @@ class PostgreSQLRebuilder:
     
     def parse_date(self, date_str: str) -> Optional[datetime.date]:
         """
-        Parse a date string from ArXiv metadata into a datetime.date.
+        Parse an arXiv metadata date/time string and return a datetime.date or None.
         
-        Accepts common ArXiv date representations and returns a date object on success.
-        Handled inputs include:
-        - ISO date: "YYYY-MM-DD"
-        - GMT timestamps like "Mon, 2 Apr 2007 19:18:42 GMT"
-        The function also attempts to handle other common variants (e.g. "YYYY-MM-DD HH:MM:SS", "YYYY/MM/DD", "MM/DD/YYYY") but will return None if parsing fails.
+        Accepts several common representations produced in arXiv metadata, including:
+        - ISO dates: "YYYY-MM-DD"
+        - RFC-style GMT timestamps: "Mon, 2 Apr 2007 19:18:42 GMT"
+        - Some common variants such as "YYYY-MM-DD HH:MM:SS", "YYYY/MM/DD", and "MM/DD/YYYY"
         
         Parameters:
-            date_str (str): Date/time string from metadata; falsy values return None.
+            date_str (str): Date/time string from metadata. Falsy values (None, empty string) return None.
         
         Returns:
-            datetime.date | None: Parsed date or None when input is falsy or cannot be parsed.
+            datetime.date | None: Parsed date on success; None if input is falsy or cannot be parsed.
         """
         if not date_str:
             return None
@@ -123,12 +122,16 @@ class PostgreSQLRebuilder:
     
     def import_metadata_from_snapshot(self):
         """
-        Import arXiv metadata from the JSONL snapshot file (self.metadata_file) and upsert records into the papers table.
+        Import arXiv metadata from the JSONL snapshot (self.metadata_file) and upsert records into the papers table.
         
-        Reads the line-delimited JSON snapshot file, parses each paper record, derives submission/update dates, primary category, version counts, authors_parsed, and partitioning fields (year, month, yymm). Records are batched and bulk-upserted into the database; PDF/LaTeX fields are left as placeholders for later phases. Updates self.stats (including 'metadata_imported' and increments 'errors' for malformed or processing failures).
+        Reads the line-delimited JSON snapshot, parses each paper, normalizes key fields (id, title, abstract, authors, categories, primary category, comments, journal_ref, doi, report_number, license), computes submission and update dates, derives version counts and latest version, serializes parsed authors, and computes partitioning fields (year, month, yymm) when submission date is available. Records are written to the database in batches via the internal bulk-upsert helper; PDF and LaTeX presence fields are left as placeholders for later phases.
+        
+        Side effects:
+        - Upserts metadata rows into the papers table (calls self._insert_metadata_batch).
+        - Updates self.stats['metadata_imported'] with the number of processed records and increments self.stats['errors'] for malformed lines or per-line processing failures.
         
         Returns:
-            bool: True on successful completion, False if the metadata file is missing or a fatal error occurs during import.
+            bool: True on successful completion; False if the metadata file is missing or a fatal error occurs during import.
         """
         logger.info("Starting complete metadata import...")
         
@@ -331,18 +334,19 @@ class PostgreSQLRebuilder:
     
     def _update_pdf_batch(self, pdf_updates):
         """
-        Update a batch of papers' PDF metadata in the database.
+        Update a batch of papers' PDF presence and metadata in the database.
+        
+        Performs a batched UPDATE (via executemany) for each 4-tuple in pdf_updates, setting has_pdf, pdf_path,
+        and pdf_size_bytes on the papers table matching arxiv_id.
         
         Parameters:
-            pdf_updates (Iterable[tuple]): An iterable of 4-tuples (has_pdf, pdf_path, pdf_size_bytes, arxiv_id)
-                where `has_pdf` is a bool, `pdf_path` is the storage path or None, `pdf_size_bytes` is an int
-                (or None), and `arxiv_id` is the paper identifier.
+            pdf_updates (Iterable[tuple]): Iterable of 4-tuples in the order
+                (has_pdf: bool, pdf_path: Optional[str], pdf_size_bytes: Optional[int], arxiv_id: str).
+                Each tuple updates the corresponding paper identified by arxiv_id.
         
-        Behavior:
-            - Performs a grouped UPDATE for each tuple, upserting the has_pdf, pdf_path, and pdf_size_bytes
-              fields on the papers table by arxiv_id.
-            - Increments self.stats['pdfs_found'] by the number of updates applied.
-            - On exception, increments self.stats['errors'] and does not re-raise.
+        Side effects:
+            - Increments self.stats['pdfs_found'] by the number of updates attempted.
+            - On exception, increments self.stats['errors'] and logs the error; exceptions are not re-raised.
             - Always closes the database connection before returning.
         """
         conn = self.get_database_connection()
@@ -368,20 +372,16 @@ class PostgreSQLRebuilder:
     
     def parse_latex_filename(self, filename: str, directory: str) -> Optional[str]:
         """
-        Extract an arXiv identifier from a LaTeX-related filename, supporting legacy and modern naming schemes.
+        Normalize and extract an arXiv identifier from a LaTeX-related filename.
         
-        Detailed behavior:
-        - Accepts filenames ending with ".gz" (LaTeX source) or ".pdf" (signal file).
-        - If the name uses the old pre-2007 concatenated form (e.g. "astro-ph0001001"), converts it to the canonical slash form ("astro-ph/0001.001").
-        - Leaves already-modern forms (e.g. "YYMM.NNNN" or "category/YYMM.NNNN") unchanged.
-        - Returns None for filenames that do not end with ".gz" or ".pdf" or cannot be parsed.
+        Parses filenames that end with ".gz" (LaTeX source) or ".pdf" (signal file) and returns a normalized arXiv ID suitable for database lookup. Recognizes both legacy pre-2007 concatenated category form (e.g., "astro-ph0001001") and modern forms (e.g., "YYMM.NNNN" or "category/YYMM.NNNN"). Legacy names are converted to the canonical "category/YYMM.NNN" form (e.g., "astro-ph0001001" -> "astro-ph/0001.001"). Filenames that do not end with ".gz" or ".pdf" or that cannot be parsed return None.
         
         Parameters:
-        - filename: The file's basename (including extension) to parse.
-        - directory: The containing directory path (provided for context; not required for parsing).
+            filename: Basename of the file (including extension) to parse.
+            directory: Containing directory path (provided for context; this function does not use it for parsing).
         
         Returns:
-        - The normalized arXiv identifier string on success, or None if the filename cannot be interpreted as an arXiv ID.
+            The normalized arXiv identifier string on success, or None if the filename cannot be interpreted as an arXiv ID.
         """
         
         if filename.endswith('.gz'):
@@ -421,9 +421,9 @@ class PostgreSQLRebuilder:
 
     def scan_and_update_latex(self):
         """
-        Scan the LaTeX data directory, detect LaTeX source files and "signal" PDFs, and update the papers table accordingly.
+        Scan the configured LaTeX data directory and update papers' LaTeX presence in the database.
         
-        This scans year-month subdirectories under self.latex_dir. Files ending with `.gz` are treated as LaTeX sources (sets has_latex and latex_path); files ending with `.pdf` are treated as signals that no LaTeX source is available (sets has_latex=False). Records are accumulated and applied in batches via self._update_latex_batch; counters in self.stats ('latex_found' and 'signal_files') are updated by those batch calls.
+        Scans year-month subdirectories under self.latex_dir and normalizes arXiv IDs using parse_latex_filename. Files ending in `.gz` are treated as LaTeX sources (sets has_latex=True and stores latex_path); files ending in `.pdf` are treated as signal files indicating no LaTeX source (sets has_latex=False). Updates are applied in batches via self._update_latex_batch and the method relies on those calls to increment self.stats counters ('latex_found' and 'signal_files').
         
         Returns:
             bool: True on successful completion; False if the configured LaTeX directory does not exist.
@@ -486,20 +486,19 @@ class PostgreSQLRebuilder:
         """
         Apply a batch of LaTeX presence/path updates to the papers table.
         
+        Each update row must be a tuple (has_latex: bool, latex_path: Optional[str], arxiv_id: str).
+        When is_latex is True the batch represents actual LaTeX source files (has_latex=True, latex_path set);
+        when False the batch represents PDF-only signal files (has_latex=False, latex_path should be None).
+        
         Parameters:
-            updates (Iterable[tuple]): Iterable of tuples matching the SQL UPDATE parameters:
-                (has_latex: bool, latex_path: Optional[str], arxiv_id: str).
-                For LaTeX source files use (True, '<path>', '<id>'); for signal PDF-only markers use (False, None, '<id>').
-            is_latex (bool): True when the batch represents actual LaTeX sources (increments latex_found),
-                False when the batch represents signal files with no LaTeX (increments signal_files).
+            updates (Iterable[tuple]): Iterable of (has_latex, latex_path, arxiv_id) tuples to apply.
+            is_latex (bool): True if this batch contains real LaTeX sources (increments latex_found);
+                             False if this batch contains signal files (increments signal_files).
         
         Side effects:
-            - Updates rows in the database table `papers` setting has_latex and latex_path by arxiv_id.
-            - Increments self.stats['latex_found'] or self.stats['signal_files'] by the batch size.
-            - On error logs the exception and increments self.stats['errors'].
-        
-        Returns:
-            None
+            - Updates `has_latex` and `latex_path` in the `papers` table for each arxiv_id in the batch.
+            - Increments self.stats['latex_found'] or self.stats['signal_files'] by the number of updates.
+            - On failure increments self.stats['errors'].
         """
         conn = self.get_database_connection()
         try:

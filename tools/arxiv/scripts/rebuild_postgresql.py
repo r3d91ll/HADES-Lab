@@ -32,20 +32,21 @@ except Exception:
     # Fallback: local extractor kept in sync with PDFScanner
     def _id_extractor(filename: str) -> str:
         """
-        Extract an arXiv identifier from a PDF filename (fallback implementation).
+        Extract an arXiv identifier from a PDF filename (fallback).
         
-        This removes a trailing ".pdf" and any version suffix like "v2". It then:
-        - Converts legacy category-style names of the form "category-subcat-1234" or
-          "category-1234" into "category/1234" when there are at least two hyphen-separated
-          parts and the last part looks like the paper number.
-        - Accepts modern numeric IDs matching "YYYY.NNNN" or "YYYY.NNNNN" and returns them unchanged.
-        - For any other form, returns the cleaned base filename.
+        Removes a trailing ".pdf" and a trailing version suffix like "v2" before parsing.
+        Recognizes and returns:
+        - legacy category-style names converted to modern form: filenames with at least
+          three hyphen-separated parts where the final part is a numeric paper id
+          (e.g. "category-subcat-1234.pdf" -> "category/subcat/1234");
+        - modern numeric arXiv IDs of the form "YYYY.NNNN" or "YYYY.NNNNN" (returned unchanged).
+        For any other filename, returns the cleaned base filename (without ".pdf" or version suffix).
         
         Parameters:
-            filename (str): The PDF filename (may include the ".pdf" extension and version suffix).
+            filename (str): PDF filename (may include ".pdf" and a version suffix like "v2").
         
         Returns:
-            str: The extracted arXiv identifier or the cleaned filename when no pattern matches.
+            str: Extracted arXiv identifier or the cleaned base filename when no pattern matches.
         """
         base_name = filename.replace(".pdf", "")
         base_name = re.sub(r"v\d+$", "", base_name)
@@ -120,7 +121,7 @@ class PostgreSQLRebuilder:
         """
         Initialize the PostgreSQLRebuilder.
         
-        Sets up database connection configuration (reads PGPASSWORD from the environment), initializes rebuild statistics, and records default absolute paths for the metadata file, PDF directory, and LaTeX directory. Logs the configured paths.
+        Sets up the PostgreSQL connection configuration (host, database, user; password read from the PGPASSWORD environment variable), initializes RebuildStats, and records absolute default paths for the metadata snapshot, PDF archive, and LaTeX archive. Logs the configured paths.
         """
         self.pg_config = {
             "host": "localhost",
@@ -142,10 +143,15 @@ class PostgreSQLRebuilder:
 
     def get_database_connection(self):
         """
-        Return an active psycopg2 PostgreSQL connection using the instance's pg_config.
+        Return a new psycopg2 PostgreSQL connection configured from the instance's pg_config.
+        
+        Uses the instance's pg_config (host, database, user, password, etc.) and a 10-second connect timeout. On failure, raises ConnectionError wrapping the underlying error.
+         
+        Returns:
+            psycopg2.extensions.connection: An open connection to the PostgreSQL server.
         
         Raises:
-            ConnectionError: If establishing the connection fails (wraps psycopg2 errors).
+            ConnectionError: If the connection attempt fails.
         """
         try:
             return psycopg2.connect(connect_timeout=10, **self.pg_config)
@@ -273,15 +279,28 @@ class PostgreSQLRebuilder:
 
     def _insert_paper_batch(self, cursor, batch):
         """
-        Insert or update a batch of paper records into the `papers` table.
+        Bulk upsert a batch of paper records into the `papers` table.
         
-        Each item in `batch` should be an iterable/tuple of values in the following order:
+        Each entry in `batch` must be an iterable with values in this exact order:
         (arxiv_id, title, abstract, authors, categories, submission_date, update_date,
-        doi, journal_ref, comments, has_pdf, has_latex, pdf_path, latex_path).
+         doi, journal_ref, comments, has_pdf, has_latex, pdf_path, latex_path).
         
-        Performs a bulk upsert: new rows are inserted and existing rows (matching arxiv_id)
-        are updated for the textual/metadata fields (title, abstract, authors, categories,
-        submission_date, update_date, doi, journal_ref, comments).
+        Performs an INSERT ... ON CONFLICT (arxiv_id) DO UPDATE, inserting new rows and
+        replacing the textual/metadata fields of existing rows (title, abstract, authors,
+        categories, submission_date, update_date, doi, journal_ref, comments).
+        
+        Parameters:
+            batch: iterable
+                Batch of records as described above. (The `cursor` parameter is a DB cursor
+                provided by the caller and is intentionally not documented as a service.)
+        
+        Side effects:
+            Executes SQL using the supplied `cursor`. Does not commit the transaction;
+            commit/rollback is the caller's responsibility.
+        
+        Exceptions:
+            Database exceptions raised by the underlying DB driver (e.g., psycopg2) will
+            propagate to the caller.
         """
         insert_sql = """
             INSERT INTO papers (
@@ -385,17 +404,12 @@ class PostgreSQLRebuilder:
 
     def scan_and_update_latex(self):
         """
-        Scan the local LaTeX archive tree and update papers' has_latex/latex_path flags in the database.
+        Scan the local LaTeX archive tree and update papers' LaTeX availability in the database.
         
-        Traverses year-month subdirectories (directory names composed of digits) under self.latex_dir. For each
-        *.tar.gz file it treats the archive as available LaTeX for the corresponding arXiv ID (sets has_latex=True
-        and records latex_path). For each *.pdf file found in these directories it treats the file as a signal that
-        no LaTeX is available for that paper (sets has_latex=False and clears latex_path). ArXiv IDs are derived
-        from the archive filename (strip version suffix) and from PDFs using the module's _id_extractor.
+        Traverses numeric year-month subdirectories under self.latex_dir. For each *.tar.gz archive found the function marks the corresponding paper as having LaTeX (sets has_latex=True and records latex_path); for each *.pdf found in these directories the function treats it as a "no LaTeX" signal (sets has_latex=False and clears latex_path). ArXiv IDs for archives are derived from the archive filename (version suffix stripped); IDs for signal PDFs are derived using the module's _id_extractor. Updates are applied in batches by calling self._update_latex_batch(...), which performs the database writes and updates RebuildStats counters (latex_found or signal_files_found).
         
-        Updates are applied in batches via self._update_latex_batch(latex_updates, is_latex), which performs the
-        database writes and updates the RebuildStats counters (latex_found or signal_files_found). Returns False
-        immediately if the configured latex_dir does not exist; otherwise returns True on completion.
+        Returns:
+            bool: False if the configured latex_dir does not exist; otherwise True on completion.
         """
         logger.info("Phase 3: Scanning local LaTeX files and updating database...")
 
@@ -489,13 +503,14 @@ class PostgreSQLRebuilder:
 
     def print_final_summary(self):
         """
-        Print a concise final summary of the rebuild and query final database statistics.
+        Print a concise final report of the rebuild run and query final database statistics.
         
-        Sets self.stats.end_time (and computes duration), prints a human-readable summary of
-        counts collected during the run (metadata imported, PDFs/LaTeX found, signal files, errors),
-        then queries the database for total paper counts and percentages for papers with PDF,
-        with LaTeX, and confirmed with no LaTeX, printing those results. Any exceptions raised
-        while querying the database are logged; the method does not raise on query failure.
+        Sets self.stats.end_time (and computes duration if start_time exists), prints a human-readable
+        summary of counters gathered during the run (metadata imported, PDFs found, LaTeX found,
+        signal files indicating no LaTeX, and errors), then queries the database for totals and
+        percentages for papers, papers with PDFs, papers with LaTeX, and papers confirmed without LaTeX.
+        Any exceptions raised while querying the database are logged and swallowed; this method does not
+        propagate database query errors.
         """
         self.stats.end_time = datetime.now()
         duration = self.stats.end_time - self.stats.start_time if self.stats.start_time else None

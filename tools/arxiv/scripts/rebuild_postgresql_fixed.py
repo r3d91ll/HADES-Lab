@@ -30,8 +30,8 @@ class PostgreSQLRebuilder:
         Initialize the rebuilder with default PostgreSQL connection settings and the metadata file path.
         
         Sets:
-        - pg_config: dict with connection parameters (host, database, user, password). The password is read from the PGPASSWORD environment variable and defaults to an empty string if unset.
-        - metadata_file: Path pointing to the expected arXiv metadata JSONL snapshot file (/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json).
+        - self.pg_config: dict with connection parameters used to open new psycopg2 connections. Defaults are host 'localhost', database 'arxiv', user 'postgres', and password taken from the PGPASSWORD environment variable (empty string if unset).
+        - self.metadata_file: Path to the expected arXiv metadata JSONL snapshot (/bulk-store/arxiv-data/metadata/arxiv-metadata-oai-snapshot.json).
         """
         self.pg_config = {
             'host': 'localhost',
@@ -112,12 +112,15 @@ class PostgreSQLRebuilder:
     
     def check_database_schema(self):
         """
-        Inspect the PostgreSQL 'papers' table schema and constraints and report success.
+        Inspect the PostgreSQL "papers" table schema and constraints, logging discovered columns and table-level constraints.
         
-        Connects to the configured database, queries information_schema for column definitions
-        (column name, data type, character maximum length, nullability) and table constraints
-        for the table named 'papers'. Returns True if the inspection completes without error;
-        on any exception the connection is closed and the function returns False.
+        This method connects to the configured database, queries information_schema.columns for the
+        'papers' table (name, data type, character maximum length, nullability) and information_schema.table_constraints
+        for associated constraints, and logs the results for human inspection. The database connection is closed
+        before the method returns.
+        
+        Returns:
+            bool: True if the inspection completed without error; False if any exception occurred (the error is logged).
         """
         logger.info("Checking database schema...")
         
@@ -161,9 +164,9 @@ class PostgreSQLRebuilder:
     
     def analyze_metadata_sample(self):
         """
-        Analyze a small sample of the metadata file to surface the shape and any obvious anomalies.
+        Inspect a small sample (up to three records) from the configured metadata JSONL file and log key fields and anomalies.
         
-        Reads up to the first three lines from the configured metadata JSONL file and logs key sample information for each record: id, title length, abstract length, authors field type, categories, and the first version creation date when available. Emits a warning when a title exceeds 500 characters. JSON parse errors for individual lines are logged but not raised.
+        Reads up to the first three lines of the metadata file and, for each successfully parsed record, logs: record id, title length, abstract length, type of the authors field, categories, and the first version's created date when present. Emits a warning if a title exceeds 500 characters. JSON decode errors for individual lines are logged and do not stop processing. This function has no return value; its observable effects are log messages.
         """
         logger.info("Analyzing metadata sample...")
         

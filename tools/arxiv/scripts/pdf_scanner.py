@@ -28,10 +28,11 @@ class PDFScanner:
         Initialize a PDFScanner.
         
         Parameters:
-            pdf_base_dir (str): Path to the root directory containing PDFs organized by year/month (default "/bulk-store/arxiv-data/pdf").
+            pdf_base_dir (str): Path to the root directory containing PDFs organized by year-month (default: "/bulk-store/arxiv-data/pdf").
         
         Description:
-            Sets the base directory (as a Path), prepares an empty mapping `pdf_map` that will map arXiv IDs to file metadata, and initializes `scan_stats` counters and timestamp placeholders used to track progress and results of a directory scan.
+            Store the base directory as a pathlib.Path, create an empty mapping `pdf_map` (arXiv ID -> metadata), and initialize `scan_stats` with counters for
+            directories scanned, PDFs found, invalid filenames, and placeholders for scan_start_time and scan_end_time.
         """
         self.pdf_base_dir = Path(pdf_base_dir)
         self.pdf_map = {}
@@ -181,11 +182,13 @@ class PDFScanner:
 
     def get_year_month_distribution(self) -> dict[str, int]:
         """
-        Return a mapping of year-month to the count of PDFs found for that period.
+        Return the count of scanned PDFs grouped by their year-month bucket.
+        
+        Iterates the scanner's in-memory pdf_map and counts entries by each entry's 'year_month' value.
+        The returned dict is sorted by year-month (keys as strings in the same format stored in pdf_map).
         
         Returns:
-            dict[str, int]: Sorted dictionary where keys are year-month strings (as stored in each PDF entry's 'year_month')
-                            and values are the number of PDFs for that year-month.
+            dict[str, int]: Mapping from year-month to number of PDFs for that period.
         """
         distribution = {}
         for arxiv_id, info in self.pdf_map.items():
