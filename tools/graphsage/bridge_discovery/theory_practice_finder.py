@@ -151,10 +151,16 @@ class TheoryPracticeFinder:
         if not self.config.use_embeddings:
             return []
         
+        if not hasattr(self, 'embeddings') or self.embeddings is None:
+            print("Warning: Embeddings not computed, skipping semantic bridges")
+            return []
+        
         bridges = []
         
         # Determine which papers to process
         if paper_idx is not None:
+            if paper_idx not in self.paper_nodes:
+                raise ValueError(f"Paper index {paper_idx} not found in paper nodes")
             paper_indices = [paper_idx]
         else:
             paper_indices = self.paper_nodes[:100]  # Limit for efficiency

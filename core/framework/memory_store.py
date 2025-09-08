@@ -80,13 +80,27 @@ class GraphMemoryStore:
         """
         start_time = time.time()
         
+        # Validate required config
+        if not db_config.get('database'):
+            raise ValueError("Database name is required in db_config")
+        if not db_config.get('username'):
+            raise ValueError("Username is required in db_config")
+        
+        # Get password securely
+        password = db_config.get('password') or os.environ.get('ARANGO_PASSWORD')
+        if not password:
+            raise ValueError("Password must be provided in config or ARANGO_PASSWORD environment variable")
+        
         # Connect to ArangoDB
-        client = ArangoClient(hosts=db_config.get('host', 'http://localhost:8529'))
-        db = client.db(
-            db_config['database'],
-            username=db_config['username'],
-            password=db_config.get('password', os.environ.get('ARANGO_PASSWORD'))
-        )
+        try:
+            client = ArangoClient(hosts=db_config.get('host', 'http://localhost:8529'))
+            db = client.db(
+                db_config['database'],
+                username=db_config['username'],
+                password=password
+            )
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to ArangoDB: {e}")
         
         print("Loading graph from ArangoDB into memory...")
         
@@ -283,11 +297,17 @@ class GraphMemoryStore:
     def cleanup(self):
         """Clean up shared memory."""
         if self.shared_memory:
-            self.shared_memory.close()
             try:
+                self.shared_memory.close()
                 self.shared_memory.unlink()
-            except:
+            except FileNotFoundError:
+                # Already unlinked
                 pass
+            except Exception as e:
+                print(f"Warning: Error cleaning up shared memory: {e}")
+            finally:
+                self.shared_memory = None
+                self.shared_memory_name = None
     
     def __del__(self):
         """Cleanup on deletion."""

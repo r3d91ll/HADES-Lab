@@ -86,13 +86,23 @@ class MeanAggregator(Aggregator):
         Returns:
             Aggregated features (batch_size, output_dim)
         """
-        # Mean pooling over neighbors
-        neighbor_mean = neighbor_feats.mean(dim=1)
-        
-        if self.concat:
-            combined = torch.cat([self_feats, neighbor_mean], dim=1)
+        # Check for empty neighbors
+        if neighbor_feats.shape[1] == 0:
+            # No neighbors, just use self features
+            if self.concat:
+                # Concatenate with zeros
+                zeros = torch.zeros_like(self_feats)
+                combined = torch.cat([self_feats, zeros], dim=1)
+            else:
+                combined = self_feats
         else:
-            combined = neighbor_mean
+            # Mean pooling over neighbors
+            neighbor_mean = neighbor_feats.mean(dim=1)
+            
+            if self.concat:
+                combined = torch.cat([self_feats, neighbor_mean], dim=1)
+            else:
+                combined = neighbor_mean
         
         return F.relu(self.fc(combined))
 

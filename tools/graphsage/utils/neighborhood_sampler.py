@@ -262,8 +262,16 @@ class NeighborhoodSampler:
         Returns:
             Variance of sampled neighbor sets
         """
+        if num_trials <= 0:
+            raise ValueError("num_trials must be positive")
+            
         neighbor_sets = []
-        num_samples = self.config.num_neighbors[0]
+        
+        # Check if node has neighbors
+        if node not in self.graph_store.adjacency or not self.graph_store.adjacency[node]:
+            return 0.0  # No neighbors, no variance
+            
+        num_samples = self.config.num_neighbors[0] if self.config.num_neighbors else 10
         
         for _ in range(num_trials):
             sampled = set(self.sample_neighbors(node, num_samples))
@@ -279,7 +287,7 @@ class NeighborhoodSampler:
                     similarities.append(intersection / union)
         
         if similarities:
-            return np.var(similarities)
+            return float(np.var(similarities))
         return 0.0
     
     def get_sampling_statistics(self) -> Dict[str, float]:

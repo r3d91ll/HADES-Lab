@@ -276,7 +276,7 @@ class GraphBuilder:
                 count = self.db.collection(coll_name).count()
                 print(f"  {coll_name}: {count:,}")
                 total_nodes += count
-            except:
+            except Exception:
                 pass
         print(f"  Total: {total_nodes:,}")
         
@@ -289,7 +289,7 @@ class GraphBuilder:
                     count = collection.count()
                     print(f"  {coll_name}: {count:,}")
                     total_edges += count
-                except:
+                except Exception:
                     pass
         print(f"  Total: {total_edges:,}")
         
