@@ -99,6 +99,35 @@ class GraphSAGEPipeline:
             'bridge_discovery_time': 0,
             'total_time': 0
         }
+        
+        # Checkpoint management
+        self.checkpoint_file = Path("graphsage_checkpoint.json")
+        self.checkpoint = self._load_checkpoint()
+    
+    def _load_checkpoint(self) -> Dict[str, Any]:
+        """Load checkpoint if it exists."""
+        if self.checkpoint_file.exists():
+            try:
+                with open(self.checkpoint_file, 'r') as f:
+                    checkpoint = json.load(f)
+                print(f"Loaded checkpoint from {self.checkpoint_file}")
+                return checkpoint
+            except Exception as e:
+                print(f"Warning: Could not load checkpoint: {e}")
+        return {}
+    
+    def _save_checkpoint(self, phase: str, data: Any = None):
+        """Save checkpoint after completing a phase."""
+        self.checkpoint[phase] = {
+            'completed': True,
+            'timestamp': time.time(),
+            'data': data
+        }
+        try:
+            with open(self.checkpoint_file, 'w') as f:
+                json.dump(self.checkpoint, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not save checkpoint: {e}")
     
     def load_graph(self):
         """Load graph from ArangoDB or cache."""
@@ -327,27 +356,51 @@ class GraphSAGEPipeline:
         print(f"Saved {num_saved} bridges to ArangoDB")
     
     def run(self):
-        """Run the complete pipeline."""
+        """Run the complete pipeline with checkpoint support."""
         print("\n" + "="*60)
         print("GRAPHSAGE PIPELINE")
         print("="*60)
         
         total_start = time.time()
         
-        # Step 1: Load graph
-        self.load_graph()
+        # Step 1: Load graph (skip if already done)
+        if not self.checkpoint.get('graph_loaded', {}).get('completed'):
+            self.load_graph()
+            self._save_checkpoint('graph_loaded')
+        else:
+            print("Skipping graph loading (already completed)")
+            # Still need to initialize graph_store from cache
+            self.graph_store = GraphMemoryStore(max_memory_gb=self.config.max_memory_gb)
+            self.graph_store.load_from_disk(self.config.cache_path)
         
-        # Step 2: Initialize model
-        self.initialize_model()
+        # Step 2: Initialize model (skip if already done)
+        if not self.checkpoint.get('model_initialized', {}).get('completed'):
+            self.initialize_model()
+            self._save_checkpoint('model_initialized')
+        else:
+            print("Skipping model initialization (already completed)")
+            self.initialize_model()  # Need to recreate model object
         
         # Step 3: Train model (optional)
-        # self.train_model()
+        # if not self.checkpoint.get('model_trained', {}).get('completed'):
+        #     self.train_model()
+        #     self._save_checkpoint('model_trained')
         
-        # Step 4: Generate embeddings
-        self.generate_embeddings()
+        # Step 4: Generate embeddings (skip if already done)
+        if not self.checkpoint.get('embeddings_generated', {}).get('completed'):
+            self.generate_embeddings()
+            self._save_checkpoint('embeddings_generated')
+        else:
+            print("Skipping embedding generation (already completed)")
         
-        # Step 5: Discover bridges
-        bridges = self.discover_bridges()
+        # Step 5: Discover bridges (skip if already done)
+        if not self.checkpoint.get('bridges_discovered', {}).get('completed'):
+            bridges = self.discover_bridges()
+            self._save_checkpoint('bridges_discovered', 
+                               {'num_bridges': sum(len(b) for b in bridges.values())})
+        else:
+            print("Skipping bridge discovery (already completed)")
+            bridges = {}  # Would need to reload from database
         
         self.stats['total_time'] = time.time() - total_start
         

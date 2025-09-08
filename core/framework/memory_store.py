@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Graph Memory Store - RAM-based graph storage for GraphSAGE.
 

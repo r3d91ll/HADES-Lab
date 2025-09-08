@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 GraphSAGE Embedder - Inductive graph embedding generation.
 

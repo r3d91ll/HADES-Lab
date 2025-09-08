@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Build Graph from Existing Data.
 
