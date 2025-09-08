@@ -21,9 +21,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from core.framework.embedders import JinaV4Embedder
-from core.framework.extractors.docling_extractor import DoclingExtractor
-from core.framework.storage import ArangoStorage
+from ..framework.embedders import JinaV4Embedder
+from ..framework.extractors.docling_extractor import DoclingExtractor
+from ..framework.storage import ArangoStorage
 
 logger = logging.getLogger(__name__)
 
@@ -185,14 +185,24 @@ class PDFProcessor:
             initializer=self._init_extraction_worker,
             initargs=(self.config.gpu_devices, self._get_docling_config())
         ) as pool:
-            # Process in batches
+            # Process in batches - schedule all first, then collect results
             batch_size = self.config.extraction_batch_size
-            all_results = []
+            async_results = []
             
+            # Schedule all batches for concurrent execution
             for i in range(0, len(tasks), batch_size):
                 batch = tasks[i:i + batch_size]
-                batch_results = pool.apply_async(self._extract_document_batch, (batch,))
-                all_results.extend(batch_results.get())
+                async_result = pool.apply_async(
+                    self._extract_document_batch, 
+                    (batch, str(self.staging_dir))
+                )
+                async_results.append(async_result)
+            
+            # Collect all results
+            all_results = []
+            for async_result in async_results:
+                batch_results = async_result.get()
+                all_results.extend(batch_results)
             
         logger.info(f"Extraction phase complete: {len(all_results)} documents processed")
         return all_results
@@ -318,7 +328,7 @@ class PDFProcessor:
                                 content = f.read()
                             extracted[f'{file_type}_source'] = content
                             extracted[f'has_{file_type}'] = True
-                        except Exception as e:
+                        except (OSError, UnicodeDecodeError) as e:
                             logger.warning(f"Failed to read {file_type} for {task.document_id}: {e}")
                 
                 # Create unified document
@@ -354,7 +364,7 @@ class PDFProcessor:
                     'document_id': task.document_id,
                     'error': str(e)
                 })
-                logger.error(f"Failed to extract {task.document_id}: {e}")
+                logger.exception(f"Failed to extract {task.document_id}")
         
         return batch_results
     
@@ -407,7 +417,7 @@ class PDFProcessor:
             }
             
         except Exception as e:
-            logger.error(f"Failed to embed/store document: {e}")
+            logger.exception("Failed to embed/store document")
             return {
                 'success': False,
                 'document_id': staged_path.split('/')[-1].replace('.json', ''),

@@ -238,7 +238,7 @@ class ArangoStorage:
             papers_coll.add_persistent_index(fields=['processing_timestamp'])
         except Exception as e:
             if "duplicate" not in str(e).lower():
-                logger.error(f"Failed to create papers index: {e}")
+                logger.exception("Failed to create papers index")
         
         # Chunks collection indexes
         chunks_coll = self.db.collection(self.chunks_collection)
@@ -248,7 +248,7 @@ class ArangoStorage:
             chunks_coll.add_fulltext_index(fields=['text'])
         except Exception as e:
             if "duplicate" not in str(e).lower():
-                logger.error(f"Failed to create chunks index: {e}")
+                logger.exception("Failed to create chunks index")
         
         # Embeddings collection indexes
         embeddings_coll = self.db.collection(self.embeddings_collection)
@@ -257,7 +257,7 @@ class ArangoStorage:
             embeddings_coll.add_persistent_index(fields=['chunk_id'])
         except Exception as e:
             if "duplicate" not in str(e).lower():
-                logger.error(f"Failed to create embeddings index: {e}")
+                logger.exception("Failed to create embeddings index")
         
         # Structures collection indexes
         structures_coll = self.db.collection(self.structures_collection)
@@ -266,7 +266,7 @@ class ArangoStorage:
             structures_coll.add_persistent_index(fields=['type'])
         except Exception as e:
             if "duplicate" not in str(e).lower():
-                logger.error(f"Failed to create structures index: {e}")
+                logger.exception("Failed to create structures index")
     
     def store_document(self, document_id: str, chunks: List[Dict[str, Any]], 
                       metadata: Dict[str, Any], extracted_content: Dict[str, Any]) -> Dict[str, Any]:
@@ -389,11 +389,11 @@ class ArangoStorage:
             }
             
         except Exception as e:
-            logger.error(f"Failed to store document {document_id}: {e}")
+            logger.exception(f"Failed to store document {document_id}")
             try:
                 transaction_db.abort_transaction()
-            except:
-                pass
+            except Exception as abort_exc:
+                logger.warning(f"Failed to abort transaction: {abort_exc}")
             
             return {
                 'success': False,
@@ -444,7 +444,7 @@ class ArangoStorage:
             }
             
         except Exception as e:
-            logger.error(f"Failed to retrieve document {document_id}: {e}")
+            logger.exception(f"Failed to retrieve document {document_id}")
             return None
     
     def document_exists(self, document_id: str) -> bool:
@@ -462,5 +462,5 @@ class ArangoStorage:
             papers_coll = self.db.collection(self.papers_collection)
             return papers_coll.has(safe_id)
         except Exception as e:
-            logger.error(f"Failed to check document existence: {e}")
+            logger.exception("Failed to check document existence")
             return False
