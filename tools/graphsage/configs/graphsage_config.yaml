@@ -1,0 +1,77 @@
+# GraphSAGE Configuration File
+# Theory-Practice Bridge Discovery with RAM-first Architecture
+
+# ArangoDB Configuration
+arango:
+  host: 'http://localhost:8529'  # Using localhost to avoid network stack
+  database: 'academy_store'
+  username: 'root'
+  # password provided via environment variable ARANGO_PASSWORD
+
+# GraphSAGE Model Configuration
+model:
+  input_dim: 2048  # Jina v4 embedding dimension
+  hidden_dims: [512, 256]  # Hidden layer dimensions
+  output_dim: 256  # Final embedding dimension
+  num_layers: 2  # Number of GraphSAGE layers (K-hop)
+  aggregator_type: 'mean'  # mean, pool, lstm, gcn
+  dropout: 0.5
+  concat: true  # Concatenate self and neighbor features
+  batch_size: 512
+  num_neighbors: [25, 10]  # Sample 25 neighbors at layer 1, 10 at layer 2
+  device: 'cuda'  # or 'cpu'
+
+# Neighborhood Sampling Configuration
+sampling:
+  strategy: 'adaptive'  # uniform, importance, adaptive
+  num_neighbors: [25, 10]  # Must match model config
+  seed: 42
+
+# Bridge Discovery Configuration
+bridge_discovery:
+  similarity_threshold: 0.75  # Minimum similarity for bridge
+  max_bridges_per_paper: 10  # Maximum bridges to find per paper
+  bridge_types: ['direct', 'semantic', 'structural', 'latent']
+  use_embeddings: true
+  use_structure: true
+  use_content: true
+
+# Pipeline Configuration
+pipeline:
+  load_from_cache: false  # Set to true after first run
+  cache_path: './cache/graph_cache.json'
+  save_embeddings: true
+  save_bridges: true
+
+# Memory Configuration
+memory:
+  max_memory_gb: 100.0  # Maximum RAM to use
+  use_shared_memory: true  # Enable zero-copy access
+
+# Training Configuration (for future implementation)
+training:
+  num_epochs: 10
+  learning_rate: 0.01
+  weight_decay: 0.0001
+  negative_samples: 5
+  
+# Monitoring Configuration
+monitoring:
+  log_interval: 100
+  checkpoint_interval: 1000
+  profile_memory: true
+  
+# Output Configuration
+output:
+  results_dir: './results'
+  save_model: true
+  model_path: './models/graphsage_model.pt'
+  
+# Conveyance Scoring Parameters (from theory)
+conveyance:
+  alpha: 1.6  # Empirical amplification factor
+  weights:
+    local_coherence: 0.25
+    instruction_fit: 0.25
+    actionability: 0.25
+    grounding: 0.25
