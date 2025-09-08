@@ -172,7 +172,7 @@ class LSTMAggregator(Aggregator):
         """
         # Random permutation of neighbors for LSTM
         batch_size, num_neighbors, _ = neighbor_feats.shape
-        perm = torch.randperm(num_neighbors)
+        perm = torch.randperm(num_neighbors, device=neighbor_feats.device)
         neighbor_feats = neighbor_feats[:, perm, :]
         
         # LSTM aggregation

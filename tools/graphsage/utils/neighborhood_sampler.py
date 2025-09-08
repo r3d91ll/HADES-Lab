@@ -70,7 +70,7 @@ class NeighborhoodSampler:
         probs = {}
         
         for node_idx in range(len(self.graph_store.node_ids)):
-            neighbors = list(self.graph_store.adjacency.get(node_idx, set()))
+            neighbors = sorted(list(self.graph_store.adjacency.get(node_idx, set())))
             
             if not neighbors:
                 continue
@@ -107,7 +107,8 @@ class NeighborhoodSampler:
         Returns:
             List of sampled neighbor indices
         """
-        neighbors = list(self.graph_store.adjacency.get(node, set()))
+        # Use sorted() for deterministic ordering
+        neighbors = sorted(list(self.graph_store.adjacency.get(node, set())))
         
         if not neighbors:
             return [node]  # Self-loop if no neighbors

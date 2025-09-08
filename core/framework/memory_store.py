@@ -11,10 +11,9 @@ instantly accessible for real-time conveyance calculations.
 
 import os
 import numpy as np
-from typing import Dict, List, Set, Tuple, Optional, Any
+from typing import Dict, List, Set, Tuple, Optional, Any, DefaultDict
 from dataclasses import dataclass
 from collections import defaultdict
-import multiprocessing as mp
 from multiprocessing import shared_memory
 import json
 import time
@@ -55,7 +54,7 @@ class GraphMemoryStore:
         self.node_embeddings: Optional[np.ndarray] = None  # Shape: (n_nodes, embedding_dim)
         
         # Edge data (adjacency lists for efficiency)
-        self.adjacency: Dict[int, Set[int]] = defaultdict(set)
+        self.adjacency: DefaultDict[int, Set[int]] = defaultdict(set)
         self.edge_types: Dict[Tuple[int, int], str] = {}
         
         # Reverse mappings
@@ -114,9 +113,13 @@ class GraphMemoryStore:
         load_time = time.time() - start_time
         memory_usage = self._calculate_memory_usage()
         
+        # For undirected graphs, edges are counted twice in adjacency lists
+        # Divide by 2 to get the actual edge count
+        edge_count = sum(len(neighbors) for neighbors in self.adjacency.values()) // 2
+        
         self.stats = GraphStats(
             num_nodes=len(self.node_ids),
-            num_edges=sum(len(neighbors) for neighbors in self.adjacency.values()),
+            num_edges=edge_count,
             num_node_types=len(set(self.node_types.values())),
             num_edge_types=len(set(self.edge_types.values())),
             memory_usage_gb=memory_usage,
@@ -205,24 +208,46 @@ class GraphMemoryStore:
         """
         num_nodes = len(self.node_ids)
         
+        # Guard against zero-node graphs
+        if num_nodes == 0:
+            print("Warning: No nodes in graph, skipping shared memory creation")
+            return
+        
+        # Clean up any existing shared memory
+        if self.shared_memory is not None:
+            self.cleanup()
+        
         # Calculate size needed
         size = num_nodes * embedding_dim * np.float32().itemsize
+        size_gb = size / (1024 ** 3)
         
-        # Create shared memory
-        self.shared_memory = shared_memory.SharedMemory(create=True, size=size)
-        self.shared_memory_name = self.shared_memory.name
+        # Check memory limit
+        if size_gb > self.max_memory_gb:
+            raise MemoryError(
+                f"Required memory ({size_gb:.2f} GB) exceeds limit ({self.max_memory_gb} GB). "
+                f"Reduce embedding_dim or increase max_memory_gb."
+            )
         
-        # Create numpy array backed by shared memory
-        self.node_embeddings = np.ndarray(
-            (num_nodes, embedding_dim),
-            dtype=np.float32,
-            buffer=self.shared_memory.buf
-        )
-        
-        # Initialize with zeros (will be filled by GraphSAGE)
-        self.node_embeddings[:] = 0
-        
-        print(f"Created shared memory '{self.shared_memory_name}' for embeddings")
+        try:
+            # Create shared memory
+            self.shared_memory = shared_memory.SharedMemory(create=True, size=size)
+            self.shared_memory_name = self.shared_memory.name
+            
+            # Create numpy array backed by shared memory
+            self.node_embeddings = np.ndarray(
+                (num_nodes, embedding_dim),
+                dtype=np.float32,
+                buffer=self.shared_memory.buf
+            )
+            
+            # Initialize with zeros (will be filled by GraphSAGE)
+            self.node_embeddings[:] = 0
+            
+            print(f"Created shared memory '{self.shared_memory_name}' for embeddings ({size_gb:.2f} GB)")
+            
+        except Exception as e:
+            self.cleanup()
+            raise RuntimeError(f"Failed to create shared memory: {e}")
         
     def get_neighbors(self, node_index: int, max_neighbors: Optional[int] = None) -> List[int]:
         """
@@ -235,7 +260,8 @@ class GraphMemoryStore:
         Returns:
             List of neighbor indices
         """
-        neighbors = list(self.adjacency.get(node_index, set()))
+        # Use sorted() for deterministic ordering
+        neighbors = sorted(list(self.adjacency.get(node_index, set())))
         
         if max_neighbors and len(neighbors) > max_neighbors:
             # Random sampling for scalability
