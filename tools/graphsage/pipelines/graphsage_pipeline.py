@@ -442,7 +442,14 @@ def load_config(config_path: str) -> PipelineConfig:
         config_dict = yaml.safe_load(f)
     
     # Create config objects
-    model_config = GraphSAGEConfig(**config_dict.get('model', {}))
+    model_dict = config_dict.get('model', {})
+    # Convert aggregator_type string to enum
+    if 'aggregator_type' in model_dict:
+        from core.framework.graph_embedders import AggregatorType
+        agg_type_str = model_dict['aggregator_type'].upper()
+        model_dict['aggregator_type'] = AggregatorType[agg_type_str]
+    
+    model_config = GraphSAGEConfig(**model_dict)
     sampling_config = SamplingConfig(**config_dict.get('sampling', {}))
     bridge_config = BridgeDiscoveryConfig(**config_dict.get('bridge_discovery', {}))
     

@@ -167,6 +167,12 @@ class GraphMemoryStore:
             ('semantic_similarity', 'similar'),
             ('theory_practice_bridges', 'implements'),
             ('paper_implements_theory', 'implements'),
+            ('paper_has_chunk', 'has_chunk'),
+            ('chunk_similarity', 'similar'),
+            ('coauthorship', 'coauthor'),
+            ('shared_category', 'same_field'),
+            ('temporal_proximity', 'temporal'),
+            ('paper_cites_paper', 'cites'),
         ]
         
         for collection_name, edge_type in edge_collections:
