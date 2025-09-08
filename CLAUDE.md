@@ -190,6 +190,26 @@ python acid_monitoring.py
 cd tools/arxiv/utils/
 python check_db_status.py --detailed
 
+# Access ArangoDB Web Interface
+# Browse to: http://localhost:8529 (NOT https!)
+# Database: academy_store
+# Username: root
+# Password: $ARANGO_PASSWORD
+
+# Check database content via Python
+python -c "
+import os
+from arango import ArangoClient
+client = ArangoClient(hosts='http://localhost:8529')
+db = client.db('academy_store', username='root', password=os.environ.get('ARANGO_PASSWORD'))
+for coll in ['arxiv_papers', 'arxiv_chunks', 'arxiv_embeddings']:
+    try:
+        count = db.collection(coll).count()
+        print(f'{coll}: {count:,} documents')
+    except:
+        pass
+"
+
 # GPU verification
 nvidia-smi
 
@@ -295,10 +315,15 @@ HADES-Lab/
    * File tracking: `has_pdf`, `pdf_path`, `has_latex`, `latex_path`
 
 2. **ArangoDB** (`academy_store` database): Processed knowledge graph
-   * `arxiv_papers`: Processing status and embeddings
-   * `arxiv_chunks`: Text segments with context preservation
-   * `arxiv_embeddings`: 2048-dimensional Jina v4 vectors
-   * `arxiv_structures`: Equations, tables, images
+   * **Connection**: `http://localhost:8529` (NOT https!)
+   * **Database**: `academy_store`
+   * **Collections**:
+     - `arxiv_papers`: Paper metadata and processing status (~2.7M papers)
+     - `arxiv_chunks`: Text segments with context preservation
+     - `arxiv_embeddings`: 2048-dimensional Jina v4 vectors
+     - `arxiv_equations`: Mathematical equations from papers
+     - `arxiv_tables`: Extracted tables
+     - `arxiv_images`: Image metadata and captions
 
 3. **Local Storage**: Direct PDF processing from `/bulk-store/arxiv-data/pdf/`
 
