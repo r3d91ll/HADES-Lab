@@ -35,7 +35,7 @@ class GraphSAGEConfig:
     input_dim: int = 2048  # Jina v4 embedding dimension
     hidden_dims: List[int] = None  # Hidden layer dimensions
     output_dim: int = 256  # Final embedding dimension
-    num_layers: int = 2  # Number of GraphSAGE layers (K)
+    num_layers: int = 1  # Number of GraphSAGE layers (K) - default to 1 for safety
     aggregator_type: AggregatorType = AggregatorType.MEAN
     dropout: float = 0.5
     concat: bool = True  # Concatenate self and neighbor features
@@ -45,9 +45,11 @@ class GraphSAGEConfig:
     
     def __post_init__(self):
         if self.hidden_dims is None:
-            self.hidden_dims = [512, 256]
+            # For single layer, just one hidden dim
+            self.hidden_dims = [256] if self.num_layers == 1 else [512, 256]
         if self.num_neighbors is None:
-            self.num_neighbors = [25, 10]  # Sample 25 at layer 1, 10 at layer 2
+            # Adjust based on number of layers
+            self.num_neighbors = [25] if self.num_layers == 1 else [25, 10]
 
 
 class Aggregator(nn.Module):
@@ -304,6 +306,21 @@ class GraphSAGEEmbedder(nn.Module):
         Returns:
             Node embeddings (batch_size, output_dim)
         """
+        # Check if we can support multiple layers
+        if len(self.layers) > 1 and self.graph_store.node_embeddings is not None:
+            # Current implementation limitation: multi-layer requires full graph forward pass
+            # For now, we'll implement a safe fallback with single layer
+            import warnings
+            warnings.warn(
+                "Multi-layer GraphSAGE currently requires full graph forward pass. "
+                "Using only first layer as temporary fallback. "
+                "Full implementation requires maintaining node->feature mapping across layers.",
+                RuntimeWarning
+            )
+            layers_to_use = self.layers[:1]
+        else:
+            layers_to_use = self.layers
+        
         # Sample neighbors
         samples = self.sample_neighbors(node_indices, self.config.num_neighbors)
         
@@ -326,8 +343,15 @@ class GraphSAGEEmbedder(nn.Module):
         # Forward through layers
         h = initial_features
         
-        for layer_idx, layer in enumerate(self.layers):
-            # Get neighbor features for this layer
+        # Store features for all nodes seen so far (for multi-layer propagation)
+        node_features = {}  # Maps node index to features at current layer
+        
+        for layer_idx, layer in enumerate(layers_to_use):
+            # Store current features
+            for i, node_idx in enumerate(node_indices):
+                node_features[node_idx] = h[i]
+            
+            # Get neighbor indices for this layer
             neighbor_indices = samples[layer_idx + 1]
             
             # Flatten neighbor indices
@@ -338,21 +362,40 @@ class GraphSAGEEmbedder(nn.Module):
                 neighbor_counts.append(len(neighbors))
             
             # Get neighbor features
-            if self.graph_store.node_embeddings is not None:
-                neighbor_feats = torch.tensor(
-                    self.graph_store.node_embeddings[all_neighbor_indices],
-                    device=self.config.device,
-                    dtype=torch.float32
-                )
+            if layer_idx == 0:
+                # First layer: use original embeddings from graph_store
+                if self.graph_store.node_embeddings is not None:
+                    neighbor_feats = torch.tensor(
+                        self.graph_store.node_embeddings[all_neighbor_indices],
+                        device=self.config.device,
+                        dtype=torch.float32
+                    )
+                else:
+                    neighbor_feats = torch.randn(
+                        len(all_neighbor_indices),
+                        h.shape[1],
+                        device=self.config.device
+                    )
             else:
-                neighbor_feats = torch.randn(
-                    len(all_neighbor_indices),
-                    h.shape[1],
-                    device=self.config.device
-                )
+                # Subsequent layers: use transformed features from previous layer
+                # This requires having computed features for all needed neighbors
+                neighbor_feat_list = []
+                for neighbor_idx in all_neighbor_indices:
+                    if neighbor_idx in node_features:
+                        # Use previously computed features
+                        neighbor_feat_list.append(node_features[neighbor_idx])
+                    else:
+                        # Neighbor not yet processed - would need recursive computation
+                        # For now, raise an error as this indicates incomplete implementation
+                        raise NotImplementedError(
+                            f"Multi-layer GraphSAGE requires full graph forward pass. "
+                            f"Node {neighbor_idx} features not available at layer {layer_idx}."
+                        )
+                
+                neighbor_feats = torch.stack(neighbor_feat_list)
             
             # Reshape to (batch_size, num_neighbors, feature_dim)
-            max_neighbors = max(neighbor_counts)
+            max_neighbors = max(neighbor_counts) if neighbor_counts else 1
             batch_neighbor_feats = torch.zeros(
                 len(node_indices), 
                 max_neighbors, 
@@ -362,8 +405,9 @@ class GraphSAGEEmbedder(nn.Module):
             
             start_idx = 0
             for i, count in enumerate(neighbor_counts):
-                batch_neighbor_feats[i, :count] = neighbor_feats[start_idx:start_idx + count]
-                start_idx += count
+                if count > 0:
+                    batch_neighbor_feats[i, :count] = neighbor_feats[start_idx:start_idx + count]
+                    start_idx += count
             
             # Apply layer
             h = layer(h, batch_neighbor_feats)
