@@ -9,11 +9,10 @@ reviews:
     # Review PRs targeting any branch (not just default)
     base_branches:
       - "main"
-      - "feature/*"
-      - "feature/**/*"
+      - "feature/.*"      # Matches any feature branch
       - "develop"
-      - "release/*"
-      - "hotfix/*"
+      - "release/.*"
+      - "hotfix/.*"
 
     # Skip drafts
     draft: false
@@ -27,12 +26,21 @@ reviews:
 
   # Tools and checks
   tools:
-    # Enable all built-in tools
-    ruff: true
-    markdownlint: true
-    languagetool: false  # Can be noisy for technical docs
-    shellcheck: true
-    yamllint: true
+    # Enable ruff for Python linting
+    ruff:
+      enabled: true
+    # Enable markdownlint
+    markdownlint:
+      enabled: true
+    # Disable languagetool (can be noisy for technical docs)
+    languagetool:
+      enabled: false
+    # Enable shellcheck
+    shellcheck:
+      enabled: true
+    # Enable yamllint
+    yamllint:
+      enabled: true
 
   # Path filters - review all files by default
   path_filters:
