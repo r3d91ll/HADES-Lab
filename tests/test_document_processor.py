@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import List
 import sys
 
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult,
     ExtractionResult
 )
-from core.processors.chunking_strategies import (
+from core.processors.text.chunking_strategies import (
     ChunkingStrategyFactory,
     TokenBasedChunking,
     SemanticChunking

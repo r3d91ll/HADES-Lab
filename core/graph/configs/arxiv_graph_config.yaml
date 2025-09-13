@@ -1,0 +1,94 @@
+# ArXiv Graph Build Configuration
+# Following "Death of the Author" philosophy - no author connections
+
+edge_types:
+  # Structural edges - fast to build
+  same_field:
+    enabled: true
+    method: category_match
+    priority: 1
+    description: "Connect papers in same research field"
+    
+  # Temporal edges - ArXiv optimized
+  temporal_proximity:
+    enabled: true
+    method: time_window
+    window_days: 30
+    priority: 2
+    description: "Connect papers published within 30 days"
+    arxiv_optimized: true  # Uses YYMM.NNNNN format
+    
+  # Primary semantic edges - high quality
+  abstract_similarity:
+    enabled: true
+    method: cosine_similarity
+    threshold: 0.75  # Higher threshold for abstracts
+    batch_size: 15000
+    priority: 3
+    description: "Connect papers with similar research topics"
+    top_k_per_node: 50  # Prevent super-nodes
+    use_gpu: true
+    
+  # Secondary semantic edges
+  keyword_similarity:
+    enabled: true
+    method: cosine_similarity  
+    threshold: 0.65  # Lower threshold for keywords
+    batch_size: 15000
+    priority: 4
+    description: "Connect papers with overlapping concepts"
+    top_k_per_node: 50
+    use_gpu: true
+    
+  # Version tracking edges
+  paper_versions:
+    enabled: true
+    method: version_grouping
+    priority: 5
+    description: "Connect different versions of same paper"
+
+# GPU Configuration
+gpu:
+  use_gpu: true
+  devices: [0, 1]  # Both RTX A6000s
+  use_nvlink: true
+  batch_size: 15000  # Fits in 48GB with headroom
+  use_fp16: true  # Mixed precision for speed
+  clear_cache_frequency: 10  # Clear every 10 batches
+
+# Validation settings
+validation:
+  check_symmetry: true  # Ensure undirected edges are symmetric
+  check_orphans: true  # Find isolated papers
+  check_duplicates: true  # Remove duplicate edges
+  check_weights: true  # Verify similarity scores in [0,1]
+  sample_size: 10000  # For expensive checks
+
+# Graph statistics targets
+targets:
+  total_edges: 60000000  # 60-70M expected
+  average_degree: 25  # 20-30 connections per paper
+  orphan_rate: 0.01  # Less than 1% isolated papers
+  largest_component: 0.95  # 95%+ in giant component
+
+# Output settings
+output:
+  save_statistics: true
+  statistics_path: "./graph_statistics/"
+  checkpoint_frequency: 1000  # Save progress every 1000 batches
+  log_level: INFO
+
+# Reproducibility
+reproducibility:
+  seed: 42
+  deterministic: true
+  save_config: true
+  timestamp_edges: true
+  model_versions:
+    embeddings: "sentence-transformers/all-MiniLM-L6-v2"
+    
+# Memory limits (to prevent OOM)
+memory:
+  max_gpu_memory_gb: 45  # Leave 3GB headroom on 48GB GPU
+  max_ram_gb: 120  # System has 128GB
+  embedding_cache_size: 100000  # Papers to keep in memory

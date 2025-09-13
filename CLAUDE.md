@@ -190,6 +190,26 @@ python acid_monitoring.py
 cd tools/arxiv/utils/
 python check_db_status.py --detailed
 
+# Access ArangoDB Web Interface
+# Browse to: http://localhost:8529 (NOT https!)
+# Database: academy_store
+# Username: root
+# Password: $ARANGO_PASSWORD
+
+# Check database content via Python
+python -c "
+import os
+from arango import ArangoClient
+client = ArangoClient(hosts='http://localhost:8529')
+db = client.db('academy_store', username='root', password=os.environ.get('ARANGO_PASSWORD'))
+for coll in ['arxiv_papers', 'arxiv_chunks', 'arxiv_embeddings']:
+    try:
+        count = db.collection(coll).count()
+        print(f'{coll}: {count:,} documents')
+    except:
+        pass
+"
+
 # GPU verification
 nvidia-smi
 
@@ -295,10 +315,15 @@ HADES-Lab/
    * File tracking: `has_pdf`, `pdf_path`, `has_latex`, `latex_path`
 
 2. **ArangoDB** (`academy_store` database): Processed knowledge graph
-   * `arxiv_papers`: Processing status and embeddings
-   * `arxiv_chunks`: Text segments with context preservation
-   * `arxiv_embeddings`: 2048-dimensional Jina v4 vectors
-   * `arxiv_structures`: Equations, tables, images
+   * **Connection**: `http://localhost:8529` (NOT https!)
+   * **Database**: `academy_store`
+   * **Collections**:
+     * `arxiv_papers`: Paper metadata and processing status (~2.7M papers)
+     * `arxiv_chunks`: Text segments with context preservation
+     * `arxiv_embeddings`: 2048-dimensional Jina v4 vectors
+     * `arxiv_equations`: Mathematical equations from papers
+     * `arxiv_tables`: Extracted tables
+     * `arxiv_images`: Image metadata and captions
 
 3. **Local Storage**: Direct PDF processing from `/bulk-store/arxiv-data/pdf/`
 
@@ -477,6 +502,44 @@ This preserves the archaeological record of development decisions.
 * **Research** (`experiments/`): One-off analyses, prototypes, research code
 
 Experiments can import from infrastructure, but infrastructure should not depend on experiments.
+
+## Code Organization Best Practices
+
+### Naming Conventions
+
+**File Naming Pattern**: Files should be prefixed with their parent directory name for clarity and discoverability:
+
+**Core Infrastructure:**
+- `core/workflows/` → Files start with `workflow_` (e.g., `workflow_pdf.py`, `workflow_pdf_batch.py`)
+- `core/database/arango/` → Files start with `arango_` (e.g., `arango_client.py`, `arango_unix_client.py`)
+- `core/processors/text/` → Files describe processing type (e.g., `chunking_strategies.py`)
+- `core/framework/` → Files describe capability (e.g., `embedders.py`, `extractors.py`)
+
+**Tools (Data Sources):**
+- `tools/arxiv/` → Files start with `arxiv_` (e.g., `arxiv_lifecycle_manager.py`, `arxiv_daily_update.py`)
+- `tools/github/` → Files start with `github_` (e.g., `github_pipeline_manager.py`)
+- `tools/hirag/` → Files start with `hirag_` (e.g., `hirag_builder.py`)
+
+This convention ensures:
+1. Immediate identification of module ownership
+2. Consistent, predictable structure
+3. Easy navigation and discovery
+4. Clear separation of concerns
+
+### Utility Creation Rule
+**Before creating any script, consider its reusability**:
+- If a script has utility beyond a single use case → Create in `core/workflows/` as a proper workflow
+- If it's a one-off experiment → Place in `experiments/`
+- If it's data-source specific → Place in appropriate `tools/` subdirectory
+
+**All workflows in `core/workflows/` must have**:
+1. Comprehensive docstrings
+2. CLI interface with `click`
+3. Proper error handling
+4. Confirmation prompts for destructive operations
+5. Logging for audit trails
+
+This prevents code cruft and ensures all tools are production-ready.
 
 ## Critical Implementation Notes
 

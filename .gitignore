@@ -388,3 +388,8 @@ arxiv_pipeline_v2_results_*.json
 tools/arxiv/REORGANIZATION_NOTICE.md
 tools/arxiv/SCRIPT_REORGANIZATION_ANALYSIS.md
 tools/arxiv/utils/SCRIPT_ANALYSIS.md
+graphsage_checkpoint.json
+cache/
+.zed/
+scratch/
+staging/

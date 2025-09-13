@@ -51,12 +51,7 @@ from functools import wraps
 import random
 
 # Import shared ArangoDBManager and retry decorator
-try:
-    # Try relative import first (when used as module)
-    from .arango_db_manager import ArangoDBManager, retry_with_backoff
-except ImportError:
-    # Fall back to absolute import (when run directly)
-    from arango_db_manager import ArangoDBManager, retry_with_backoff
+from core.database.arango.arango_client import ArangoDBManager, retry_with_backoff
 
 # Global instances for worker processes
 WORKER_EMBEDDER = None

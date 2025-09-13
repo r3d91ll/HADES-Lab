@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tools.github.github_document_manager import GitHubDocumentManager
-from core.processors.generic_document_processor import GenericDocumentProcessor
+from core.workflows.workflow_pdf_batch import GenericDocumentProcessor
 import os
 import json
 
@@ -160,7 +160,7 @@ def test_tree_sitter_extraction():
     # Check if Tree-sitter metadata was stored
     if results.get('embedding_success', 0) > 0:
         logger.info("\nChecking stored metadata in ArangoDB...")
-        from core.database.arango_db_manager import ArangoDBManager
+        from core.database.arango.arango_client import ArangoDBManager
         
         db_manager = ArangoDBManager(config['arango'])
         

@@ -1,12 +1,11 @@
 """
-Data Infrastructure Module
+Text Processing Module
 
-Provides data loading, PDF processing, and chunk management utilities
-for processing academic papers from arXiv and other sources.
+Provides text processing utilities like chunking strategies.
+Document processing workflows have been moved to core/workflows/.
 """
 
-from .document_processor import DocumentProcessor, ProcessingConfig, ProcessingResult
-from .chunking_strategies import (
+from .text.chunking_strategies import (
     ChunkingStrategy,
     TokenBasedChunking,
     SemanticChunking,
@@ -15,9 +14,6 @@ from .chunking_strategies import (
 )
 
 __all__ = [
-    "DocumentProcessor", 
-    "ProcessingConfig", 
-    "ProcessingResult",
     "ChunkingStrategy",
     "TokenBasedChunking",
     "SemanticChunking",

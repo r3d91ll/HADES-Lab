@@ -1,0 +1,71 @@
+{
+  "timestamp": "2025-09-13T13:53:55.160452",
+  "database": "academy_store",
+  "collections": {
+    "arxiv_papers": {
+      "exists": true,
+      "count": 2823744,
+      "indexes": 1
+    },
+    "arxiv_abstract_embeddings": {
+      "exists": true,
+      "count": 2823744,
+      "indexes": 1
+    },
+    "arxiv_chunks": {
+      "exists": false,
+      "count": 0,
+      "indexes": 0
+    },
+    "arxiv_embeddings": {
+      "exists": false,
+      "count": 0,
+      "indexes": 0
+    },
+    "arxiv_equations": {
+      "exists": false,
+      "count": 0,
+      "indexes": 0
+    },
+    "arxiv_tables": {
+      "exists": false,
+      "count": 0,
+      "indexes": 0
+    },
+    "arxiv_images": {
+      "exists": false,
+      "count": 0,
+      "indexes": 0
+    }
+  },
+  "validation_queries": {
+    "papers_with_embeddings": 2823744,
+    "total_papers": 2823744,
+    "embedding_coverage": 100.0
+  },
+  "sample_data": {
+    "embedding": {
+      "paper_id": "supr-con_9608004",
+      "dimensions": 2048,
+      "has_model_field": false,
+      "model": "not specified"
+    },
+    "paper": {
+      "id": "solv-int_9811015",
+      "has_title": true,
+      "has_abstract": true,
+      "has_authors": true,
+      "has_categories": true
+    }
+  },
+  "performance": {
+    "final_run_papers": 1156802,
+    "final_run_minutes": 399.1,
+    "papers_per_second": 48.3,
+    "workers_used": 2,
+    "batch_size": 80,
+    "gpu_model": "NVIDIA RTX A6000",
+    "embedder": "Sentence-Transformers",
+    "model": "jinaai/jina-embeddings-v4"
+  }
+}
