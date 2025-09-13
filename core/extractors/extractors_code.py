@@ -9,13 +9,15 @@ for Jina v4 coding LoRA embeddings.
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Union
 
-from core.framework.extractors.tree_sitter_extractor import TreeSitterExtractor
+from .extractors_treesitter import TreeSitterExtractor
+from .extractors_base import ExtractorBase, ExtractorConfig, ExtractionResult
+
 logger = logging.getLogger(__name__)
 
 
-class CodeExtractor:
+class CodeExtractor(ExtractorBase):
     """
     Extract content from code files.
     
@@ -24,16 +26,19 @@ class CodeExtractor:
     semantic structure.
     """
     
-    def __init__(self, use_tree_sitter: bool = True):
+    def __init__(self, config: Optional[ExtractorConfig] = None, use_tree_sitter: bool = True):
         """
         Initialize the CodeExtractor instance.
-        
-        Sets up a mapping of common file extensions to their single-line comment marker (used by metadata heuristics) 
+
+        Sets up a mapping of common file extensions to their single-line comment marker (used by metadata heuristics)
         and optionally initializes Tree-sitter for symbol extraction.
-        
+
         Args:
+            config: Extractor configuration
             use_tree_sitter: Whether to use Tree-sitter for symbol extraction
         """
+        super().__init__(config)
+
         # Common comment patterns for different languages
         self.comment_patterns = {
             '.py': '#',
@@ -64,7 +69,7 @@ class CodeExtractor:
             self.tree_sitter = None
             logger.info("Initialized CodeExtractor without Tree-sitter")
     
-    def extract(self, file_path: str) -> Optional[Dict[str, Any]]:
+    def extract(self, file_path: Union[str, Path], **kwargs) -> ExtractionResult:
         """
         Extracts text and basic metadata from a code file for embedding generation.
         
@@ -87,14 +92,18 @@ class CodeExtractor:
         file_path = Path(file_path)
         
         if not file_path.exists():
-            logger.error(f"File not found: {file_path}")
-            return None
-        
+            logger.warning(f"File not found: {file_path}")
+            return ExtractionResult(
+                text="",
+                metadata={"file_path": str(file_path)},
+                error=f"File not found: {file_path}"
+            )
+
         try:
             # Read file content
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            
+
             # Extract Tree-sitter symbols if available
             tree_sitter_data = {}
             if self.use_tree_sitter and self.tree_sitter:
@@ -103,40 +112,56 @@ class CodeExtractor:
                     logger.debug(f"Extracted Tree-sitter symbols for {file_path}")
                 except Exception as e:
                     logger.warning(f"Tree-sitter extraction failed for {file_path}: {e}")
-            
-            result = {
-                'full_text': content,
-                'text': content,
-                'markdown': f"```{file_path.suffix[1:]}\n{content}\n```",
-                'num_lines': len(content.splitlines()),
-                'file_size': file_path.stat().st_size,
-                'file_extension': file_path.suffix,
-                'extractor': 'code_extractor_with_tree_sitter' if tree_sitter_data else 'code_extractor'
-            }
-            
-            # Add Tree-sitter data if available
+
+            # Build metadata
+            metadata = self._extract_metadata(content, file_path)
+            metadata['file_extension'] = file_path.suffix
+            metadata['file_size'] = file_path.stat().st_size
+            metadata['num_lines'] = len(content.splitlines())
+            metadata['extractor'] = 'code_extractor_with_tree_sitter' if tree_sitter_data else 'code_extractor'
+
+            # Add Tree-sitter data to metadata if available
             if tree_sitter_data:
-                result['symbols'] = tree_sitter_data.get('symbols', {})
-                result['code_metrics'] = tree_sitter_data.get('metrics', {})
-                result['code_structure'] = tree_sitter_data.get('structure', {})
-                result['language'] = tree_sitter_data.get('language')
-                
+                metadata['symbols'] = tree_sitter_data.get('symbols', {})
+                metadata['code_metrics'] = tree_sitter_data.get('metrics', {})
+                metadata['code_structure'] = tree_sitter_data.get('structure', {})
+                metadata['language'] = tree_sitter_data.get('language')
+
                 # Generate symbol hash for comparison
                 if self.tree_sitter and tree_sitter_data.get('symbols'):
-                    result['symbol_hash'] = self.tree_sitter.generate_symbol_hash(tree_sitter_data['symbols'])
-            
-            # Extract basic metadata (fallback for non-Tree-sitter)
-            result['metadata'] = self._extract_metadata(content, file_path)
-            
+                    metadata['symbol_hash'] = self.tree_sitter.generate_symbol_hash(tree_sitter_data['symbols'])
+
             # Merge Tree-sitter metrics into metadata if available
             if tree_sitter_data.get('metrics'):
-                result['metadata'].update(tree_sitter_data['metrics'])
-            
-            return result
-            
+                metadata.update(tree_sitter_data['metrics'])
+
+            # Create code block
+            code_block = {
+                'language': file_path.suffix[1:] if file_path.suffix else 'text',
+                'code': content,
+                'markdown': f"```{file_path.suffix[1:]}\n{content}\n```"
+            }
+
+            return ExtractionResult(
+                text=content,
+                metadata=metadata,
+                code_blocks=[code_block]
+            )
+
+        except OSError as e:
+            logger.exception(f"I/O error extracting {file_path}")
+            return ExtractionResult(
+                text="",
+                metadata={"file_path": str(file_path)},
+                error=f"I/O error: {str(e)}"
+            )
         except Exception as e:
-            logger.error(f"Failed to extract {file_path}: {e}")
-            return None
+            logger.exception(f"Unexpected error extracting {file_path}")
+            return ExtractionResult(
+                text="",
+                metadata={"file_path": str(file_path)},
+                error=f"Unexpected error: {str(e)}"
+            )
     
     def _extract_metadata(self, content: str, file_path: Path) -> Dict[str, Any]:
         """
@@ -188,5 +213,33 @@ class CodeExtractor:
             # Java analysis
             metadata['import_count'] = sum(1 for line in lines if line.strip().startswith('import '))
             metadata['class_count'] = sum(1 for line in lines if 'class ' in line and '{' in line)
-            
+
         return metadata
+
+    def extract_batch(self,
+                     file_paths: List[Union[str, Path]],
+                     **kwargs) -> List[ExtractionResult]:
+        """
+        Extract content from multiple code files.
+
+        Args:
+            file_paths: List of file paths
+            **kwargs: Additional extraction options
+
+        Returns:
+            List of ExtractionResult objects
+        """
+        results = []
+        for file_path in file_paths:
+            results.append(self.extract(file_path, **kwargs))
+        return results
+
+    @property
+    def supported_formats(self) -> List[str]:
+        """Get list of supported file formats."""
+        return [
+            '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.c', '.cpp', '.h', '.hpp',
+            '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.r',
+            '.m', '.mm', '.sh', '.bash', '.zsh', '.ps1', '.yaml', '.yml', '.toml',
+            '.json', '.xml', '.html', '.css', '.scss', '.sass', '.sql'
+        ]

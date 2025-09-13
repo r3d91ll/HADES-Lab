@@ -50,7 +50,7 @@ class ChunkWithEmbedding:
     context_window_used: int  # How many tokens were in the full context
 
 
-class JinaV4Embedder:
+class JinaV4Embedder(EmbedderBase):
     """
     Jina v4 embedder with late chunking support.
     
@@ -137,24 +137,17 @@ class JinaV4Embedder:
             trust_remote_code=True
         )
         
-        # Load model directly to the target device to avoid Flash Attention warning
-        # Check if device starts with "cuda" to handle both "cuda" and "cuda:0", "cuda:1", etc.
-        if self.device.startswith("cuda") and torch.cuda.is_available():
-            self.model = AutoModel.from_pretrained(
-                self.model_name,
-                trust_remote_code=True,
-                torch_dtype=dtype,
-                device_map=self.device
-            )
-        else:
-            self.model = AutoModel.from_pretrained(
-                self.model_name,
-                trust_remote_code=True,
-                torch_dtype=dtype
-            )
-            # If not using device_map, manually move to device
-            if self.device != "cpu":
-                self.model = self.model.to(self.device)
+        # Load model and then move to target device
+        # device_map should be "auto" or a dict, not a device string
+        self.model = AutoModel.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            torch_dtype=dtype
+        )
+
+        # Move model to the target device if not CPU
+        if self.device and self.device != "cpu":
+            self.model = self.model.to(self.device)
         
         self.model.eval()
         logger.info("Jina v4 model loaded with late chunking support")
@@ -237,6 +230,40 @@ class JinaV4Embedder:
         
         return result
     
+    def embed_single(self, text: str, task: str = "retrieval") -> np.ndarray:
+        """
+        Embed a single text (required by EmbedderBase interface).
+
+        Args:
+            text: Text to embed
+            task: Task type
+
+        Returns:
+            1D embedding array
+        """
+        embeddings = self.embed_texts([text], task=task, batch_size=1)
+        return embeddings[0] if embeddings.size > 0 else np.zeros(self.EMBEDDING_DIM)
+
+    @property
+    def embedding_dimension(self) -> int:
+        """Get the dimension of embeddings produced by this model."""
+        return self.EMBEDDING_DIM
+
+    @property
+    def max_sequence_length(self) -> int:
+        """Get the maximum sequence length supported."""
+        return self.MAX_TOKENS
+
+    @property
+    def supports_late_chunking(self) -> bool:
+        """Whether this embedder supports late chunking."""
+        return True
+
+    @property
+    def supports_multimodal(self) -> bool:
+        """Whether this embedder supports multimodal inputs."""
+        return True  # Jina v4 supports images
+
     def embed_code(self, 
                    code_snippets: List[str],
                    batch_size: int = 4) -> np.ndarray:
