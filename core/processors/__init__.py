@@ -14,24 +14,6 @@ from .text.chunking_strategies import (
     ChunkingStrategyFactory
 )
 
-# Backward compatibility - redirect to workflows
-import warnings
-
-def _deprecated_import(name):
-    warnings.warn(
-        f"Importing {name} from core.processors is deprecated. "
-        f"Please use core.workflows instead.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-
-# These will be imported from workflows for backward compatibility
-try:
-    from core.workflows.workflow_pdf import DocumentProcessor, ProcessingConfig, ProcessingResult
-    _deprecated_import("DocumentProcessor")
-except ImportError:
-    pass
-
 __all__ = [
     "ChunkingStrategy",
     "TokenBasedChunking",
@@ -43,3 +25,35 @@ __all__ = [
     "ProcessingConfig",
     "ProcessingResult",
 ]
+
+# Lazy import for backward compatibility using __getattr__
+def __getattr__(name):
+    """
+    Lazy import deprecated classes from workflows.
+
+    This provides backward compatibility while encouraging migration
+    to the new module structure.
+    """
+    import warnings
+
+    deprecated_imports = {
+        "DocumentProcessor": "core.workflows.workflow_pdf",
+        "ProcessingConfig": "core.workflows.workflow_pdf",
+        "ProcessingResult": "core.workflows.workflow_pdf",
+    }
+
+    if name in deprecated_imports:
+        module_path = deprecated_imports[name]
+        warnings.warn(
+            f"Importing {name} from core.processors is deprecated. "
+            f"Please use {module_path} instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
+        # Dynamically import from the new location
+        import importlib
+        module = importlib.import_module(module_path)
+        return getattr(module, name)
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -227,8 +227,23 @@ class DatabaseFactory:
     @staticmethod
     def _build_postgres_conn_string(**kwargs) -> str:
         """Build PostgreSQL connection string from kwargs."""
-        parts = []
+        from typing import Dict, Any
+
+        # Normalize keys to libpq names
+        key_map = {"database": "dbname", "username": "user"}
+        mapped: Dict[str, Any] = {}
+
         for key, value in kwargs.items():
-            if value is not None:
-                parts.append(f"{key}={value}")
-        return " ".join(parts)
+            if value is None:
+                continue
+            # Map to correct libpq key names
+            mapped_key = key_map.get(key, key)
+            mapped[mapped_key] = value
+
+        # Password fallback from environment if not provided
+        if "password" not in mapped:
+            env_pw = os.environ.get("PGPASSWORD")
+            if env_pw:
+                mapped["password"] = env_pw
+
+        return " ".join(f"{k}={v}" for k, v in mapped.items())

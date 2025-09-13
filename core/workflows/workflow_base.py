@@ -19,6 +19,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 import logging
 from datetime import datetime
+import tempfile
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ class WorkflowConfig:
     use_gpu: bool = True
     checkpoint_enabled: bool = True
     checkpoint_interval: int = 100
-    staging_path: Path = Path("/dev/shm/workflow_staging")
+    staging_path: Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "hades_workflow_staging")
     timeout_seconds: int = 300
 
 
@@ -108,7 +110,7 @@ class WorkflowBase(ABC):
 
     def save_checkpoint(self, checkpoint_data: Dict[str, Any]):
         """
-        Save workflow checkpoint.
+        Save workflow checkpoint with atomic write.
 
         Args:
             checkpoint_data: Data to checkpoint
@@ -120,11 +122,24 @@ class WorkflowBase(ABC):
 
         try:
             import json
-            with open(checkpoint_path, 'w') as f:
-                json.dump(checkpoint_data, f, default=str)
-            logger.debug(f"Checkpoint saved to {checkpoint_path}")
+            # Write to temp file first, then atomically rename
+            temp_path = checkpoint_path.with_suffix('.tmp')
+            with open(temp_path, 'w') as f:
+                json.dump(checkpoint_data, f, default=str, indent=2)
+                f.flush()
+                os.fsync(f.fileno())  # Ensure data is written to disk
+
+            # Atomic rename (on POSIX systems)
+            temp_path.replace(checkpoint_path)
+            logger.debug(f"Checkpoint saved atomically to {checkpoint_path}")
         except Exception as e:
             logger.warning(f"Failed to save checkpoint: {e}")
+            # Clean up temp file if it exists
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except:
+                    pass
 
     def load_checkpoint(self) -> Optional[Dict[str, Any]]:
         """
