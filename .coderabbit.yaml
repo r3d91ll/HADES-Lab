@@ -1,20 +1,19 @@
-# CodeRabbit Configuration
-# This file enables CodeRabbit to review PRs on all branches, not just main
+# CodeRabbit Configuration (HADES — Conveyance-aligned)
+# Enables CodeRabbit to review PRs on all branches, not just main
 
 # Review triggers
 reviews:
-  # Enable auto-review on all branches
   auto_review:
     enabled: true
     # Review PRs targeting any branch (not just default)
     base_branches:
       - "main"
-      - "feature/.*"      # Matches any feature branch
+      - "feature/.*"
       - "develop"
       - "release/.*"
       - "hotfix/.*"
 
-    # Skip drafts
+    # Skip drafts (false => do review drafts)
     draft: false
 
   # Review settings
@@ -26,43 +25,43 @@ reviews:
 
   # Tools and checks
   tools:
-    # Enable ruff for Python linting
     ruff:
       enabled: true
-    # Enable markdownlint
     markdownlint:
       enabled: true
-    # Disable languagetool (can be noisy for technical docs)
     languagetool:
       enabled: false
-    # Enable shellcheck
     shellcheck:
       enabled: true
-    # Enable yamllint
     yamllint:
       enabled: true
 
   # Path filters - review all files by default
   path_filters:
-    # Review all Python files
     - "**/*.py"
-    # Review all configuration files
+    - "**/*.pyi"
     - "**/*.yaml"
     - "**/*.yml"
     - "**/*.json"
     - "**/*.toml"
-    # Review documentation
+    - "**/*.ini"
+    - "**/*.cfg"
     - "**/*.md"
     - "**/*.rst"
-    # Review shell scripts
+    - "**/*.mmd"        # Mermaid diagrams
+    - "**/*.mermaid"    # Mermaid diagrams
     - "**/*.sh"
     - "**/*.bash"
+    - "**/*.sql"
+    - "**/*.mojo"
 
   # Paths to ignore
   path_ignores:
     - "**/node_modules/**"
     - "**/__pycache__/**"
     - "**/.pytest_cache/**"
+    - "**/.ruff_cache/**"
+    - "**/.mypy_cache/**"
     - "**/venv/**"
     - "**/.venv/**"
     - "**/dist/**"
@@ -75,45 +74,103 @@ reviews:
 # Language-specific settings
 language_settings:
   python:
-    # Enforce Python best practices
     linting_enabled: true
 
 # Custom review instructions
 instructions: |
-  Focus on:
-  1. Consistency with the Conveyance Framework (WHERE × WHAT × CONVEYANCE × TIME = Information)
-  2. Proper error handling and logging
-  3. Factory pattern implementations
-  4. Interface compliance with base classes
-  5. Backward compatibility maintenance
-  6. Performance implications
+  # HADES — Conveyance Framework (Efficiency view default)
 
-  For this restructure project specifically:
-  - Ensure all moved files maintain their functionality
-  - Verify import paths are updated correctly
-  - Check that deprecation warnings are properly implemented
-  - Validate that test coverage is adequate
+  ## Canonical equation (efficiency view)
+  C = (W · R · H / T) · Ctx^α
 
-  Note: This is a major restructure project (Issue #35) with multiple phases.
-  Phase branches merge to feature/core-restructure, which will eventually merge to main.
+  Where:
+    - W = What (signal/content quality: correctness, tests, docs, code health)
+    - R = Where (relational/topological positioning: boundaries, imports, coupling/cohesion, dependency graph)
+    - H = Who (agent/capability leverage & access patterns: interfaces, reuse, automation, observability)
+    - T = Time to converge (latency/cost): build/test/runtime + cognitive load (diff size, churn, migration steps)
+    - L, I, A, G ∈ [0,1] with weights wL, wI, wA, wG (defaults 0.25 each)
+    - Ctx = wL·L + wI·I + wA·A + wG·G
+    - α ∈ [1.5, 2.0], default 1.7; **α applies only to Ctx — never to T**
+
+  ## Time stance
+  - Default to **efficiency view** (formula above).
+  - If the PR explicitly fixes T (e.g., controlled benchmarks), also report the **capability view**:
+    C_cap = (W · R · H) · Ctx^α
+
+  ## Zero-propagation gate
+  - If any of {W, R, H} = 0 (e.g., broken builds, missing critical tests/docs, invalid topology) or T → ∞,
+    **request changes** with a blocking note: “C = 0 by zero-propagation.”
+
+  ## What to focus on (map findings to W/R/H/T and L/I/A/G)
+  1) **Consistency with Conveyance**
+     - Identify how the change affects **W, R, H, T**.
+     - Score **L, I, A, G** in [0,1]; use weights (wL, wI, wA, wG), default 0.25 each.
+     - Use **α = 1.7** unless the PR specifies otherwise (must stay in [1.5, 2.0]).
+     - Call out any double-counting of time (do not smuggle T into α).
+
+  2) **Error handling & logging (Todd’s 3 Laws)**
+     - Data is sacrosanct: validate inputs, protect data integrity; no silent data loss.
+     - Reliability: ensure failure modes are controlled; retries/backoffs/circuit breakers where warranted.
+     - Ownership: every side-effecting action is logged with sufficient context to assume responsibility.
+
+  3) **Factory pattern & interfaces (H, R)**
+     - Factory/strategy usage is explicit; interfaces align with base classes.
+     - No hidden ambient state; dependency injection favored; composition over inheritance unless justified.
+
+  4) **Backward compatibility (R, T)**
+     - Public APIs guarded; semantic changes gated with deprecation windows and warnings.
+     - Migrations documented; feature flags or adapters where needed to lower T.
+
+  5) **Performance & capacity (T, W)**
+     - Show evidence: microbenchmarks, complexity deltas, memory/IO profiles.
+     - Watch for GPU/CPU hand-off inefficiencies, data copies, and needless allocations.
+
+  6) **Observability (H, T)**
+     - Structured logs, metrics, and (where applicable) traces; RED/USE signals for services.
+     - Error taxonomies consistent; no log noise explosions.
+
+  7) **Security & secrets (W, R)**
+     - Secrets not in code or logs; least privilege; input validation; shell safety.
+
+  8) **Docs & tests (W, L/I/A/G)**
+     - Public functions have Google-style docstrings; examples where actionable.
+     - Tests cover happy-path and failure modes; ensure coverage for moved/renamed modules.
+
+  ## Restructure project (Issue #35)
+  - Verify moved files preserve functionality; imports updated; deprecations produce warnings.
+  - Ensure phase branches merge cleanly into `feature/core-restructure` before `main`.
+
+  ## Reviewer output — include this “Conveyance Scorecard”
+  - **Time stance**: Efficiency (default) / Capability (if fixed T)
+  - **W/R/H/T summary**: what changed, why it matters
+  - **Ctx weights**: wL=..., wI=..., wA=..., wG=... (defaults 0.25 each if unspecified)
+  - **L/I/A/G scores**: L=.., I=.., A=.., G=..  (each in [0,1])
+  - **α**: default 1.7 unless PR specifies [1.5, 2.0]
+  - **Zero-propagation**: triggered? (yes/no; if yes, state the failing dimension)
+  - **Evidence**: link to benchmarks, coverage, profiling, or diffs
 
 # Chat settings
 chat:
-  # Enable chat commands
   auto_reply: true
 
-# PR description requirements
+# PR description requirements (supply inputs for the scorecard)
 pr_description:
-  # Require certain sections in PR descriptions
-  required_sections: []  # We handle this manually
+  required_sections:
+    - "Conveyance Summary"
+    - "Time Stance and T Metrics"
+    - "Ctx Breakdown (L/I/A/G + weights + α)"
+    - "W/R/H Mapping"
+    - "Performance & Complexity Evidence"
+    - "Compatibility & Migration Plan"
+    - "Tests & Observability"
+    - "Docs & Changelog"
+    - "Risks & Rollback"
 
 # Complexity thresholds
 complexity:
-  # Flag files with high complexity
   max_complexity: 15
 
 # Documentation requirements
 documentation:
-  # Require docstrings for public functions
   require_docstrings: true
-  docstring_style: "google"  # We use Google-style docstrings
+  docstring_style: "google"
