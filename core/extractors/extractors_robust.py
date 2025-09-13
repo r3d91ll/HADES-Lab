@@ -27,7 +27,22 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_with_docling(pdf_path: str, use_ocr: bool, extract_tables: bool) -> Dict[str, Any]:
-    """Extract using Docling (runs in subprocess)."""
+    """
+    Run Docling extraction for a PDF in a subprocess and return the extracted data.
+    
+    This function instantiates a DoclingExtractor (with fallback disabled) and invokes its
+    extract method. On success it returns the extractor's result dictionary; on any
+    exception it returns a dictionary with an 'error' key containing the exception string.
+    
+    Parameters:
+        pdf_path: Path to the PDF file to extract.
+        use_ocr: If True, enable OCR during extraction.
+        extract_tables: If True, enable table extraction.
+    
+    Returns:
+        A dictionary containing extraction results as produced by Docling, or
+        {'error': '<exception message>'} if extraction failed.
+    """
     try:
         extractor = DoclingExtractor(
             use_ocr=use_ocr,
@@ -40,7 +55,22 @@ def _extract_with_docling(pdf_path: str, use_ocr: bool, extract_tables: bool) ->
 
 
 def _extract_with_pymupdf(pdf_path: str) -> Dict[str, Any]:
-    """Fallback extraction using PyMuPDF."""
+    """
+    Fallback PDF text extraction using PyMuPDF.
+    
+    Attempts to open and extract per-page text from `pdf_path` with PyMuPDF (`fitz`). When pages contain non-empty text, each page's content is prefixed with a page header ("--- Page N ---") and concatenated into a single `full_text`. Returns a dictionary containing the extracted text, page count, and an extractor identifier.
+    
+    If PyMuPDF is not available (module-level PYMUPDF_AVAILABLE is False) or an error occurs while reading the file, this function returns None.
+    
+    Returns:
+        dict or None: On success, a dictionary with keys:
+            - 'full_text' (str): concatenated page texts with headers.
+            - 'text' (str): same value as 'full_text'.
+            - 'markdown' (str): same value as 'full_text'.
+            - 'num_pages' (int): total number of pages in the document.
+            - 'extractor' (str): the string 'pymupdf_fallback'.
+        None if PyMuPDF is unavailable or extraction fails.
+    """
     if not PYMUPDF_AVAILABLE:
         return None
         
@@ -86,13 +116,13 @@ class RobustExtractor:
         use_fallback: bool = True
     ):
         """
-        Initialize robust extractor.
+        Initialize a RobustExtractor with extraction options, timeout, and optional fallback.
         
-        Args:
-            use_ocr: Whether to use OCR for scanned PDFs
-            extract_tables: Whether to extract table structures
-            timeout: Maximum seconds to wait for extraction
-            use_fallback: Whether to use PyMuPDF fallback on failure
+        Parameters:
+            use_ocr (bool): Enable OCR for scanned or image-based PDFs (default False).
+            extract_tables (bool): Attempt to detect and extract table structures (default True).
+            timeout (int): Maximum time in seconds to wait for the primary extraction process before treating it as timed out (default 30).
+            use_fallback (bool): If True, allow a PyMuPDF-based fallback extraction when the primary extraction fails or times out (default True).
         """
         self.use_ocr = use_ocr
         self.extract_tables = extract_tables
@@ -103,13 +133,15 @@ class RobustExtractor:
     
     def extract(self, pdf_path: str) -> Optional[Dict[str, Any]]:
         """
-        Extract text and structures from PDF with timeout protection.
+        Extract text and structures from a PDF using Docling in an isolated process with timeout protection; optionally falls back to PyMuPDF.
         
-        Args:
-            pdf_path: Path to PDF file
-            
+        Attempts Docling extraction inside a spawned subprocess and enforces the instance timeout. If Docling returns a result without an 'error' key that result is returned. On timeout or crash the method attempts to clean up any spawned child processes (terminating/killing as needed). If Docling fails and use_fallback is True and PyMuPDF is available, a PyMuPDF-based fallback extraction is attempted.
+        
+        Parameters:
+            pdf_path (str): Path to the PDF file to extract.
+        
         Returns:
-            Extracted data or None if extraction fails
+            Optional[Dict[str, Any]]: Extraction result dict on success (contents depend on the extractor), or None if extraction failed and no fallback was performed or available.
         """
         pdf_file = Path(pdf_path)
         if not pdf_file.exists():

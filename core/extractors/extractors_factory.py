@@ -47,11 +47,14 @@ class ExtractorFactory:
     @classmethod
     def register(cls, name: str, extractor_class: type):
         """
-        Register an extractor class.
-
-        Args:
-            name: Name to register under
-            extractor_class: Extractor class to register
+        Register an extractor class in the factory registry.
+        
+        Registers `extractor_class` under `name` so the factory can create instances
+        of that extractor via `create`. This mutates the class-level extractor registry.
+        
+        Parameters:
+            name (str): Key used to look up this extractor type.
+            extractor_class (type): Extractor class to register (typically a subclass of ExtractorBase).
         """
         cls._extractors[name] = extractor_class
         logger.info(f"Registered extractor: {name}")
@@ -63,20 +66,22 @@ class ExtractorFactory:
               config: Optional[ExtractorConfig] = None,
               **kwargs) -> ExtractorBase:
         """
-        Create an extractor instance.
-
-        Args:
-            file_path: Optional file path for auto-detection
-            extractor_type: Explicit extractor type
-            config: Extraction configuration
-            **kwargs: Additional arguments for the extractor
-
-        Returns:
-            Extractor instance
-
-        Raises:
-            ValueError: If no suitable extractor found
-        """
+              Create and return an extractor instance using the provided configuration, explicit type, or by auto-detecting type from a file path.
+              
+              If no config is provided, a new ExtractorConfig is built from kwargs. If extractor_type is not given but file_path is, the extractor type is determined from the file extension (with mappings for common formats, code files, and LaTeX-related extensions); when neither is provided the factory defaults to 'docling'. If the requested extractor type is not already registered the factory attempts on-demand registration; if it remains unavailable a ValueError is raised.
+              
+              Parameters:
+                  file_path: Optional path used to auto-detect the extractor type when extractor_type is not provided.
+                  extractor_type: Optional explicit extractor type name to use (overrides auto-detection).
+                  config: Optional ExtractorConfig to pass to the extractor. If omitted, one is constructed from kwargs.
+                  **kwargs: Extra parameters forwarded to ExtractorConfig when config is not supplied.
+              
+              Returns:
+                  An instance of the resolved extractor class constructed with the provided config.
+              
+              Raises:
+                  ValueError: If no extractor is registered (and cannot be auto-registered) for the resolved extractor type.
+              """
         # Create config if not provided
         if config is None:
             config = ExtractorConfig(**kwargs)
@@ -106,13 +111,18 @@ class ExtractorFactory:
     @classmethod
     def _determine_extractor_type(cls, file_path: Union[str, Path]) -> str:
         """
-        Determine extractor type from file path.
-
-        Args:
-            file_path: File path
-
+        Determine the extractor type for a given file path based on its suffix.
+        
+        Uses the factory's internal extension-to-type mapping first, then falls back to:
+        - 'latex' for common LaTeX-related extensions ('.tex', '.bib', '.cls', '.sty'),
+        - 'code' for a curated set of programming-language file extensions,
+        - 'docling' as the default for PDFs and any unknown/other extensions.
+        
+        Parameters:
+            file_path (str | Path): Path to the file whose extractor type should be determined.
+        
         Returns:
-            Extractor type string
+            str: One of the extractor type identifiers (e.g., 'docling', 'latex', 'code') as resolved for the given file.
         """
         path = Path(file_path)
         suffix = path.suffix.lower()
@@ -137,10 +147,18 @@ class ExtractorFactory:
     @classmethod
     def _auto_register(cls, extractor_type: str):
         """
-        Attempt to auto-register an extractor type.
-
-        Args:
-            extractor_type: Type of extractor to register
+        Attempt to import and register a built-in extractor implementation for the given extractor type.
+        
+        This performs on-demand registration by dynamically importing the extractor class corresponding to extractor_type
+        and calling cls.register(name, extractor_class). Supported extractor_type values and their registrations:
+        - "docling" -> DoclingExtractor
+        - "latex" -> LatexExtractor
+        - "code" -> CodeExtractor
+        - "treesitter" -> TreeSitterExtractor
+        - "robust" -> RobustExtractor
+        
+        If extractor_type is unrecognized, a warning is logged and no registration is attempted. Import failures are
+        caught and logged; this function does not raise on import errors.
         """
         try:
             if extractor_type == 'docling':
@@ -169,25 +187,31 @@ class ExtractorFactory:
                        config: Optional[ExtractorConfig] = None,
                        **kwargs) -> ExtractorBase:
         """
-        Create the best extractor for a given file.
-
-        Args:
-            file_path: Path to the file
-            config: Extraction configuration
-            **kwargs: Additional arguments
-
-        Returns:
-            Extractor instance
-        """
+                       Create and return an extractor tailored to the given file.
+                       
+                       This is a convenience wrapper around `create` that uses the file path to auto-detect the extractor type when one is not provided. If the file extension is unrecognized, the factory defaults to the 'docling' extractor. The provided `config`, if any, is passed through to the created extractor.
+                       
+                       Parameters:
+                           file_path: Path to the input file used to determine the extractor type.
+                           config: Optional extraction configuration to instantiate the extractor with.
+                       
+                       Returns:
+                           An instance of ExtractorBase appropriate for the file.
+                       """
         return cls.create(file_path=file_path, config=config, **kwargs)
 
     @classmethod
     def list_available(cls) -> Dict[str, Any]:
         """
-        List available extractors.
-
+        Return a mapping of registered extractor names to basic info.
+        
+        Each key is a registered extractor name; values are dicts containing:
+        - "class": extractor class name
+        - "module": extractor class module
+        If retrieving info for an extractor fails, its value will be {"error": "<error message>"}.
+        
         Returns:
-            Dictionary of available extractors with their info
+            Dict[str, Any]: Mapping of extractor name to info or error.
         """
         available = {}
         for name, extractor_class in cls._extractors.items():
@@ -205,9 +229,12 @@ class ExtractorFactory:
     @classmethod
     def get_format_mapping(cls) -> Dict[str, str]:
         """
-        Get the format to extractor mapping.
-
+        Return a shallow copy of the mapping from file extensions to extractor type names.
+        
+        The returned dictionary maps file suffixes (including the leading dot, e.g. '.py', '.tex') to
+        the extractor type string used by the factory (e.g. 'code', 'latex', 'docling').
+        
         Returns:
-            Dictionary mapping file extensions to extractor types
+            Dict[str, str]: A shallow copy of the internal format-to-extractor mapping.
         """
         return cls._format_mapping.copy()

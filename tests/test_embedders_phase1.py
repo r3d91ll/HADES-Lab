@@ -47,6 +47,12 @@ class TestEmbedderFactory(unittest.TestCase):
         # Create a mock embedder class
         class MockEmbedder:
             def __init__(self, config):
+                """
+                Initialize the instance with the given configuration.
+                
+                Parameters:
+                    config (EmbeddingConfig): Configuration used to configure the embedder instance; stored on the instance as `self.config`.
+                """
                 self.config = config
 
         # Register it

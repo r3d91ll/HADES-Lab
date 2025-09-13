@@ -35,10 +35,14 @@ class LaTeXExtractor:
     
     def __init__(self, use_pandoc: bool = False):
         """
-        Initialize LaTeX extractor.
+        Create a LaTeX extractor instance.
         
-        Args:
-            use_pandoc: Whether to use pandoc for LaTeX to markdown conversion
+        Parameters:
+            use_pandoc (bool): If True, attempt to convert LaTeX to Markdown using Pandoc for extracted documents.
+        
+        Side effects:
+            - Initializes self.use_pandoc and a `pandoc_stats` dict tracking conversion attempts, successes, and failures.
+            - Emits an informational log about the extractor initialization and Pandoc usage.
         """
         self.use_pandoc = use_pandoc
         # Track pandoc conversion stats
@@ -51,16 +55,23 @@ class LaTeXExtractor:
     
     def extract(self, latex_path: str) -> Dict[str, Any]:
         """
-        Extract content from LaTeX source archive.
+        Determine whether the provided .gz file contains a tar archive of LaTeX sources or a single gzipped LaTeX file, then extract structured content accordingly.
         
-        Args:
-            latex_path: Path to .gz file containing LaTeX source
-            
+        Parameters:
+            latex_path (str): Path to a gzipped file that is either a tar.gz archive of a LaTeX project or a single gzipped .tex file.
+        
         Returns:
-            Dictionary containing:
-            - full_text: Complete text content (LaTeX or markdown)
-            - structures: Extracted structures (equations, tables, citations)
-            - metadata: Processing metadata
+            Dict[str, Any]: Extraction result with keys:
+                - full_text (str): Extracted document text — Markdown if Pandoc conversion was used successfully, otherwise the raw LaTeX source.
+                - latex_source (str): Raw LaTeX content read from the main .tex file.
+                - structures (dict): Detected structures including 'equations', 'tables', 'citations', 'sections', and optional 'bibliography'.
+                - metadata (dict): Processing metadata (e.g., extractor name, extraction_type ('tar.gz' or 'plain.gz'), main_file, num_tex_files, has_bibliography, processing_time, latex_path, and optional pandoc_error).
+        
+        Raises:
+            FileNotFoundError: If the provided path does not exist.
+        
+        Notes:
+            - If an unexpected error occurs during processing, the method logs the failure and returns a standardized empty result produced by _empty_result(latex_path, error_message).
         """
         latex_path = Path(latex_path)
         
@@ -109,7 +120,27 @@ class LaTeXExtractor:
             return self._empty_result(latex_path, str(e))
     
     def _extract_from_tar_gz(self, latex_path: Path, start_time: datetime) -> Dict[str, Any]:
-        """Extract from tar.gz archive (multiple files)."""
+        """
+        Extract content from a gzipped tar archive containing LaTeX sources and return a structured result.
+        
+        Reads and extracts the tar.gz into a temporary directory, selects the largest `.tex` file as the main LaTeX source, and derives structured elements (equations, tables, citations, sections). If a `.bbl` bibliography file is present it is included. Optionally converts the main `.tex` to Markdown using Pandoc (when the extractor was initialized with pandoc enabled); on conversion failure the raw LaTeX is used as a fallback. Returns metadata including processing time and details about the archive.
+        
+        Parameters:
+            latex_path (Path): Path to the gzipped tar archive to process.
+            start_time (datetime): Timestamp captured before processing began; used to compute processing duration.
+        
+        Returns:
+            Dict[str, Any]: A dictionary with keys:
+                - full_text: Converted Markdown if Pandoc succeeded and was used, otherwise the raw LaTeX text.
+                - latex_source: Raw LaTeX content of the selected main `.tex` file.
+                - structures: Dict containing extracted elements:
+                    - equations: list of equation entries
+                    - tables: list of table entries
+                    - citations: list of unique citation keys
+                    - sections: list of section entries
+                    - bibliography: (optional) contents of a `.bbl` file if found
+                - metadata: Dict with extraction details (extractor, extraction_type, main_file, num_tex_files, has_bibliography, processing_time, latex_path) and an optional `pandoc_error` if conversion failed.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             
@@ -192,10 +223,32 @@ class LaTeXExtractor:
     
     def _extract_from_plain_gz(self, latex_path: Path, start_time: datetime) -> Dict[str, Any]:
         """
-        Extract from plain gzipped .tex file (single file).
+        Extract content from a single gzipped LaTeX (.tex.gz) file and return structured results.
         
-        Some ArXiv papers store LaTeX as a single gzipped .tex file
-        rather than a tar.gz archive.
+        Reads the gzipped LaTeX text, extracts equations, tables, citation keys, and section structure. If Pandoc conversion is enabled on the extractor instance, attempts to convert the LaTeX to Markdown and uses the converted text as `full_text` when successful; otherwise `full_text` contains the raw LaTeX. Computes processing duration using `start_time`.
+        
+        Returns:
+            dict: A result dictionary with keys:
+                - full_text (str): Markdown (if Pandoc conversion succeeded) or the raw LaTeX text.
+                - latex_source (str): The raw LaTeX content read from the gzipped file.
+                - structures (dict): Extracted structures with keys:
+                    - equations (list): Extracted equation entries.
+                    - tables (list): Extracted table entries.
+                    - citations (list): Unique citation keys.
+                    - sections (list): Section entries with level, title, and position.
+                - metadata (dict): Processing metadata including:
+                    - extractor: 'latex'
+                    - extraction_type: 'plain.gz'
+                    - main_file: input file name
+                    - num_tex_files: 1
+                    - has_bibliography: False
+                    - processing_time: duration in seconds (float)
+                    - latex_path: original path as string
+                    - pandoc_error (optional): error summary if Pandoc conversion failed
+        
+        Notes:
+            - If the input file is empty or an error occurs, the method returns the standardized empty result produced by `_empty_result`.
+            - `start_time` is used only to compute `processing_time` and should represent the extraction start timestamp.
         """
         try:
             # Read the gzipped LaTeX directly
@@ -261,7 +314,25 @@ class LaTeXExtractor:
             return self._empty_result(latex_path, str(e))
     
     def _extract_equations(self, latex: str) -> List[Dict[str, Any]]:
-        """Extract all equations from LaTeX source."""
+        """
+        Extract LaTeX equations from a source string.
+        
+        Parses the provided LaTeX text and returns a list of equation entries discovered in the source. Each entry is a dict with:
+        - 'type': one of 'display', 'display_unnumbered', 'align', or 'inline'.
+        - 'latex': the raw LaTeX content of the equation (labels removed for display/align types).
+        - 'label': the label value from a `\label{...}` if present, otherwise None.
+        
+        Notes:
+        - Display equations detected from \begin{equation}...\end{equation} (type 'display') and \begin{equation*}...\end{equation*} (type 'display_unnumbered').
+        - Align environments (including starred variants) are returned with type 'align'.
+        - Inline math matched by $...$ is returned with type 'inline'; inline matches are filtered to a reasonable length and limited to the first 100 occurrences to reduce noise.
+        
+        Parameters:
+            latex (str): LaTeX source text to scan.
+        
+        Returns:
+            List[Dict[str, Any]]: List of extracted equation entries.
+        """
         equations = []
         
         # Display equations: \begin{equation}...\end{equation}
@@ -324,7 +395,22 @@ class LaTeXExtractor:
         return equations
     
     def _extract_tables(self, latex: str) -> List[Dict[str, Any]]:
-        """Extract all tables from LaTeX source."""
+        """
+        Extract LaTeX table environments and return structured table data.
+        
+        Scans the provided LaTeX source for table (and table*) environments and returns a list of table entries. Each entry contains:
+        - 'caption': caption text if present, otherwise None
+        - 'label': label key if present, otherwise None
+        - 'latex': the inner tabular/array environment (or the full table content if no tabular/array was found)
+        - 'column_spec': column specification from \begin{tabular}{...} or \begin{array}{...}, otherwise None
+        - 'full_content': the complete content of the matched table environment
+        
+        Parameters:
+            latex (str): The raw LaTeX source to search for table environments.
+        
+        Returns:
+            List[Dict[str, Any]]: A list of dictionaries describing each extracted table.
+        """
         tables = []
         
         # Find table environments
@@ -373,7 +459,17 @@ class LaTeXExtractor:
         return tables
     
     def _extract_citations(self, latex: str) -> List[str]:
-        """Extract all citation keys from LaTeX source."""
+        """
+        Extract unique citation keys from a LaTeX source string.
+        
+        Searches for citation commands (e.g. `\cite{...}`, `\citep{...}`, `\citet{...}`), splits multiple keys within a single command by commas, preserves the first occurrence order, and removes duplicates.
+        
+        Parameters:
+            latex (str): LaTeX source text to scan for citation keys.
+        
+        Returns:
+            List[str]: Ordered list of unique citation keys found in the source.
+        """
         citations = []
         
         # Find \cite commands (including variants like \citep, \citet)
@@ -395,7 +491,17 @@ class LaTeXExtractor:
         return unique_citations
     
     def _extract_sections(self, latex: str) -> List[Dict[str, Any]]:
-        """Extract section structure from LaTeX source."""
+        """
+        Return a list describing the hierarchical section headings found in the LaTeX source.
+        
+        Searches for \section, \subsection, \subsubsection, and \paragraph commands and records each match's level, title text, and byte/character start position in the input string.
+        
+        Returns:
+            List[Dict[str, Any]]: Each item contains:
+                - 'level' (str): one of 'section', 'subsection', 'subsubsection', 'paragraph'.
+                - 'title' (str): the raw title text captured between the braces.
+                - 'position' (int): the start index of the matched command in the input string.
+        """
         sections = []
         
         # Find all section commands
@@ -412,10 +518,22 @@ class LaTeXExtractor:
     
     def _convert_to_markdown(self, tex_path: Path) -> Tuple[Optional[str], Optional[str]]:
         """
-        Convert LaTeX to markdown using pandoc if available.
+        Convert a LaTeX .tex file to Markdown using Pandoc.
+        
+        Attempts to run the system `pandoc` to convert the file at `tex_path`. Updates
+        internal Pandoc statistics counters (attempts, successes, failures) as it
+        runs. On success returns the converted Markdown text; on failure returns an
+        error message describing the Pandoc failure or the exception encountered.
+        
+        Parameters:
+            tex_path (Path): Path to the `.tex` file to convert.
         
         Returns:
-            Tuple of (markdown_text, error_message)
+            Tuple[Optional[str], Optional[str]]: (markdown_text, error_message).
+                - `markdown_text` is the converted Markdown string when conversion
+                  succeeds, otherwise None.
+                - `error_message` is a human-readable error or exception string when
+                  conversion fails, otherwise None.
         """
         self.pandoc_stats['attempts'] += 1
         try:
@@ -474,13 +592,15 @@ class LaTeXExtractor:
     
     def extract_batch(self, latex_paths: List[str]) -> List[Dict[str, Any]]:
         """
-        Extract from multiple LaTeX sources.
+        Process multiple LaTeX source paths and return a list of extraction results.
         
-        Args:
-            latex_paths: List of LaTeX archive paths
-            
+        Each path is processed with extract(...). Failures for individual items are caught and converted into a standardized empty result (via _empty_result) so that processing continues and the returned list preserves the input order.
+        
+        Parameters:
+            latex_paths (List[str]): Paths to LaTeX sources (tar.gz or gz) to extract.
+        
         Returns:
-            List of extraction results
+            List[Dict[str, Any]]: Extraction results corresponding to each input path; on failure for an item, its entry is the standardized empty result containing an error message.
         """
         results = []
         for latex_path in latex_paths:

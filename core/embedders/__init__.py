@@ -29,13 +29,13 @@ __all__ = [
 # Convenience function for backward compatibility
 def create_embedder(model_name: str = "jinaai/jina-embeddings-v4", **kwargs):
     """
-    Create an embedder instance (backward compatibility).
-
-    Args:
-        model_name: Model name or path
-        **kwargs: Additional configuration
-
+    Create an embedder instance by delegating to EmbedderFactory.
+    
+    Parameters:
+        model_name (str): Model identifier or factory key (defaults to "jinaai/jina-embeddings-v4").
+        **kwargs: Additional keyword arguments forwarded to EmbedderFactory.create.
+    
     Returns:
-        Embedder instance
+        EmbedderBase: A new embedder instance for the requested model.
     """
     return EmbedderFactory.create(model_name, **kwargs)

@@ -32,11 +32,11 @@ class EmbedderFactory:
     @classmethod
     def register(cls, name: str, embedder_class: type):
         """
-        Register an embedder class.
-
-        Args:
-            name: Name to register under
-            embedder_class: Embedder class to register
+        Register an embedder class under a given name in the factory registry.
+        
+        Adds the provided embedder class to the class-level registry mapping used by
+        EmbedderFactory. If a different class is already registered under the same
+        name, it will be replaced.
         """
         cls._embedders[name] = embedder_class
         logger.info(f"Registered embedder: {name}")
@@ -47,19 +47,21 @@ class EmbedderFactory:
               config: Optional[EmbeddingConfig] = None,
               **kwargs) -> EmbedderBase:
         """
-        Create an embedder instance.
-
-        Args:
-            model_name: Name or path of the model
-            config: Embedding configuration
-            **kwargs: Additional arguments for the embedder
-
-        Returns:
-            Embedder instance
-
-        Raises:
-            ValueError: If no suitable embedder found
-        """
+              Create and return an EmbedderBase instance for the given model.
+              
+              If `config` is not provided, an EmbeddingConfig is constructed from `model_name` and any extra keyword arguments. The factory determines an embedder type from `model_name`, attempts on-demand registration for that type, and instantiates the registered embedder class.
+              
+              Parameters:
+                  model_name (str): Model identifier or path used to pick and configure the embedder.
+                  config (Optional[EmbeddingConfig]): Pre-built embedding configuration. If omitted, one is created.
+                  **kwargs: Additional fields forwarded to EmbeddingConfig when `config` is not supplied.
+              
+              Returns:
+                  EmbedderBase: An instance of the selected embedder class initialized with `config`.
+              
+              Raises:
+                  ValueError: If no embedder is registered (after auto-registration) for the determined embedder type.
+              """
         # Create config if not provided
         if config is None:
             config = EmbeddingConfig(model_name=model_name, **kwargs)
@@ -86,13 +88,15 @@ class EmbedderFactory:
     @classmethod
     def _determine_embedder_type(cls, model_name: str) -> str:
         """
-        Determine embedder type from model name.
-
-        Args:
-            model_name: Model name or path
-
+        Determine the embedder type from a model name.
+        
+        Performs a case-insensitive substring check against the provided model_name and returns one of the supported embedder type keys: "jina", "sentence", "openai", or "cohere". If no known marker is found, defaults to "jina".
+        
+        Parameters:
+            model_name: Model identifier or path used to infer the embedder type.
+        
         Returns:
-            Embedder type string
+            A string key identifying the embedder type: "jina", "sentence", "openai", or "cohere".
         """
         model_lower = model_name.lower()
 
@@ -111,10 +115,16 @@ class EmbedderFactory:
     @classmethod
     def _auto_register(cls, embedder_type: str):
         """
-        Attempt to auto-register an embedder type.
-
-        Args:
-            embedder_type: Type of embedder to register
+        Auto-registers a known embedder implementation for the given embedder type.
+        
+        If embedder_type == "jina", attempts to import JinaV4Embedder and register it under the name "jina".
+        If embedder_type == "sentence", emits a warning that the sentence-transformers embedder is not yet migrated.
+        For any other embedder_type, emits a warning about the unknown type.
+        
+        Side effects:
+        - May call cls.register(...) to add an embedder to the factory registry.
+        - Logs warnings for unimplemented or unknown types.
+        - Logs an error if an ImportError occurs while attempting to import a backend (the exception is not propagated).
         """
         try:
             if embedder_type == "jina":
@@ -131,10 +141,15 @@ class EmbedderFactory:
     @classmethod
     def list_available(cls) -> Dict[str, Any]:
         """
-        List available embedders.
-
+        Return a mapping of registered embedder names to their basic metadata.
+        
+        For each embedder registered in the factory registry, the mapping contains either:
+        - a dict with keys `"class"` (the embedder class name) and `"module"` (the class' module path),
+        or
+        - a dict with key `"error"` containing a string message if retrieving the info failed.
+        
         Returns:
-            Dictionary of available embedders with their info
+            Dict[str, Any]: Mapping from embedder registry name to metadata or error information.
         """
         available = {}
         for name, embedder_class in cls._embedders.items():

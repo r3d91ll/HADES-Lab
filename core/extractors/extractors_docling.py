@@ -35,12 +35,14 @@ class DoclingExtractor:
     
     def __init__(self, use_ocr: bool = False, extract_tables: bool = True, use_fallback: bool = False):
         """
-        Initialize Docling extractor.
+        Create a Docling-based extractor configured for OCR, table extraction, and optional PyMuPDF fallback.
         
-        Args:
-            use_ocr: Whether to use OCR for scanned PDFs
-            extract_tables: Whether to extract table structures
-            use_fallback: Whether to use PyMuPDF fallback when Docling fails (default: False for consistency)
+        If Docling is available, this initializes PipelineOptions (enabling table-structure options only when table extraction is requested) and constructs a DocumentConverter. If Docling is not available, the extractor is prepared to use the fallback path and converter will be None.
+        
+        Parameters:
+            use_ocr (bool): Enable OCR for scanned PDFs when using Docling.
+            extract_tables (bool): Enable extraction of table structures; when True, table-structure options (including cell matching) are configured.
+            use_fallback (bool): If True, allow falling back to the PyMuPDF-based extractor when Docling is unavailable or fails.
         """
         self.use_ocr = use_ocr
         self.extract_tables = extract_tables
@@ -196,7 +198,27 @@ class DoclingExtractor:
                 raise RuntimeError(f"Extraction failed for {pdf_path}: {e}") from e
     
     def _extract_with_docling(self, pdf_path: Path) -> Dict[str, Any]:
-        """Extract using Docling library v2 with enhanced error handling."""
+        """
+        Extract text and structured elements from a PDF using Docling v2, with optional fallback to the configured fallback extractor.
+        
+        This method runs the Docling converter on the provided PDF path and returns a normalized result containing:
+        - full_text: the document text (prefers Docling's markdown export when available)
+        - markdown: same content as `full_text` (kept for compatibility)
+        - structures: extracted structural items (tables, equations, images) when available and when table extraction is enabled
+        - metadata: contains 'extractor' == 'docling_v2', 'num_pages' (if available), and 'processing_time' (set to None because Docling does not provide it)
+        
+        If Docling reports a non-success status or produces no text, and the instance was configured with fallback enabled, this method will attempt the fallback extractor and return its result. If fallback is disabled, a RuntimeError is raised.
+        
+        Parameters:
+            pdf_path (Path): Path to the PDF file to extract.
+        
+        Returns:
+            Dict[str, Any]: Normalized extraction result as described above.
+        
+        Raises:
+            RuntimeError: If Docling conversion fails or produces no text and fallback is disabled.
+            TimeoutError: May be propagated if Docling triggers a timeout and fallback is disabled.
+        """
         try:
             # Docling v2 uses convert_single for single PDFs  
             # Note: Timeout protection disabled due to signal conflicts with Docling's internal processes
@@ -316,9 +338,28 @@ class DoclingExtractor:
     
     def _extract_fallback(self, pdf_path: Path) -> Dict[str, Any]:
         """
-        Fallback extraction using PyMuPDF when Docling is not available.
+        Fallback PDF extraction using PyMuPDF (fitz) when Docling is unavailable.
         
-        This provides basic text extraction for testing purposes.
+        Performs page-by-page plain-text extraction and returns a minimal normalized result suitable
+        for downstream processing. If PyMuPDF is not installed, returns a small stub result. Any
+        unexpected error during extraction yields a result with an empty text and an `error` entry
+        in metadata instead of raising.
+        
+        Parameters:
+            pdf_path (Path): Path to the PDF file to extract.
+        
+        Returns:
+            dict: A dictionary with the following keys:
+                - full_text (str): Concatenated plain text of pages (each page prefixed with
+                  '--- Page N ---'). Empty on fatal extraction failure.
+                - markdown (str): A lightweight markdown version (page headers converted to
+                  '## Page N'). Mirrors `full_text` formatting.
+                - structures (dict): Empty dict for this fallback (tables/equations not extracted).
+                - metadata (dict): Contains at minimum:
+                    - extractor (str): One of 'pymupdf_fallback', 'stub', or 'fallback_failed'.
+                    - num_pages (int): Number of pages when extraction succeeded with PyMuPDF.
+                    - warning (str): Present when using the fallback stub or when structures are not extracted.
+                    - error (str): Present only if extraction failed with an unexpected exception.
         """
         try:
             import fitz  # PyMuPDF
@@ -377,13 +418,21 @@ class DoclingExtractor:
     
     def extract_batch(self, pdf_paths: List[str]) -> List[Dict[str, Any]]:
         """
-        Extract from multiple PDFs.
+        Extract multiple documents and return their normalized extraction results.
         
-        Args:
-            pdf_paths: List of PDF file paths
-            
+        Processes each path in order by calling self.extract(path). On success, ensures the returned result includes 'pdf_path'. On failure for an individual file, logs the error and appends a fallback result with 'full_text' set to None, empty 'structures', and a metadata entry containing the error string.
+        
+        Parameters:
+            pdf_paths (List[str]): Iterable of file paths (strings) to extract.
+        
         Returns:
-            List of extraction results
+            List[Dict[str, Any]]: List of per-file extraction results. Successful results follow the extractor's normal output schema and will include 'pdf_path'. Failed entries have the shape:
+                {
+                    'pdf_path': <path>,
+                    'full_text': None,
+                    'structures': {},
+                    'metadata': {'error': <error message>}
+                }
         """
         results = []
         for pdf_path in pdf_paths:

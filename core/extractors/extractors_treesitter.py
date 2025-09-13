@@ -87,7 +87,11 @@ class TreeSitterExtractor:
     }
     
     def __init__(self):
-        """Initialize the Tree-sitter extractor."""
+        """
+        Initialize the TreeSitterExtractor.
+        
+        Sets up an internal parser cache (self.parsers). If Tree-sitter is not available, logs a warning and leaves the cache empty. If available, attempts to pre-load parsers for common languages (python, javascript, typescript, java, go, rust, cpp, c) and stores any successfully created parsers in the cache; failures to load individual language parsers are logged at debug level.
+        """
         self.parsers = {}
         
         if not TREE_SITTER_AVAILABLE:
@@ -107,18 +111,21 @@ class TreeSitterExtractor:
     
     def extract_symbols(self, file_path: str, content: Optional[str] = None) -> Dict[str, Any]:
         """
-        Extract symbol table and structural information from a code file.
+        Extract symbols, metrics, and top-level structure from a source file using Tree-sitter.
         
-        Args:
-            file_path: Path to the code file
-            content: Optional file content (if already loaded)
-            
+        Parses the provided file (or supplied content) with a Tree-sitter parser detected from the file extension and returns a structured result containing language-specific symbol tables, approximate code metrics, and a high-level module structure. If Tree-sitter is unavailable, the language is unsupported, the file cannot be read, or parsing fails, an empty result structure is returned.
+        
+        Parameters:
+            file_path (str): Path to the source file used to detect language and (if `content` is None) read content.
+            content (Optional[str]): Optional file contents to parse; when provided, the file is not read from disk.
+        
         Returns:
-            Dictionary containing:
-            - symbols: Categorized symbols (functions, classes, imports, etc.)
-            - metrics: Code complexity metrics
-            - structure: Nested structure information
-            - language: Detected programming language
+            Dict[str, Any]: A dictionary with keys:
+                - symbols: dict of categorized symbols (functions, classes, imports, etc.) per language extractor.
+                - metrics: approximate code metrics (lines_of_code, complexity, max_depth, node_count, avg_depth).
+                - structure: high-level module structure (top-level functions/classes with line ranges).
+                - language: detected Tree-sitter language name.
+                - tree_sitter_version: version string of the tree_sitter package or 'unknown'.
         """
         if not TREE_SITTER_AVAILABLE:
             return self._empty_result()
@@ -171,7 +178,11 @@ class TreeSitterExtractor:
             return self._empty_result()
     
     def _detect_language(self, file_path: Path) -> Optional[str]:
-        """Detect programming language from file extension."""
+        """
+        Return the detected Tree-sitter language name for a file based on its extension.
+        
+        Checks the file's suffix (case-insensitive) against the extractor's LANGUAGE_MAP and returns the corresponding language identifier (e.g., '.py' -> 'python'). Returns None if the extension is not recognized.
+        """
         suffix = file_path.suffix.lower()
         return self.LANGUAGE_MAP.get(suffix)
     
@@ -191,14 +202,22 @@ class TreeSitterExtractor:
     
     def _extract_language_symbols(self, tree, content: str, language: str) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Extract symbols specific to each programming language.
+        Dispatch to a language-specific symbol extractor and return the collected symbol table.
         
-        Returns a dictionary with categories:
-        - functions: Function/method definitions
-        - classes: Class/type definitions
-        - imports: Import statements
-        - variables: Global/constant variables
-        - exports: Exported symbols (for JS/TS)
+        This calls the appropriate per-language extractor based on `language` and returns
+        a dictionary of symbol categories (each a list of symbol dictionaries). Common
+        keys produced include: `functions`, `classes`, `imports`, `variables`,
+        `exports`, `interfaces`, `enums`, and `types`. For config formats (json/yaml/xml/toml)
+        a minimal structural metadata extractor is used; unsupported languages fall back
+        to a generic identifier-based extractor.
+        
+        Parameters:
+            language (str): Tree-sitter language identifier (e.g., "python", "javascript",
+                "java", "go", "rust", "c", "cpp", "json", "yaml", "xml", "toml").
+        
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Mapping from category name to a list of
+            symbol dictionaries produced by the language-specific extractor.
         """
         symbols = {
             'functions': [],
@@ -235,7 +254,34 @@ class TreeSitterExtractor:
         return symbols
     
     def _extract_python_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Extract symbols from Python code."""
+        """
+        Extract Python symbols from a Tree-sitter Python syntax node.
+        
+        Returns a dictionary of symbol categories discovered anywhere under the provided node:
+        - functions: list of functions with keys `name`, `line` (1-based), `scope` (e.g., "module" or "module.Class"),
+          `parameters` (list), `decorators` (list), and `docstring` (string or None).
+        - classes: list of classes with keys `name`, `line` (1-based), `scope`, `bases` (list of base class names),
+          `decorators` (list), and `docstring` (string or None).
+        - imports: list of import statements with keys `statement` (source text), `line` (1-based), and `type`
+          (`import` or `from_import`).
+        - variables: list of module-level constants detected from uppercase identifiers with keys `name`, `line` (1-based),
+          `type` (`constant`), and `scope`.
+        - decorators: collected decorator nodes (kept for backward compatibility; may be empty).
+        
+        Parameters:
+            node: Tree-sitter node representing a Python module or subtree to inspect.
+            content (str): Full source text corresponding to the node (used to extract names, statements, and docstrings).
+        
+        Notes:
+        - The function treats uppercase module-level assignments as constants.
+        - Class member functions and nested definitions are recorded with an updated `scope` of the form
+          "module.ClassName" when traversing class bodies.
+        - Line numbers are 1-based.
+        - Docstrings and decorators are obtained via helper methods on the extractor; if none are present the values will be None or empty lists as appropriate.
+        
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Symbol table grouped by category.
+        """
         symbols = {
             'functions': [],
             'classes': [],
@@ -245,6 +291,22 @@ class TreeSitterExtractor:
         }
         
         def traverse(node, scope='module'):
+            """
+            Recursively walk a Python Tree-sitter node to collect module-level symbols into the surrounding `symbols` buckets.
+            
+            This traversal recognizes:
+            - function_definition: records name, 1-based line, scope, parameters, decorators, and docstring.
+            - class_definition: records name, line, scope, base classes, decorators, and docstring; then walks the class body with an updated scope ("<parent>.<ClassName>") and avoids double-traversing the class children.
+            - import_statement and import_from_statement: records the original statement text, line, and import type.
+            - assignment at module scope: records identifiers that are all uppercase as probable constants.
+            
+            Side effects:
+            - Mutates the outer-scope `symbols` dictionary by appending found entries to the keys 'functions', 'classes', 'imports', and 'variables'.
+            
+            Parameters:
+            - node: Tree-sitter AST node to visit.
+            - scope: dotted scope string (defaults to 'module'); used to qualify symbol scope when collected.
+            """
             if node.type == 'function_definition':
                 name_node = node.child_by_field_name('name')
                 if name_node:
@@ -305,7 +367,30 @@ class TreeSitterExtractor:
         return symbols
     
     def _extract_javascript_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Extract symbols from JavaScript/TypeScript code."""
+        """
+        Extract JavaScript/TypeScript top-level symbols from a Tree-sitter syntax node.
+        
+        Parses the provided Tree-sitter `node` (typically the root of a parsed JS/TS file) and collects language-level symbols used for indexing and lightweight metadata. Uses the raw file `content` to slice name and statement text and to compute 1-based line numbers.
+        
+        Parameters:
+            node: Tree-sitter syntax node representing the AST subtree to scan.
+            content (str): Source text corresponding to the parsed node.
+        
+        Returns:
+            dict: A mapping of symbol categories to lists of symbol records. Categories and typical record fields:
+              - 'functions': [{'name': str, 'line': int, 'async': bool, 'generator': bool}, ...]
+              - 'classes': [{'name': str, 'line': int, 'extends': Optional[str]}, ...]
+              - 'imports': [{'statement': str, 'line': int}, ...]
+              - 'exports': [{'statement': str, 'line': int}, ...]
+              - 'variables': [] (reserved for future use)
+              - 'interfaces': [{'name': str, 'line': int}, ...]
+              - 'types': [{'name': str, 'line': int}, ...]
+        
+        Notes:
+            - Line numbers are 1-based.
+            - Function records attempt to detect `async` and generator functions; class records include an `extends` entry when a superclass is present.
+            - `content` is used for exact source slices (names and full import/export statements).
+        """
         symbols = {
             'functions': [],
             'classes': [],
@@ -317,6 +402,14 @@ class TreeSitterExtractor:
         }
         
         def traverse(node):
+            """
+            Recursively traverse a JavaScript/TypeScript Tree-sitter node and collect top-level symbols into the surrounding `symbols` dictionary.
+            
+            This visitor recognizes function declarations/expressions/arrow functions (records name, 1-based line, async, and generator), class declarations (name, line, extends), import and export statements (source text and line), interface declarations (name and line), and type alias declarations (name and line). It reads identifier text and full statements from the enclosing `content` string and appends entries to the outer-scope `symbols` lists. The function mutates `symbols` and has no return value.
+            
+            Parameters:
+                node: A Tree-sitter AST node to visit.
+            """
             if node.type in ['function_declaration', 'function_expression', 'arrow_function']:
                 name_node = node.child_by_field_name('name')
                 if name_node:
@@ -375,7 +468,19 @@ class TreeSitterExtractor:
         return symbols
     
     def _extract_java_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Extract symbols from Java code."""
+        """
+        Extract Java symbols from a Tree-sitter syntax node.
+        
+        Returns a dictionary of symbol categories discovered in the subtree rooted at `node`. Categories and the shape of each entry:
+        - functions: list of {name: str, line: int, modifiers: List[str]} — Java method declarations.
+        - classes: list of {name: str, line: int, modifiers: List[str]} — class declarations.
+        - imports: list of {statement: str, line: int} — full import statements as source text.
+        - interfaces: list of {name: str, line: int} — interface declarations.
+        - enums: list of {name: str, line: int} — enum declarations.
+        - annotations: list — reserved for annotation declarations (may be empty).
+        
+        Line numbers are 1-based. Names and statements are sliced from `content` using node byte ranges.
+        """
         symbols = {
             'functions': [],
             'classes': [],
@@ -386,6 +491,20 @@ class TreeSitterExtractor:
         }
         
         def traverse(node):
+            """
+            Recursively traverse a Tree-sitter AST node and collect Java symbol declarations into the enclosing `symbols` mapping.
+            
+            This helper walks the subtree rooted at `node` and appends discovered declarations to the surrounding `symbols` dict:
+            - method_declaration -> functions: {'name', 'line', 'modifiers'}
+            - class_declaration  -> classes:   {'name', 'line', 'modifiers'}
+            - import_declaration -> imports:   {'statement', 'line'}
+            - interface_declaration -> interfaces: {'name', 'line'}
+            - enum_declaration   -> enums:     {'name', 'line'}
+            
+            Names and statement text are sliced from the `content` buffer using node byte ranges. Line numbers are 1-based. The function recurses into all child nodes and returns None.
+            Parameters:
+                node: A Tree-sitter AST node to inspect (recursively).
+            """
             if node.type == 'method_declaration':
                 name_node = node.child_by_field_name('name')
                 if name_node:
@@ -433,7 +552,26 @@ class TreeSitterExtractor:
         return symbols
     
     def _extract_go_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Extract symbols from Go code."""
+        """
+        Extract a symbol table from a Tree-sitter Go syntax node.
+        
+        Parameters:
+            node: Tree-sitter node representing a Go source file or subtree. The function walks this node to discover declarations.
+            content (str): Original Go source text used to slice names/statements and compute line numbers.
+        
+        Returns:
+            dict: A mapping with the following keys (each value is a list of dicts):
+                - 'functions': entries with {'name': str, 'line': int, 'receiver': Optional[str]} for function/method declarations.
+                - 'types': entries with {'name': str, 'line': int} for declared types (including structs, interfaces, type aliases).
+                - 'imports': entries with {'statement': str, 'line': int} for import declarations (full import text trimmed).
+                - 'interfaces': list reserved for interface-like declarations (may be populated via type declarations).
+                - 'constants': entries with {'name': str, 'line': int} for constant declarations.
+                - 'variables': list reserved for variable declarations (may be populated if detected).
+        
+        Notes:
+            - Line numbers are 1-based.
+            - Names and statements are taken by slicing the original `content` using node byte ranges.
+        """
         symbols = {
             'functions': [],
             'types': [],
@@ -444,6 +582,23 @@ class TreeSitterExtractor:
         }
         
         def traverse(node):
+            """
+            Recursively traverse a Go syntax subtree and append discovered symbols (functions, types, imports, constants)
+            to the enclosing `symbols` collection.
+            
+            This helper inspects node types relevant to Go declarations:
+            - `function_declaration`: records function name, 1-based line number, and receiver (via self._extract_receiver).
+            - `type_declaration` / `type_spec`: records type names and line numbers.
+            - `import_declaration`: records the full import statement text and line number.
+            - `const_declaration` / `const_spec`: records constant names and line numbers.
+            
+            Side effects:
+            - Mutates the outer-scope `symbols` dict by appending entries.
+            - Reads source text from the outer-scope `content` to extract names and statement text.
+            
+            Parameters:
+                node: A Tree-sitter AST node representing the current subtree to inspect.
+            """
             if node.type == 'function_declaration':
                 name_node = node.child_by_field_name('name')
                 if name_node:
@@ -486,7 +641,25 @@ class TreeSitterExtractor:
         return symbols
     
     def _extract_rust_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Extract symbols from Rust code."""
+        """
+        Extract Rust symbols from a Tree-sitter syntax node.
+        
+        Traverses the given Tree-sitter node subtree and collects high-level Rust declarations into categorized lists:
+        - functions: dicts with keys 'name', 'line', 'async'
+        - structs: dicts with keys 'name', 'line'
+        - enums: dicts with keys 'name', 'line'
+        - traits: dicts with keys 'name', 'line'
+        - imports: dicts with keys 'statement', 'line'
+        - types: (reserved, may remain empty)
+        - macros: (reserved, may remain empty)
+        
+        Parameters:
+            node: Tree-sitter node serving as the root of the traversal (typically the parsed file or module node).
+            content (str): Original source text used to extract exact name and statement substrings.
+        
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Mapping of symbol categories to lists of symbol metadata dictionaries.
+        """
         symbols = {
             'functions': [],
             'structs': [],
@@ -498,6 +671,11 @@ class TreeSitterExtractor:
         }
         
         def traverse(node):
+            """
+            Recursively traverse a Tree-sitter AST node and collect Rust-specific symbols into the enclosing `symbols` mapping.
+            
+            This visitor appends discovered entries to the surrounding `symbols` dictionary (functions, structs, enums, traits, imports). For each declaration it records the name (extracted from the node's `name` child when present) and the 1-based line number; import declarations record the full statement text and line. The function mutates `symbols` and relies on the outer-scope `content` string and `self._has_child_type` for async detection. No value is returned.
+            """
             if node.type == 'function_item':
                 name_node = node.child_by_field_name('name')
                 if name_node:
@@ -544,7 +722,24 @@ class TreeSitterExtractor:
         return symbols
     
     def _extract_c_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Extract symbols from C/C++ code."""
+        """
+        Extract C/C++ symbols from a Tree-sitter syntax tree node.
+        
+        Traverses the provided Tree-sitter node and collects top-level and nested C/C++ declarations:
+        - functions: name and 1-based line number (from function declarators)
+        - structs: name and line number
+        - classes: name and line number
+        - includes: full include statement and line number
+        - defines: macro name and line number
+        - typedefs: (collected via typedef nodes when present)
+        
+        Parameters:
+            node: Tree-sitter AST node to traverse (typically the root of a parsed C/C++ tree).
+            content (str): Original source text; used to extract identifier text and statement slices.
+        
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: A mapping of symbol categories to lists of symbol records. Each record contains at least 'name' or 'statement' and 'line'.
+        """
         symbols = {
             'functions': [],
             'structs': [],
@@ -555,6 +750,17 @@ class TreeSitterExtractor:
         }
         
         def traverse(node):
+            """
+            Recursively walk a C/C++ tree-sitter node subtree and collect top-level C/C++ symbols into the outer `symbols` mapping.
+            
+            This function visits nodes to find function definitions, struct and class declarations, preprocessor includes, and macro defines. For each discovered symbol it appends a dictionary with the symbol name (or full include/define statement) and its 1-based line number into the appropriate list in the surrounding `symbols` variable. It reads text slices from the surrounding `content` and uses the extractor's `_extract_function_name` helper to resolve function names.
+            
+            Parameters:
+                node: A tree-sitter Node representing the current subtree root to traverse.
+            
+            Returns:
+                None — results are recorded by mutating the enclosing `symbols` dictionary.
+            """
             if node.type == 'function_definition':
                 # Look for the declarator which contains the name
                 declarator = node.child_by_field_name('declarator')
@@ -604,10 +810,23 @@ class TreeSitterExtractor:
     
     def _extract_config_metadata(self, node, content: str, language: str) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Extract minimal structural metadata from config files.
+        Extract minimal structural metadata from a parsed configuration file.
         
-        We don't interpret semantic meaning - that's Jina v4's job.
-        We just provide basic structural information for context.
+        This collects lightweight, format-specific counts and nesting information without
+        attempting to interpret semantic meanings of keys or values. Supported formats
+        are: "json", "yaml", "xml", and "toml". The function assumes `node` is a
+        Tree-sitter root or subtree for the parsed content; reaching this code implies
+        parsing succeeded.
+        
+        Returns:
+            A dict with:
+              - 'config_type' (str): same as the provided `language`.
+              - 'structure_info' (list): a single-entry list containing a dict with:
+                  - 'type': 'config_metadata'
+                  - 'format': the config format (language)
+                  - 'key_count' (int): number of key/property-like nodes found
+                  - 'max_nesting_depth' (int): maximum traversal depth encountered
+                  - 'is_valid_syntax' (bool): True when parsing reached this extractor
         """
         symbols = {
             'config_type': language,
@@ -619,6 +838,18 @@ class TreeSitterExtractor:
         max_depth = 0
         
         def traverse(node, depth=0):
+            """
+            Recursively traverse a Tree-sitter syntax node to count config keys/properties and track maximum nesting depth.
+            
+            This helper walks the syntax tree rooted at `node`, increments the nonlocal `key_count` when it encounters node types that represent keys/properties for the detected config `language` (json, yaml, xml, toml), and updates the nonlocal `max_depth` to reflect the deepest nesting seen.
+            
+            Parameters:
+                node: A Tree-sitter AST node to traverse.
+                depth (int): Current depth in the tree (root starts at 0).
+            
+            Side effects:
+                Modifies the enclosing scope's `key_count` and `max_depth` nonlocal variables.
+            """
             nonlocal key_count, max_depth
             max_depth = max(max_depth, depth)
             
@@ -653,13 +884,31 @@ class TreeSitterExtractor:
         return symbols
     
     def _extract_generic_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Generic symbol extraction for unsupported languages."""
+        """
+        Extracts a minimal symbol table from a syntax tree for languages without a dedicated extractor.
+        
+        This walks the given Tree-sitter `node` subtree and collects identifier occurrences whose text length is greater than two characters. For each identifier the function records its name and 1-based line number (derived from the node's start_point). Identifiers are deduplicated (first occurrence preserved) and the final list is truncated to at most 100 entries. The returned mapping contains two keys:
+        - 'identifiers': list of { 'name': str, 'line': int }
+        - 'literals': list (currently unused; returned for compatibility with other extractors)
+        
+        Parameters:
+            node: Tree-sitter AST node to traverse (root of the subtree to scan).
+            content (str): Source file content used to slice identifier text by node byte offsets.
+        
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: Symbol categories with collected identifiers and literals.
+        """
         symbols = {
             'identifiers': [],
             'literals': []
         }
         
         def traverse(node):
+            """
+            Recursively walk the given syntax subtree and collect identifier names into the surrounding `symbols['identifiers']` list.
+            
+            This function visits every node in the subtree rooted at `node`. When it encounters a node of type 'identifier', it extracts the source text using the outer-scope `content` bytes range and, if the identifier length is greater than two characters, appends a dict with keys 'name' and 'line' (1-based line number) to `symbols['identifiers']`. Short identifiers (length ≤ 2) are ignored. The function mutates the outer `symbols` structure and returns None.
+            """
             if node.type == 'identifier':
                 text = content[node.start_byte:node.end_byte]
                 if len(text) > 2:  # Skip short identifiers
@@ -686,13 +935,16 @@ class TreeSitterExtractor:
     
     def _calculate_metrics(self, tree, content: str) -> Dict[str, Any]:
         """
-        Calculate code complexity metrics.
+        Compute simple code metrics from a Tree-sitter syntax tree and the source text.
         
-        Returns metrics including:
-        - lines_of_code: Total lines
-        - complexity: Cyclomatic complexity estimate
-        - depth: Maximum nesting depth
-        - node_count: Total AST nodes
+        Returns a dictionary with:
+        - lines_of_code (int): number of lines in the provided content.
+        - complexity (int): a small cyclomatic-complexity estimate (starts at 1 and increments for control-flow constructs).
+        - max_depth (int): maximum AST nesting depth visited (skips nodes inside string/comment nodes).
+        - node_count (int): number of AST nodes counted (skips nodes inside string/comment nodes).
+        - avg_depth (float): max_depth divided by node_count (guarded against division by zero).
+        
+        The function uses a language-specific set of control-flow node types based on tree.language (defaults to Python) when estimating complexity. It intentionally ignores nodes that represent strings or comments to avoid inflating metrics.
         """
         lines = content.count('\n') + 1
         
@@ -729,6 +981,19 @@ class TreeSitterExtractor:
         cf_nodes = control_flow_nodes.get(language, control_flow_nodes['python'])
         
         def traverse(node, depth=0, in_string_or_comment=False):
+            """
+            Recursively traverse AST nodes to update node count, maximum depth, and cyclomatic complexity.
+            
+            This helper visits each node in the Tree-sitter syntax tree, skipping nodes that are inside string or comment constructs. For every non-skipped node it increments the module-level node_count, updates max_depth, and increments complexity when the node's type is listed in `cf_nodes`. Traversal sets `in_string_or_comment` for any descendant nodes under string/comment nodes.
+            
+            Parameters:
+                node: A Tree-sitter AST node to visit.
+                depth (int): Current traversal depth (root call typically 0).
+                in_string_or_comment (bool): Whether the current node is within a string or comment region.
+            
+            Side effects:
+                Updates the enclosing scope's nonlocal variables `node_count`, `max_depth`, and `complexity`.
+            """
             nonlocal node_count, max_depth, complexity
             
             # Skip nodes inside strings and comments
@@ -758,9 +1023,18 @@ class TreeSitterExtractor:
     
     def _extract_structure(self, tree, content: str, language: str) -> Dict[str, Any]:
         """
-        Extract high-level structural information.
+        Return a high-level module structure with top-level functions and classes.
         
-        Returns nested structure showing code organization.
+        Builds a minimal hierarchical representation for the parsed file: a root node of type "module" with its detected language and a list of top-level children. Each child represents a top-level function or class and includes 1-based start and end line numbers. The extractor recognizes several common Tree-sitter node types for functions and classes across languages.
+        
+        Returns:
+            dict: Structure with keys:
+                - type (str): Always "module".
+                - language (str): The detected language passed to the function.
+                - children (list): List of dicts for top-level members. Each child has:
+                    - type (str): "function" or "class".
+                    - line (int): 1-based start line of the node.
+                    - end_line (int): 1-based end line of the node.
         """
         structure = {
             'type': 'module',
@@ -787,7 +1061,21 @@ class TreeSitterExtractor:
     
     # Helper methods
     def _extract_parameters(self, node, content: str) -> List[str]:
-        """Extract function parameters."""
+        """
+        Return a list of parameter strings extracted from a function/method node.
+        
+        Searches the node's 'parameters' child and collects text for child nodes of types
+        commonly used to represent parameters (e.g., 'identifier', 'typed_parameter',
+        'simple_parameter'). Parameter text is trimmed and filtered to exclude bare
+        punctuation like parentheses and commas.
+        
+        Parameters:
+            node: Tree-sitter AST node representing a function or method declaration.
+            content (str): Full source file content used to slice parameter text by byte offsets.
+        
+        Returns:
+            List[str]: Ordered list of parameter source fragments as they appear in the signature.
+        """
         params = []
         param_list = node.child_by_field_name('parameters')
         if param_list:
@@ -799,7 +1087,11 @@ class TreeSitterExtractor:
         return params
     
     def _extract_decorators(self, node, content: str) -> List[str]:
-        """Extract Python decorators."""
+        """
+        Return a list of Python decorator source strings for the given Tree-sitter node.
+        
+        Searches the node's direct children for nodes of type 'decorator' and returns the raw source slice for each decorator (including the leading '@' and any arguments). Does not recurse into deeper descendants and does not normalize or parse the decorator text.
+        """
         decorators = []
         for child in node.children:
             if child.type == 'decorator':
@@ -808,7 +1100,25 @@ class TreeSitterExtractor:
         return decorators
     
     def _extract_docstring(self, node, content: str) -> Optional[str]:
-        """Extract Python docstring."""
+        """
+        Extract the first-string literal docstring from a Tree-sitter node's body.
+        
+        Given a Tree-sitter node representing a module, class, or function, this returns
+        the text of the leading string expression (the usual Python docstring) if present.
+        The function inspects the node's `body` field, looks for an initial
+        `expression_statement` whose child is a `string` node, slices the original
+        source `content` using the string node's byte range, strips common Python
+        string prefixes (r, f, fr, rf, etc.) and surrounding quotes (single, double,
+        or triple), and returns the trimmed docstring text. Returns None when no
+        leading string literal is found.
+        
+        Parameters:
+            node: Tree-sitter AST node for a module/class/function (expected to have a `body` field).
+            content (str): The full source text corresponding to the node, used to extract the literal slice.
+        
+        Returns:
+            Optional[str]: The cleaned docstring text, or None if no docstring is present.
+        """
         body = node.child_by_field_name('body')
         if body and body.children:
             first_stmt = body.children[0]
@@ -843,7 +1153,12 @@ class TreeSitterExtractor:
         return None
     
     def _extract_bases(self, node, content: str) -> List[str]:
-        """Extract base classes."""
+        """
+        Return the list of base class names declared on a Python `class_definition` node.
+        
+        Scans the node's `superclasses` field and extracts identifier text slices from the original source `content`.
+        Returns base class names in source order; returns an empty list if no superclasses are present.
+        """
         bases = []
         superclasses = node.child_by_field_name('superclasses')
         if superclasses:
@@ -853,14 +1168,37 @@ class TreeSitterExtractor:
         return bases
     
     def _has_child_type(self, node, child_type: str) -> bool:
-        """Check if node has a child of specific type."""
+        """
+        Return True if the given Tree-sitter node has an immediate child with the specified node type.
+        
+        Parameters:
+            node: A Tree-sitter AST node whose immediate children will be inspected.
+            child_type (str): The node type string to match (e.g., "function_definition", "class_definition").
+        
+        Returns:
+            bool: True if any direct child of `node` has type equal to `child_type`, otherwise False.
+        
+        Notes:
+            - Only immediate/direct children are checked; descendants at deeper levels are not considered.
+        """
         for child in node.children:
             if child.type == child_type:
                 return True
         return False
     
     def _get_extends(self, node, content: str) -> Optional[str]:
-        """Get extended class for JavaScript/TypeScript."""
+        """
+        Return the name of the first extended/base class from a JavaScript/TypeScript class heritage clause.
+        
+        Searches the node for a `heritage` field and, if it contains an `extends_clause`, extracts and returns the clause text with the leading `extends` keyword removed and surrounding whitespace trimmed. Returns None if no heritage or extends clause is present.
+        
+        Parameters:
+            node: Tree-sitter node representing a class declaration or similar construct.
+            content (str): Full source text used to slice the extends clause.
+        
+        Returns:
+            Optional[str]: The base class name or expression as a string, or None if not found.
+        """
         heritage = node.child_by_field_name('heritage')
         if heritage:
             for child in heritage.children:
@@ -869,7 +1207,20 @@ class TreeSitterExtractor:
         return None
     
     def _extract_modifiers(self, node, content: str) -> List[str]:
-        """Extract Java modifiers."""
+        """
+        Extract Java modifiers from a Tree-sitter node.
+        
+        Given a node that may contain a `modifiers` field, returns the list of modifier tokens
+        as they appear in the source (sliced from `content`). Typical modifiers include
+        'public', 'private', 'protected', 'static', 'final', etc.
+        
+        Parameters:
+            node: Tree-sitter node expected to have a `modifiers` child field.
+            content (str): Full source text used to extract the modifier substrings.
+        
+        Returns:
+            List[str]: Modifier tokens in source order. Empty list if no modifiers are present.
+        """
         modifiers = []
         mod_node = node.child_by_field_name('modifiers')
         if mod_node:
@@ -879,7 +1230,19 @@ class TreeSitterExtractor:
         return modifiers
     
     def _extract_receiver(self, node, content: str) -> Optional[str]:
-        """Extract Go method receiver."""
+        """
+        Extract the Go method receiver declaration from a method node.
+        
+        Returns the source text for the first receiver parameter (e.g., "(r *MyType)")
+        when present and parseable; otherwise returns None.
+        
+        Parameters:
+            node: Tree-sitter node for a Go method or function declaration.
+            content (str): File source used to slice the receiver text.
+        
+        Returns:
+            Optional[str]: The raw receiver text or None if not found.
+        """
         params = node.child_by_field_name('parameters')
         if params and params.children:
             first_param = params.children[0]
@@ -888,7 +1251,22 @@ class TreeSitterExtractor:
         return None
     
     def _extract_function_name(self, declarator, content: str) -> Optional[str]:
-        """Extract function name from C/C++ declarator."""
+        """
+        Extract the function name from a C/C++ declarator node.
+        
+        Searches the declarator's children for identifier-like nodes and returns the corresponding source text.
+        Handles:
+        - plain `identifier` and `field_identifier` nodes,
+        - `function_declarator` nodes whose child contains the identifier,
+        - `pointer_declarator` nodes by recursing into their children.
+        
+        Parameters:
+            declarator: A Tree-sitter node representing a C/C++ declarator.
+            content (str): The full source text from which node byte ranges are sliced.
+        
+        Returns:
+            The function name as it appears in source, or None if no name can be determined.
+        """
         if declarator.type == 'function_declarator':
             for child in declarator.children:
                 if child.type == 'identifier':
@@ -906,7 +1284,20 @@ class TreeSitterExtractor:
         return None
     
     def _empty_result(self) -> Dict[str, Any]:
-        """Return empty result structure."""
+        """
+        Return a standardized empty extraction result.
+        
+        The result matches the shape produced by extract_symbols when no data can be extracted
+        (e.g., unsupported language, parse failure, or missing tree-sitter). Fields:
+        
+        - symbols: categories for collected symbols (lists are empty).
+        - metrics: numeric metrics initialized to zero.
+        - structure: empty dict for hierarchical structure.
+        - language: None to indicate no detected language.
+        
+        Returns:
+            Dict[str, Any]: A dictionary with keys 'symbols', 'metrics', 'structure', and 'language'.
+        """
         return {
             'symbols': {
                 'functions': [],
@@ -927,10 +1318,20 @@ class TreeSitterExtractor:
     
     def generate_symbol_hash(self, symbols: Dict[str, List]) -> str:
         """
-        Generate a hash of the symbol table for comparison.
+        Return a stable SHA-256 hex digest representing the provided symbol table.
         
-        This creates a stable hash that can be used to detect changes
-        in code structure without comparing full content.
+        This produces a deterministic fingerprint of the symbol table suitable for change detection:
+        - Sorts categories and, within each category of dict items, sorts by each item's 'name' field.
+        - Only the 'name' fields are used (items without a 'name' are ignored).
+        - The resulting ordered string is hashed with SHA-256 and returned as a hex string.
+        
+        Parameters:
+            symbols (Dict[str, List]): Mapping of symbol categories (e.g., "functions", "classes")
+                to lists of symbol dictionaries. Each symbol dictionary is expected to contain a
+                'name' key when applicable.
+        
+        Returns:
+            str: Hex-encoded SHA-256 digest of the stable symbol representation.
         """
         # Create a stable string representation
         symbol_str = ""

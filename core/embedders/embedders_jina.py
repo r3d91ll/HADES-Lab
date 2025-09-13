@@ -70,15 +70,27 @@ class JinaV4Embedder:
                  chunk_overlap_tokens: int = None,
                  config_path: str = None):
         """
-        Initialize Jina v4 embedder with late chunking support.
-        
-        Args:
-            device: Device to use (cuda/cpu) - overrides config
-            use_fp16: Use half precision for efficiency - overrides config
-            chunk_size_tokens: Size of chunks in tokens - overrides config
-            chunk_overlap_tokens: Overlap between chunks - overrides config
-            config_path: Path to embedder configuration file
-        """
+                 Create a Jina v4 embedder instance and load tokenizer and model weights, preparing late-chunking defaults.
+                 
+                 If provided, a YAML config is loaded (expected structure: top-level "embedder" mapping); values in the constructor arguments override config values. The initializer:
+                 - Loads configuration from config_path or a default configs/embedder.yaml next to the package, falling back to built-in defaults on load errors.
+                 - Sets device, model_name, chunk_size_tokens, chunk_overlap_tokens, and use_fp16 defaults.
+                 - Chooses torch dtype (float16 when use_fp16 is true and device is CUDA, otherwise float32).
+                 - Loads the tokenizer and the model via Transformers (trust_remote_code=True). When a CUDA device string is used and CUDA is available, the model is loaded with device_map set to that device; otherwise the model is loaded and moved to the selected device.
+                 - Puts the model into eval() mode.
+                 
+                 Parameters:
+                     device: Target device string (e.g., "cuda", "cuda:0", or "cpu"). Overrides config.device if specified.
+                     use_fp16: If True and the device is CUDA, the model will be loaded with float16 precision. Overrides config.use_fp16.
+                     chunk_size_tokens: Token count used for late-chunking window size. Overrides config.chunk_size_tokens.
+                     chunk_overlap_tokens: Token overlap between adjacent chunks for late chunking. Overrides config.chunk_overlap_tokens.
+                     config_path: Optional path to a YAML file containing an "embedder" mapping with default settings; missing or invalid files are ignored and defaults are used.
+                 
+                 Side effects:
+                     - May download model/tokenizer weights from the hub.
+                     - Loads tokenizer into self.tokenizer and model into self.model and calls self.model.eval().
+                     - Logs configuration and fallback warnings on config load failures.
+                 """
         # Try to load config if path provided or default exists
         config = {}
         if config_path:
@@ -164,16 +176,21 @@ class JinaV4Embedder:
                     task: str = "retrieval",
                     batch_size: int = 4) -> np.ndarray:
         """
-        Embed texts using Jina v4.
-        
-        Args:
-            texts: List of texts to embed
-            task: Task type (retrieval, text-matching, code)
-            batch_size: Batch size for processing
-            
-        Returns:
-            Numpy array of embeddings (N x 2048)
-        """
+                    Compute 2048-dimensional embeddings for a list of texts using the loaded Jina v4 model.
+                    
+                    Processes inputs in batches, calls the model's `encode_text` with the given `task`, and converts the model output (torch tensors, tensor-like objects, lists, or numpy-compatible structures) into a contiguous NumPy array of shape (N, 2048). Tensors are moved to CPU as needed; CUDA cache is cleared between batches to reduce OOM risk.
+                    
+                    Parameters:
+                        texts (List[str]): Input texts to embed.
+                        task (str): Embedding task to use. Common values: "retrieval", "text-matching", "code".
+                        batch_size (int): Number of texts to process per model call.
+                    
+                    Returns:
+                        np.ndarray: Array of embeddings with shape (len(texts), 2048).
+                    
+                    Raises:
+                        Exception: If the model's returned embeddings cannot be converted to a NumPy array.
+                    """
         all_embeddings = []
         
         with torch.no_grad():
@@ -241,26 +258,26 @@ class JinaV4Embedder:
                    code_snippets: List[str],
                    batch_size: int = 4) -> np.ndarray:
         """
-        Embed code using the code-specific task.
-        
-        Args:
-            code_snippets: List of code snippets
-            batch_size: Batch size for processing
-            
-        Returns:
-            Numpy array of embeddings (N x 2048)
-        """
+                   Embed code snippets into 2048-dimensional vectors.
+                   
+                   This is a thin wrapper around embed_texts that calls the model with task="code".
+                   Parameters:
+                       code_snippets (List[str]): Code strings to embed.
+                       batch_size (int): Number of snippets processed per model batch.
+                   
+                   Returns:
+                       np.ndarray: Array of shape (N, 2048) with L2-normalized embeddings for each snippet.
+                   """
         return self.embed_texts(code_snippets, task="code", batch_size=batch_size)
     
     def embed_images(self, images: List[Union[bytes, Image.Image, str]]) -> np.ndarray:
         """
-        Embed images using Jina v4's multimodal capabilities.
+        Embed a list of images using the model's multimodal encoder and return L2-normalized embeddings.
         
-        Args:
-            images: List of images as bytes, PIL Images, or base64 strings
-            
+        Accepts images as raw bytes, PIL Image instances, or base64-encoded strings (decoded as raw image bytes). Each image is converted to RGB if needed before encoding. Raises ValueError for unsupported input types.
+        
         Returns:
-            L2-normalized embeddings as numpy array
+            A 2D numpy array of shape (len(images), EMBEDDING_DIM) containing L2-normalized embeddings (dtype float32).
         """
         processed_images = []
         
@@ -311,13 +328,15 @@ class JinaV4Embedder:
     
     def embed_multimodal(self, pairs: List[Dict[str, Union[str, List[bytes]]]]) -> np.ndarray:
         """
-        Create unified embeddings for text+image pairs.
+        Generate L2-normalized multimodal embeddings for a list of text+image pairs.
         
-        Args:
-            pairs: List of dicts with 'text' and optional 'images' keys
-            
+        Each item in `pairs` should be a dict with an optional 'text' (str) and optional 'images' (list). For each pair:
+        - If both text and images are absent, returns a zero vector.
+        - If only one modality is present, uses that modality's embedding.
+        - If both are present, performs late fusion using default weights (text=0.7, images=0.3) after averaging multiple image embeddings.
+        
         Returns:
-            L2-normalized multimodal embeddings
+            np.ndarray: Array of shape (len(pairs), 2048) with L2-normalized embeddings.
         """
         embeddings_list = []
         
@@ -365,23 +384,17 @@ class JinaV4Embedder:
                                  text: str,
                                  task: str = "retrieval") -> List[ChunkWithEmbedding]:
         """
-        Context-aware chunking implementation for Jina v4.
-        
-        Uses a sliding window approach with significant overlap to preserve context.
-        Each chunk is embedded with awareness of surrounding text through larger
-        context windows, achieving similar benefits to traditional late chunking.
-        
-        This maintains the WHERE dimension of information even when physically chunked,
-        preventing zero-propagation in the WHAT dimension by ensuring each chunk
-        contains awareness of its surrounding context.
-        
-        Args:
-            text: Full document text to process
-            task: Task type (retrieval, text-matching, separation, classification)
-            
-        Returns:
-            List of ChunkWithEmbedding objects with contextually-aware embeddings
-        """
+                                 Create context-aware embeddings for a document by splitting it into overlapping chunks.
+                                 
+                                 Each returned ChunkWithEmbedding contains the chunk text, its embedding (2048-d), and boundary metadata (character/token spans and chunk indices). The method preserves surrounding context for each chunk using overlapping context windows so embeddings reflect document-level context rather than isolated snippets.
+                                 
+                                 Parameters:
+                                     text (str): Full document text to chunk and embed. If empty, returns an empty list.
+                                     task (str): Embedding task to pass to the model (commonly "retrieval", "code", "text-matching", or "classification").
+                                 
+                                 Returns:
+                                     List[ChunkWithEmbedding]: Ordered list of chunks with context-aware embeddings.
+                                 """
         if not text:
             return []
         
@@ -392,19 +405,13 @@ class JinaV4Embedder:
                                        texts: List[str],
                                        task: str = "retrieval") -> List[List[ChunkWithEmbedding]]:
         """
-        Batch version of embed_with_late_chunking for GPU efficiency.
-        
-        Processes multiple documents simultaneously while preserving the late chunking
-        context awareness. Collects context windows from all documents and processes
-        them in batches for optimal GPU utilization.
-        
-        Args:
-            texts: List of full document texts to process
-            task: Task type (retrieval, text-matching, separation, classification)
-            
-        Returns:
-            List of lists - one ChunkWithEmbedding list per input document
-        """
+                                       Produce context-aware chunk embeddings for multiple documents using batched late chunking.
+                                       
+                                       Collects context windows from each input document, encodes those windows in batched calls to the model for GPU efficiency, and maps the resulting embeddings back to per-document lists of ChunkWithEmbedding objects (one list per input text). Returns an empty list for empty input.
+                                        
+                                       Returns:
+                                           List[List[ChunkWithEmbedding]]: A list with one list of ChunkWithEmbedding objects per input document.
+                                       """
         if not texts:
             return []
         
@@ -512,9 +519,18 @@ class JinaV4Embedder:
     
     def _prepare_chunks_for_batch(self, text: str, doc_idx: int) -> List[Dict]:
         """
-        Prepare chunks and context windows for a single document in batch processing.
+        Prepare chunk and context window metadata for a single document to support batched encoding.
         
-        Returns list of dictionaries with chunk and context information.
+        Chunks are created by sliding a fixed-size character window across the input text (a heuristic mapping of tokens->chars: ~4 chars per token). For each chunk this returns a dictionary containing:
+        - 'chunk_text': the chunk's raw text.
+        - 'context_text': chunk text plus surrounding context (one chunk size on each side where available).
+        - 'start_char', 'end_char': character offsets of the chunk within the original text.
+        - 'start_token', 'end_token': rough token index estimates derived from character offsets (heuristic, not exact).
+        - 'chunk_index': zero-based index of the chunk within the document.
+        - 'total_chunks': total number of chunks for the document (set after chunking).
+        - 'context_window_used': rough token-size estimate of the context window.
+        
+        This function does not perform exact tokenization; the token-related fields are approximate and intended only for downstream bookkeeping when assembling batched inputs for the model.
         """
         # Estimate chunk size in characters (rough: ~4 chars per token)
         chunk_size_chars = self.chunk_size_tokens * 4
@@ -564,12 +580,25 @@ class JinaV4Embedder:
                                     text: str,
                                     task: str = "retrieval") -> List[ChunkWithEmbedding]:
         """
-        Create chunks with contextual embeddings using overlapping windows.
-        
-        Each chunk is embedded with surrounding context to preserve semantic
-        relationships across boundaries. This is Jina v4's practical approach
-        to achieving the benefits of late chunking.
-        """
+                                    Create overlapping text chunks and compute a context-aware embedding for each chunk.
+                                    
+                                    This splits `text` into character-based chunks (chunk size derived from the configured
+                                    token chunk size), embeds a larger context window surrounding each chunk using the
+                                    model's `encode_text` API, and returns a list of ChunkWithEmbedding with rough token
+                                    estimates and metadata. The implementation includes OOM recovery: on CUDA OOM it will
+                                    clear cache, retry, and progressively reduce the context window; if embedding still
+                                    fails a zero vector is used as a last resort.
+                                    
+                                    Parameters:
+                                        text (str): Full document to chunk and embed.
+                                        task (str): Embedding task passed to the model (e.g., "retrieval", "code").
+                                    
+                                    Returns:
+                                        List[ChunkWithEmbedding]: Ordered chunks covering `text`. Each item contains the
+                                        chunk text, its context-derived embedding (L2-normalization performed elsewhere),
+                                        character and rough token boundaries, chunk index, total_chunks (set on return),
+                                        and the approximate context window size used (in tokens).
+                                    """
         # Estimate chunk size in characters (rough: ~4 chars per token)
         chunk_size_chars = self.chunk_size_tokens * 4
         context_window_chars = min(self.chunk_size_tokens * 8, self.MAX_TOKENS * 4)  # 2x context on each side
@@ -711,21 +740,23 @@ class JinaV4Embedder:
                            text: str, 
                            task: str = "retrieval") -> Tuple[torch.Tensor, Dict]:
         """
-        Encode a full document to get token-level embeddings (first step of late chunking).
-        
-        This is the critical first step of proper late chunking:
-        1. Process the entire document through the transformer
-        2. Get contextualized token embeddings for the whole document
-        3. Return these for subsequent chunking with context preservation
-        
-        Args:
-            text: Full document text
-            task: Task type (retrieval, code, etc.)
-            
-        Returns:
-            Tuple of (token_embeddings, metadata_dict)
-            where metadata_dict contains token offsets and other info
-        """
+                           Encode a full document to obtain contextualized token-level embeddings for late chunking.
+                           
+                           Processes the entire text through the model (truncating to MAX_TOKENS if necessary) and returns per-token contextual embeddings plus metadata required for downstream chunking. If an empty string is provided, returns an empty tensor and an empty dict.
+                           
+                           Parameters:
+                               text (str): Full document text to encode.
+                               task (str): High-level task hint (e.g., "retrieval", "code"). Used to select the model task label; defaults to "retrieval".
+                           
+                           Returns:
+                               Tuple[torch.Tensor, dict]: 
+                                   - token_embeddings: Tensor of shape [seq_len, hidden_dim] containing contextual token embeddings for the (possibly truncated) input.
+                                   - metadata: Dict with keys:
+                                       - 'offset_mapping' (np.ndarray): character offsets for each token.
+                                       - 'num_tokens' (int): number of tokens kept (<= MAX_TOKENS).
+                                       - 'text_length' (int): original text length in characters.
+                                       - 'task' (str): the task string passed through.
+                           """
         if not text:
             return torch.empty(0, self.EMBEDDING_DIM), {}
         
@@ -843,24 +874,20 @@ class JinaV4Embedder:
                                  chunk_size_tokens: Optional[int] = None,
                                  chunk_overlap_tokens: Optional[int] = None) -> List[ChunkWithEmbedding]:
         """
-        Create chunks with embeddings from pre-computed token embeddings (second step).
-        
-        This is the second step of proper late chunking:
-        1. Take the contextualized token embeddings from step 1
-        2. Create chunks by slicing the token embeddings
-        3. Pool each chunk's tokens to get chunk embedding
-        4. Each chunk embedding preserves full document context
-        
-        Args:
-            token_embeddings: Token-level embeddings from encode_full_document
-            metadata: Metadata dict from encode_full_document
-            text: Original text for creating chunk text
-            chunk_size_tokens: Override default chunk size
-            chunk_overlap_tokens: Override default overlap
-            
-        Returns:
-            List of ChunkWithEmbedding objects with context-aware embeddings
-        """
+                                 Create document chunks by pooling precomputed token embeddings.
+                                 
+                                 Takes token-level contextual embeddings (from encode_full_document) and slices them into overlapping token windows to produce ChunkWithEmbedding objects. Each chunk's embedding is the mean-pooled vector of its tokens (L2-normalized) and the chunk text is extracted from `text` using the encoder's offset_mapping so character boundaries align with tokens. The returned chunks record token and character spans, chunk index, total_chunks, and the full-document context size used for pooling.
+                                 
+                                 Parameters:
+                                     token_embeddings (torch.Tensor): Token-level embeddings for the full document (shape: [num_tokens, dim]).
+                                     metadata (Dict): Metadata returned by encode_full_document; must contain 'offset_mapping' (sequence of (start_char, end_char) per token) and 'num_tokens'.
+                                     text (str): Original document text used to extract chunk text from character offsets.
+                                     chunk_size_tokens (Optional[int]): If provided, overrides the embedder's default chunk size (in tokens).
+                                     chunk_overlap_tokens (Optional[int]): If provided, overrides the embedder's default chunk overlap (in tokens).
+                                 
+                                 Returns:
+                                     List[ChunkWithEmbedding]: Sequential chunks covering the document. Each chunk.embedding is a CPU numpy array (L2-normalized). Total chunks and chunk_index fields are populated.
+                                 """
         chunk_size = chunk_size_tokens or self.chunk_size_tokens
         overlap = chunk_overlap_tokens or self.chunk_overlap_tokens
         
@@ -937,18 +964,20 @@ class JinaV4Embedder:
                              text: str,
                              task: str = "retrieval") -> List[ChunkWithEmbedding]:
         """
-        Process a document that may exceed 32k tokens.
-        
-        For documents longer than 32k tokens, we process in windows with
-        overlap to maintain some context across boundaries.
-        
-        Args:
-            text: Document text (can be very long)
-            task: Task type
-            
-        Returns:
-            List of all chunks with embeddings
-        """
+                             Split a potentially very long document into context-preserving chunks and return their embeddings.
+                             
+                             If the document fits within the model's token context window (MAX_TOKENS), delegates to the context-window chunking method. For longer texts, processes the document in overlapping character windows (each window sized approximately MAX_TOKENS * 4 characters with a ~1000-token overlap), runs context-aware chunking on each window, then adjusts chunk character/token offsets back to the original document coordinates and reindexes chunk indices.
+                             
+                             Parameters:
+                                 task: Embedding task passed to the underlying chunking/encoding routines (default "retrieval").
+                             
+                             Returns:
+                                 List[ChunkWithEmbedding]: Chunks covering the full document in reading order. Each chunk includes its embedding and updated start/end character and token offsets, plus chunk_index and total_chunks set for the final list.
+                             
+                             Notes:
+                                 - Token/character conversions use a heuristic (~4 characters per token) for window sizing and offset adjustment.
+                                 - Overlapping windows preserve cross-window context but may produce overlapping chunks; callers should expect and handle overlap if necessary.
+                             """
         # Quick token count estimate (rough: ~4 chars per token)
         estimated_tokens = len(text) // 4
         

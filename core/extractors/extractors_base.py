@@ -62,10 +62,12 @@ class ExtractorBase(ABC):
 
     def __init__(self, config: Optional[ExtractorConfig] = None):
         """
-        Initialize extractor with configuration.
-
-        Args:
-            config: Extraction configuration
+        Initialize the extractor instance with the given configuration.
+        
+        If no config is provided, a default ExtractorConfig is created and assigned to self.config.
+        
+        Parameters:
+            config (Optional[ExtractorConfig]): Extraction configuration to use; when None, a default is applied.
         """
         self.config = config or ExtractorConfig()
 
@@ -74,15 +76,16 @@ class ExtractorBase(ABC):
                file_path: Union[str, Path],
                **kwargs) -> ExtractionResult:
         """
-        Extract content from a document.
-
-        Args:
-            file_path: Path to the document
-            **kwargs: Additional extraction options
-
-        Returns:
-            ExtractionResult with extracted content
-        """
+               Abstract method — extract structured content from a single document.
+               
+               Subclasses must override this to read and convert the document at `file_path` into an ExtractionResult.
+               `file_path` is the path to the input document. `**kwargs` are extractor-specific options (for example: page ranges,
+               timeout overrides, or OCR configuration) and may be ignored by some implementations.
+               
+               Returns:
+                   ExtractionResult: standardized extraction output containing text, metadata, detected objects (tables, images,
+                   equations, code blocks, references), optional error information, and processing time.
+               """
         pass
 
     @abstractmethod
@@ -90,26 +93,23 @@ class ExtractorBase(ABC):
                      file_paths: List[Union[str, Path]],
                      **kwargs) -> List[ExtractionResult]:
         """
-        Extract content from multiple documents.
-
-        Args:
-            file_paths: List of document paths
-            **kwargs: Additional extraction options
-
-        Returns:
-            List of ExtractionResult objects
-        """
+                     Extract content from multiple documents and return a list of ExtractionResult objects in the same order.
+                     
+                     Each entry in the returned list corresponds to the path at the same index in `file_paths`. Additional keyword arguments are forwarded to the per-file `extract` implementation and may customize behavior (e.g., page range, OCR overrides) depending on the concrete extractor.
+                     """
         pass
 
     def validate_file(self, file_path: Union[str, Path]) -> bool:
         """
-        Validate that a file can be processed.
-
-        Args:
-            file_path: Path to validate
-
+        Validate that `file_path` refers to an existing, non-empty regular file.
+        
+        Performs three checks: the path exists, is a file (not a directory or other special entry), and has a non-zero size. On failure each check logs an error describing the reason.
+        
+        Parameters:
+            file_path (str | Path): Path to the file to validate.
+        
         Returns:
-            True if file can be processed
+            bool: True if the path exists, is a regular file, and is not empty; otherwise False.
         """
         path = Path(file_path)
         if not path.exists():
@@ -126,12 +126,24 @@ class ExtractorBase(ABC):
     @property
     @abstractmethod
     def supported_formats(self) -> List[str]:
-        """Get list of supported file formats."""
+        """
+        Return the list of file formats this extractor supports.
+        
+        Returns:
+            List[str]: A list of supported file format identifiers (e.g., file extensions or MIME-type strings).
+        """
         pass
 
     @property
     def supports_gpu(self) -> bool:
-        """Whether this extractor can use GPU acceleration."""
+        """
+        Return whether this extractor supports GPU acceleration.
+        
+        Subclasses that enable GPU processing should override this property to return True.
+        
+        Returns:
+            bool: True if GPU acceleration is supported, otherwise False.
+        """
         return False
 
     @property
@@ -146,10 +158,17 @@ class ExtractorBase(ABC):
 
     def get_extractor_info(self) -> Dict[str, Any]:
         """
-        Get information about the extractor.
-
+        Return a dictionary summarizing this extractor's identity, capabilities, and core configuration.
+        
         Returns:
-            Dictionary with extractor metadata
+            dict: Metadata containing:
+                - "class" (str): extractor class name.
+                - "supported_formats" (List[str]): formats the extractor supports.
+                - "supports_gpu" (bool): whether GPU acceleration is supported.
+                - "supports_batch" (bool): whether batch processing is supported.
+                - "supports_ocr" (bool): whether OCR is supported.
+                - "config" (dict): selected configuration values with keys
+                  "use_gpu" (bool), "batch_size" (int), and "timeout_seconds" (int).
         """
         return {
             "class": self.__class__.__name__,

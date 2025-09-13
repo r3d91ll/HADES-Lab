@@ -477,7 +477,20 @@ class PhaseManager:
     
     @staticmethod
     def _init_extraction_worker(gpu_devices=None, docling_config=None):
-        """Initialize extraction worker with GPU access and Docling instance."""
+        """
+        Initialize a worker process for extraction: assign a GPU (if provided), configure PyTorch threads, and instantiate a per-process DoclingExtractor stored in the global WORKER_DOCLING.
+        
+        If `gpu_devices` is provided, the worker picks a GPU by round-robin based on the worker index and sets the CUDA_VISIBLE_DEVICES environment variable accordingly. PyTorch thread count is set to 8. The function creates a DoclingExtractor once per process using options from `docling_config` (defaults: use_ocr=False, extract_tables=True, use_fallback=True) and assigns it to the module-level WORKER_DOCLING for reuse by extraction tasks.
+        
+        Parameters:
+            gpu_devices (Optional[Sequence[int]]): Sequence of GPU device ids available to worker processes; if None, no CUDA device is enforced.
+            docling_config (Optional[dict]): Configuration overrides for DoclingExtractor; only the keys `use_ocr`, `extract_tables`, and `use_fallback` are read by this initializer.
+        
+        Side effects:
+            - Sets the environment variable `CUDA_VISIBLE_DEVICES` for the process when a GPU is assigned.
+            - Calls `torch.set_num_threads(8)`.
+            - Initializes the global `WORKER_DOCLING` with a DoclingExtractor instance.
+        """
         import torch
         import os
         import logging
@@ -516,7 +529,18 @@ class PhaseManager:
     
     @staticmethod
     def _init_embedding_worker(gpu_devices: List[int], arango_config: Dict[str, Any]):
-        """Initialize embedding worker with pre-loaded Jina model and DB connection."""
+        """
+        Initialize per-process resources for an embedding worker.
+        
+        This initializer is intended to run in a worker process (ProcessPoolExecutor initializer). It:
+        - Selects a GPU for the worker from the provided gpu_devices list and sets CUDA_VISIBLE_DEVICES for the process.
+        - Instantiates and assigns a process-global JinaV4Embedder to WORKER_EMBEDDER (preloads model onto the chosen device).
+        - Instantiates and assigns an ArangoDBManager using arango_config to WORKER_DB_MANAGER.
+        
+        Parameters:
+            gpu_devices (List[int]): Ordered list of GPU device IDs; the worker selects one by its process index (round-robin).
+            arango_config (Dict[str, Any]): ArangoDB connection/configuration dictionary used to construct the per-worker DB manager.
+        """
         import torch
         import os
         import logging

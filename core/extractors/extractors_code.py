@@ -26,13 +26,12 @@ class CodeExtractor:
     
     def __init__(self, use_tree_sitter: bool = True):
         """
-        Initialize the CodeExtractor instance.
+        Create a CodeExtractor and prepare language comment heuristics.
         
-        Sets up a mapping of common file extensions to their single-line comment marker (used by metadata heuristics) 
-        and optionally initializes Tree-sitter for symbol extraction.
+        Initializes a mapping of common file extensions to their single-line comment marker (used by metadata heuristics). If `use_tree_sitter` is True, attempts to instantiate a TreeSitterExtractor for symbol/structure extraction; on failure Tree-sitter support is disabled and extraction will proceed without it.
         
-        Args:
-            use_tree_sitter: Whether to use Tree-sitter for symbol extraction
+        Parameters:
+            use_tree_sitter (bool): If True, try to enable Tree-sitter-based extraction; if initialization fails, Tree-sitter will be disabled silently.
         """
         # Common comment patterns for different languages
         self.comment_patterns = {
@@ -66,23 +65,23 @@ class CodeExtractor:
     
     def extract(self, file_path: str) -> Optional[Dict[str, Any]]:
         """
-        Extracts text and basic metadata from a code file for embedding generation.
+        Extract the contents of a code file and return text plus lightweight, language-aware metadata.
         
-        Reads the file at `file_path` as UTF-8 (errors ignored) and returns a dictionary containing the raw content and simple derived fields:
-        - full_text: the file's full raw content
-        - text: same as full_text (kept for compatibility)
+        Reads the file at `file_path` as UTF-8 (errors ignored) and builds a result dict containing:
+        - full_text, text: raw file content
         - markdown: fenced code block using the file extension as the language tag
-        - num_lines: number of lines in the file
+        - num_lines: number of lines
         - file_size: file size in bytes
-        - file_extension: file suffix (e.g., ".py")
-        - extractor: constant string 'code_extractor'
-        - metadata: language-aware summary (line_count, char_count, has_docstring, import_count, function_count, class_count)
+        - file_extension: suffix (e.g., ".py")
+        - extractor: 'code_extractor_with_tree_sitter' if Tree-sitter provided enrichment, otherwise 'code_extractor'
+        If a Tree-sitter extractor is available and succeeds, the result is enriched with:
+        - symbols, code_metrics (from Tree-sitter 'metrics'), code_structure, language, and symbol_hash (when symbols exist)
         
         Parameters:
             file_path (str): Path to the code file to read.
         
         Returns:
-            Optional[Dict[str, Any]]: The extraction result dictionary on success; None if the file does not exist or extraction fails.
+            Optional[Dict[str, Any]]: Extraction result on success; None if the file does not exist or an error occurs.
         """
         file_path = Path(file_path)
         
