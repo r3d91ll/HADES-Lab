@@ -20,7 +20,7 @@ import yaml
 import json
 import os
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from .config_base import BaseConfig, ConfigError, ConfigValidationError
@@ -47,8 +47,8 @@ class ConfigSource:
     path: Path
     format: ConfigFormat
     priority: int  # Higher numbers = higher priority
-    exists: bool
-    readable: bool = False
+    exists: bool = field(default=False, init=False)
+    readable: bool = field(default=False, init=False)
 
     def __post_init__(self):
         """Validate source accessibility."""
@@ -406,7 +406,7 @@ class ConfigLoader:
         except ConfigValidationError:
             raise
         except Exception as e:
-            raise ConfigError(f"Failed to create {config_name} configuration: {e}")
+            raise ConfigError(f"Failed to create {config_name} configuration: {e}") from e
 
     @staticmethod
     def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

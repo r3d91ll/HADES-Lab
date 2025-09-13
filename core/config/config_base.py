@@ -297,10 +297,24 @@ class BaseConfig(BaseModel, ABC):
         local_coherence = 1.0 if not semantic_errors else max(0.0, 1.0 - len(semantic_errors) / 10)
 
         # I = Instruction fit (all required fields present)
-        required_fields = [field for field, field_info in self.__fields__.items()
-                          if field_info.is_required()]
-        instruction_fit = sum(1.0 for field in required_fields
-                            if getattr(self, field, None) is not None) / max(1, len(required_fields))
+        # Handle both Pydantic v1 and v2 compatibility
+        required_fields = []
+        for field, field_info in self.__fields__.items():
+            # Check if field is required (compatible with both Pydantic versions)
+            is_required = (
+                getattr(field_info, 'required', False) or  # Pydantic v1
+                (hasattr(field_info, 'is_required') and field_info.is_required()) or  # Pydantic v2 method
+                (field_info.default is None and field_info.default_factory is None)  # Fallback check
+            )
+            if is_required:
+                required_fields.append(field)
+
+        # Calculate instruction fit, handling case where there are no required fields
+        if required_fields:
+            instruction_fit = sum(1.0 for field in required_fields
+                                if getattr(self, field, None) is not None) / len(required_fields)
+        else:
+            instruction_fit = 1.0  # Perfect fit if no fields are required
 
         # A = Actionability (configuration is complete and usable)
         field_values = [getattr(self, field, None) for field in self.__fields__]
