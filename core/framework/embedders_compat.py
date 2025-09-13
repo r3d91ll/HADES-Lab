@@ -8,6 +8,7 @@ DEPRECATED: This will be removed after the restructure is complete.
 """
 
 import warnings
+
 from core.embedders import *
 
 warnings.warn(
@@ -18,12 +19,6 @@ warnings.warn(
 )
 
 # Re-export everything for backward compatibility
-from core.embedders import (
-    EmbedderBase,
-    EmbeddingConfig,
-    EmbedderFactory,
-    create_embedder
-)
 
 # Try to import specific embedders
 try:

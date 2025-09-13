@@ -21,9 +21,6 @@ from core.workflows.storage import *
 
 # Try to import specific storage components
 try:
-    from core.workflows.storage import (
-        StorageBase,
-        LocalStorage
-    )
+    from core.workflows.storage import LocalStorage, StorageBase
 except ImportError:
     pass

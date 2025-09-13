@@ -18,4 +18,3 @@ warnings.warn(
 )
 
 # Re-export LaTeXExtractor for backward compatibility
-from core.extractors import LaTeXExtractor

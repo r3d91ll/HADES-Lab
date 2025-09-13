@@ -10,18 +10,50 @@ Core framework for all HADES processors providing:
 - Shared utilities
 """
 
+# Backward compatibility imports with deprecation warnings
+import types
+import warnings
+
 from .base_processor import BaseProcessor
-from .config import ConfigManager, Config
+from .config import Config, ConfigManager
 from .logging import LogManager
 from .metrics import MetricsCollector
 
-# Backward compatibility imports with deprecation warnings
 try:
     from . import embedders_compat as embedders
-    from . import extractors_compat as extractors
-    from . import storage_compat as storage
 except ImportError:
-    pass
+    # Create safe fallback
+    embedders = types.SimpleNamespace()
+    warnings.warn(
+        "embedders_compat module not found. Using empty namespace fallback.",
+        ImportWarning,
+        stacklevel=2
+    )
+
+try:
+    from . import extractors_compat as extractors
+except ImportError:
+    # Create safe fallback
+    extractors = types.SimpleNamespace()
+    warnings.warn(
+        "extractors_compat module not found. Using empty namespace fallback.",
+        ImportWarning,
+        stacklevel=2
+    )
+
+try:
+    from . import storage_compat as storage
+    # Add StorageManager alias for backward compatibility
+    StorageManager = getattr(storage, 'StorageManager', None)
+except ImportError:
+    # Create safe fallback
+    storage = types.SimpleNamespace()
+    StorageManager = None
+    warnings.warn(
+        "storage_compat module not found. Using empty namespace fallback.",
+        ImportWarning,
+        stacklevel=2
+    )
 
 __all__ = [
     'BaseProcessor',
@@ -31,7 +63,8 @@ __all__ = [
     'MetricsCollector',
     'embedders',
     'extractors',
-    'storage'
+    'storage',
+    'StorageManager'
 ]
 
 __version__ = '1.5.0'

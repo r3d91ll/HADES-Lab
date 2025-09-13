@@ -18,4 +18,3 @@ warnings.warn(
 )
 
 # Re-export DoclingExtractor for backward compatibility
-from core.extractors import DoclingExtractor

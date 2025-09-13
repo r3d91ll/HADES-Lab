@@ -22,14 +22,14 @@ from core.extractors import *
 # Try to import specific extractors that might be used
 try:
     from core.extractors import (
+        CodeExtractor,
+        DoclingExtractor,
         ExtractorBase,
         ExtractorConfig,
         ExtractorFactory,
-        DoclingExtractor,
         LaTeXExtractor,
         RobustExtractor,
         TreeSitterExtractor,
-        CodeExtractor
     )
 except ImportError:
     pass

@@ -8,14 +8,14 @@ transforming information from PDF format to structured text and metadata.
 """
 
 import logging
-from pathlib import Path
-from typing import Dict, Any, Optional, List
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 try:
-    from docling.document_converter import DocumentConverter
     # DocumentConversionInput was removed in newer versions
     from docling.datamodel.pipeline_options import PipelineOptions, TableStructureOptions
+    from docling.document_converter import DocumentConverter
     DOCLING_AVAILABLE = True
 except ImportError as e:
     DOCLING_AVAILABLE = False
@@ -27,16 +27,16 @@ logger = logging.getLogger(__name__)
 class DoclingExtractor:
     """
     Extract text and structures from PDFs using Docling.
-    
+
     This extractor serves as a boundary object between raw PDFs and
     the embedding pipeline, preserving semantic structures while
     transforming the document format.
     """
-    
+
     def __init__(self, use_ocr: bool = False, extract_tables: bool = True, use_fallback: bool = False):
         """
         Initialize Docling extractor.
-        
+
         Args:
             use_ocr: Whether to use OCR for scanned PDFs
             extract_tables: Whether to extract table structures
@@ -45,7 +45,7 @@ class DoclingExtractor:
         self.use_ocr = use_ocr
         self.extract_tables = extract_tables
         self.use_fallback = use_fallback
-        
+
         if DOCLING_AVAILABLE:
             # Configure pipeline options - Docling v2 doesn't accept None for table_structure_options
             if extract_tables:
@@ -62,7 +62,7 @@ class DoclingExtractor:
                     do_table_structure=False
                     # Don't include table_structure_options when not extracting tables
                 )
-            
+
             # Initialize converter
             self.converter = DocumentConverter(
                 pipeline_options=self.pipeline_options
@@ -71,11 +71,11 @@ class DoclingExtractor:
         else:
             self.converter = None
             logger.warning("Docling not available - using fallback text extraction")
-    
-    def extract(self, pdf_path: str) -> Dict[str, Any]:
+
+    def extract(self, pdf_path: str) -> dict[str, Any]:
         """
         Extract text and optional structured content from a file path (PDF or plain text).
-        
+
         This method accepts a path to a document and returns a normalized extraction result. Behavior:
         - If the path does not exist, raises FileNotFoundError.
         - For text files (suffix .txt, .text, .md): reads the file as UTF-8 and returns an early-text result:
@@ -88,22 +88,22 @@ class DoclingExtractor:
           (seconds) and pdf_path into the returned metadata.
         - Pre-validation failures (empty file, invalid header, unreadable file) raise RuntimeError and are not retried with fallback.
         - Processing-time errors will attempt the fallback extractor if use_fallback is True; otherwise a RuntimeError is raised.
-        
+
         Returns:
             Dict[str, Any]: Extraction result. For text-reader paths the result contains a 'text' key and metadata described above.
             For PDF extraction, the exact keys come from the underlying extractor but will include metadata with at least
             'extractor', 'num_pages' (when available), 'processing_time', and 'pdf_path'.
-        
+
         Raises:
             FileNotFoundError: If the provided path does not exist.
             RuntimeError: For empty files, invalid PDF header, unreadable files, text read failures, extraction failures,
                           or when Docling is unavailable and fallback is disabled.
         """
         pdf_path = Path(pdf_path)
-        
+
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
-        
+
         # Pre-validation: Check if file is readable and not empty
         file_size = pdf_path.stat().st_size
         if file_size == 0:
@@ -112,19 +112,19 @@ class DoclingExtractor:
                 raise RuntimeError(f"Text file is empty: {pdf_path}")
             else:
                 raise RuntimeError(f"File is empty: {pdf_path}")
-        
+
         # Check file type and handle appropriately
         pdf_path_obj = Path(pdf_path)
-        
+
         # For text files, handle directly (useful for testing)
         if pdf_path_obj.suffix in ['.txt', '.text', '.md']:
             try:
-                with open(pdf_path, 'r', encoding='utf-8') as f:
+                with open(pdf_path, encoding='utf-8') as f:
                     text = f.read()
-                
+
                 if not text.strip():
                     raise RuntimeError(f"Text file is empty: {pdf_path}")
-                
+
                 return {
                     'text': text,
                     'tables': [],
@@ -139,20 +139,20 @@ class DoclingExtractor:
                     },
                     'version': 'text_reader'
                 }
-            except (IOError, UnicodeDecodeError) as e:
+            except (OSError, UnicodeDecodeError) as e:
                 raise RuntimeError(f"Cannot read text file: {pdf_path}, error: {e}")
-        
+
         # Check basic PDF header for actual PDF files
         try:
             with open(pdf_path, 'rb') as f:
                 header = f.read(8)
                 if not header.startswith(b'%PDF'):
                     raise RuntimeError(f"Invalid PDF header: {pdf_path}")
-        except IOError as e:
+        except OSError as e:
             raise RuntimeError(f"Cannot read PDF file: {pdf_path}, error: {e}")
-        
+
         start_time = datetime.now()
-        
+
         try:
             if DOCLING_AVAILABLE and self.converter:
                 result = self._extract_with_docling(pdf_path)
@@ -175,13 +175,13 @@ class DoclingExtractor:
         except Exception as e:
             # Compute duration before handling exception
             duration = (datetime.now() - start_time).total_seconds()
-            
+
             # Don't use fallback for pre-validation errors (they should fail fast)
             error_msg = str(e)
             if any(x in error_msg for x in ["empty", "Invalid PDF header", "Cannot read PDF file"]):
                 logger.error(f"Pre-validation failed for {pdf_path}: {e}")
                 raise RuntimeError(f"Pre-validation failed for {pdf_path}: {e}") from e
-            
+
             # Use fallback for processing errors if enabled
             if self.use_fallback:
                 logger.warning(f"Extraction failed, attempting fallback: {e}")
@@ -194,14 +194,14 @@ class DoclingExtractor:
                 # Re-raise with more context
                 logger.error(f"Extraction failed for {pdf_path}: {e}")
                 raise RuntimeError(f"Extraction failed for {pdf_path}: {e}") from e
-    
-    def _extract_with_docling(self, pdf_path: Path) -> Dict[str, Any]:
+
+    def _extract_with_docling(self, pdf_path: Path) -> dict[str, Any]:
         """Extract using Docling library v2 with enhanced error handling."""
         try:
-            # Docling v2 uses convert_single for single PDFs  
+            # Docling v2 uses convert_single for single PDFs
             # Note: Timeout protection disabled due to signal conflicts with Docling's internal processes
             result = self.converter.convert_single(str(pdf_path))
-            
+
             # Check conversion status
             if hasattr(result, 'status'):
                 # ConversionStatus.SUCCESS has value '4', ConversionStatus.PARTIAL_SUCCESS has different value
@@ -215,15 +215,15 @@ class DoclingExtractor:
                         return self._extract_fallback(pdf_path)
                     else:
                         raise RuntimeError(error_msg)
-            
+
             # Extract from result.output (Docling v2 structure)
             full_text = ""
             structures = {}
             num_pages = None
-            
+
             if hasattr(result, 'output'):
                 output = result.output
-                
+
                 # Export to markdown
                 if hasattr(output, 'export_to_markdown'):
                     full_text = output.export_to_markdown()
@@ -231,7 +231,7 @@ class DoclingExtractor:
                     full_text = output.text
                 else:
                     full_text = str(output)
-                
+
                 # Extract tables if present
                 if self.extract_tables and hasattr(output, 'tables'):
                     structures['tables'] = []
@@ -243,7 +243,7 @@ class DoclingExtractor:
                             'headers': getattr(table, 'headers', [])
                         }
                         structures['tables'].append(table_data)
-                
+
                 # Extract equations if present
                 if hasattr(output, 'equations'):
                     structures['equations'] = []
@@ -253,7 +253,7 @@ class DoclingExtractor:
                             'label': getattr(eq, 'label', None)
                         }
                         structures['equations'].append(eq_data)
-                
+
                 # Extract figures if present
                 if hasattr(output, 'figures'):
                     structures['images'] = []
@@ -264,11 +264,11 @@ class DoclingExtractor:
                             'page': getattr(fig, 'page', None)
                         }
                         structures['images'].append(fig_data)
-            
+
             # Get number of pages if available
             if hasattr(result, 'pages'):
                 num_pages = len(result.pages)
-            
+
             if not full_text:
                 error_msg = "Docling extracted no text from PDF"
                 logger.error(error_msg)
@@ -277,7 +277,7 @@ class DoclingExtractor:
                     return self._extract_fallback(pdf_path)
                 else:
                     raise RuntimeError(error_msg)
-        
+
         except (TimeoutError, RuntimeError) as e:
             # Handle timeout and runtime errors explicitly
             logger.warning(f"Docling processing issue for {pdf_path}: {e}")
@@ -286,7 +286,7 @@ class DoclingExtractor:
                 return self._extract_fallback(pdf_path)
             else:
                 raise
-                
+
         except Exception as e:
             # Handle assertion failures and other crashes
             error_msg = str(e)
@@ -296,13 +296,13 @@ class DoclingExtractor:
                 logger.error(f"Docling PDF parsing crash for {pdf_path}: {e}")
             else:
                 logger.error(f"Docling unexpected error for {pdf_path}: {e}")
-            
+
             if self.use_fallback:
                 logger.info("Attempting fallback extraction")
                 return self._extract_fallback(pdf_path)
             else:
                 raise RuntimeError(f"Docling conversion failed: {e}") from e
-        
+
         return {
             'full_text': full_text,
             'markdown': full_text,  # Also provide as 'markdown' key
@@ -313,31 +313,31 @@ class DoclingExtractor:
                 'processing_time': None  # Docling doesn't provide this
             }
         }
-    
-    def _extract_fallback(self, pdf_path: Path) -> Dict[str, Any]:
+
+    def _extract_fallback(self, pdf_path: Path) -> dict[str, Any]:
         """
         Fallback extraction using PyMuPDF when Docling is not available.
-        
+
         This provides basic text extraction for testing purposes.
         """
         try:
             import fitz  # PyMuPDF
-            
+
             doc = fitz.open(str(pdf_path))
             try:
                 text_parts = []
                 num_pages = len(doc)
-                
+
                 for page_num, page in enumerate(doc):
                     text = page.get_text()
                     if text.strip():
                         text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
-                
+
                 full_text = "\n\n".join(text_parts)
-                
+
                 # Also create markdown version
                 markdown_text = full_text.replace("--- Page", "\n## Page")
-                
+
                 return {
                     'full_text': full_text,
                     'markdown': markdown_text,  # Add markdown key
@@ -374,14 +374,14 @@ class DoclingExtractor:
                     'error': str(e)
                 }
             }
-    
-    def extract_batch(self, pdf_paths: List[str]) -> List[Dict[str, Any]]:
+
+    def extract_batch(self, pdf_paths: list[str]) -> list[dict[str, Any]]:
         """
         Extract from multiple PDFs.
-        
+
         Args:
             pdf_paths: List of PDF file paths
-            
+
         Returns:
             List of extraction results
         """
@@ -399,5 +399,5 @@ class DoclingExtractor:
                     'structures': {},
                     'metadata': {'error': str(e)}
                 })
-        
+
         return results

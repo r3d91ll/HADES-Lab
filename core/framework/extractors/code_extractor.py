@@ -18,4 +18,3 @@ warnings.warn(
 )
 
 # Re-export CodeExtractor for backward compatibility
-from core.extractors import CodeExtractor

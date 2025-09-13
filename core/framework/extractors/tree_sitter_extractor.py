@@ -18,4 +18,3 @@ warnings.warn(
 )
 
 # Re-export TreeSitterExtractor for backward compatibility
-from core.extractors import TreeSitterExtractor

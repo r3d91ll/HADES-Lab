@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Phase 4 Integration Tests
 

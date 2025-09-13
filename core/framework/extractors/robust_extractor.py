@@ -18,4 +18,3 @@ warnings.warn(
 )
 
 # Re-export RobustExtractor for backward compatibility
-from core.extractors import RobustExtractor
