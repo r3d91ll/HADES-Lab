@@ -7,14 +7,14 @@ reviews:
     enabled: true
     # Review PRs targeting any branch (not just default)
     base_branches:
-      - "main"
-      - "feature/.*"
-      - "develop"
-      - "release/.*"
-      - "hotfix/.*"
+      - "^main$"
+      - "^feature/.*$"
+      - "^develop$"
+      - "^release/.*$"
+      - "^hotfix/.*$"
 
     # Skip drafts (false => do review drafts)
-    draft: false
+    drafts: false
 
   # Review settings
   request_changes_workflow: false
@@ -36,141 +36,81 @@ reviews:
     yamllint:
       enabled: true
 
-  # Path filters - review all files by default
+  # Path filters - review all files by default, with exclusions
   path_filters:
-    - "**/*.py"
-    - "**/*.pyi"
-    - "**/*.yaml"
-    - "**/*.yml"
-    - "**/*.json"
-    - "**/*.toml"
-    - "**/*.ini"
-    - "**/*.cfg"
-    - "**/*.md"
-    - "**/*.rst"
-    - "**/*.mmd"        # Mermaid diagrams
-    - "**/*.mermaid"    # Mermaid diagrams
-    - "**/*.sh"
-    - "**/*.bash"
-    - "**/*.sql"
-    - "**/*.mojo"
+    - "**/*"                    # Review all files
+    - "!**/node_modules/**"
+    - "!**/__pycache__/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/.mypy_cache/**"
+    - "!**/venv/**"
+    - "!**/.venv/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/*.pyc"
+    - "!**/*.pyo"
+    - "!**/*.egg-info/**"
+    - "!**/Acheron/**"         # Our deprecated code archive
 
-  # Paths to ignore
-  path_ignores:
-    - "**/node_modules/**"
-    - "**/__pycache__/**"
-    - "**/.pytest_cache/**"
-    - "**/.ruff_cache/**"
-    - "**/.mypy_cache/**"
-    - "**/venv/**"
-    - "**/.venv/**"
-    - "**/dist/**"
-    - "**/build/**"
-    - "**/*.pyc"
-    - "**/*.pyo"
-    - "**/*.egg-info/**"
-    - "**/Acheron/**"  # Our deprecated code archive
+  # Path-specific instructions - apply to all paths
+  path_instructions:
+    - paths: ["**/*"]
+      instructions: |
+        # HADES — Conveyance Framework (Efficiency view default)
 
-# Language-specific settings
-language_settings:
-  python:
-    linting_enabled: true
+        ## CRITICAL: Correct Formula
+        C = (W · R · H / T) · Ctx^α
 
-# Custom review instructions
-instructions: |
-  # HADES — Conveyance Framework (Efficiency view default)
+        NOT "WHERE × WHAT × CONVEYANCE × TIME" (this is WRONG)
 
-  ## Canonical equation (efficiency view)
-  C = (W · R · H / T) · Ctx^α
+        - W = What (signal/content quality)
+        - R = Where (relational/topological positioning)
+        - H = Who (agent/capability leverage)
+        - T = Time to converge (DIVIDES, not multiplies!)
+        - Ctx = wL·L + wI·I + wA·A + wG·G (weights default 0.25)
+        - α ∈ [1.5, 2.0], default 1.7, applies ONLY to Ctx
 
-  Where:
-    - W = What (signal/content quality: correctness, tests, docs, code health)
-    - R = Where (relational/topological positioning: boundaries, imports, coupling/cohesion, dependency graph)
-    - H = Who (agent/capability leverage & access patterns: interfaces, reuse, automation, observability)
-    - T = Time to converge (latency/cost): build/test/runtime + cognitive load (diff size, churn, migration steps)
-    - L, I, A, G ∈ [0,1] with weights wL, wI, wA, wG (defaults 0.25 each)
-    - Ctx = wL·L + wI·I + wA·A + wG·G
-    - α ∈ [1.5, 2.0], default 1.7; **α applies only to Ctx — never to T**
+        ## Red flags to request changes:
+        - TIME multiplied rather than divided (look for "× TIME")
+        - "CONVEYANCE" used as an input factor (C is the outcome, not input)
+        - Missing WHO (H) in the efficiency equation
+        - α applied to anything other than Ctx
+        - Evidence of double-counting time
 
-  ## Time stance
-  - Default to **efficiency view** (formula above).
-  - If the PR explicitly fixes T (e.g., controlled benchmarks), also report the **capability view**:
-    C_cap = (W · R · H) · Ctx^α
+        ## Review Focus Areas
 
-  ## Zero-propagation gate
-  - If any of {W, R, H} = 0 (e.g., broken builds, missing critical tests/docs, invalid topology) or T → ∞,
-    **request changes** with a blocking note: “C = 0 by zero-propagation.”
+        1. **Todd's 3 Laws**:
+           - Data is sacrosanct: validate inputs, no silent data loss
+           - Reliability: controlled failure modes
+           - Ownership: comprehensive logging
 
-  ## What to focus on (map findings to W/R/H/T and L/I/A/G)
-  1) **Consistency with Conveyance**
-     - Identify how the change affects **W, R, H, T**.
-     - Score **L, I, A, G** in [0,1]; use weights (wL, wI, wA, wG), default 0.25 each.
-     - Use **α = 1.7** unless the PR specifies otherwise (must stay in [1.5, 2.0]).
-     - Call out any double-counting of time (do not smuggle T into α).
+        2. **Factory patterns & interfaces** (H, R)
+        3. **Backward compatibility** (R, T)
+        4. **Performance evidence** (T, W)
+        5. **Observability** (H, T)
+        6. **Security** (W, R)
 
-  2) **Error handling & logging (Todd’s 3 Laws)**
-     - Data is sacrosanct: validate inputs, protect data integrity; no silent data loss.
-     - Reliability: ensure failure modes are controlled; retries/backoffs/circuit breakers where warranted.
-     - Ownership: every side-effecting action is logged with sufficient context to assume responsibility.
+        ## Conveyance Scorecard Output
+        - Time stance: Efficiency (default) or Capability (if T fixed)
+        - W/R/H/T summary
+        - L/I/A/G scores (each in [0,1])
+        - α value (default 1.7)
+        - Zero-propagation check
+        - Evidence links
 
-  3) **Factory pattern & interfaces (H, R)**
-     - Factory/strategy usage is explicit; interfaces align with base classes.
-     - No hidden ambient state; dependency injection favored; composition over inheritance unless justified.
-
-  4) **Backward compatibility (R, T)**
-     - Public APIs guarded; semantic changes gated with deprecation windows and warnings.
-     - Migrations documented; feature flags or adapters where needed to lower T.
-
-  5) **Performance & capacity (T, W)**
-     - Show evidence: microbenchmarks, complexity deltas, memory/IO profiles.
-     - Watch for GPU/CPU hand-off inefficiencies, data copies, and needless allocations.
-
-  6) **Observability (H, T)**
-     - Structured logs, metrics, and (where applicable) traces; RED/USE signals for services.
-     - Error taxonomies consistent; no log noise explosions.
-
-  7) **Security & secrets (W, R)**
-     - Secrets not in code or logs; least privilege; input validation; shell safety.
-
-  8) **Docs & tests (W, L/I/A/G)**
-     - Public functions have Google-style docstrings; examples where actionable.
-     - Tests cover happy-path and failure modes; ensure coverage for moved/renamed modules.
-
-  ## Restructure project (Issue #35)
-  - Verify moved files preserve functionality; imports updated; deprecations produce warnings.
-  - Ensure phase branches merge cleanly into `feature/core-restructure` before `main`.
-
-  ## Reviewer output — include this “Conveyance Scorecard”
-  - **Time stance**: Efficiency (default) / Capability (if fixed T)
-  - **W/R/H/T summary**: what changed, why it matters
-  - **Ctx weights**: wL=..., wI=..., wA=..., wG=... (defaults 0.25 each if unspecified)
-  - **L/I/A/G scores**: L=.., I=.., A=.., G=..  (each in [0,1])
-  - **α**: default 1.7 unless PR specifies [1.5, 2.0]
-  - **Zero-propagation**: triggered? (yes/no; if yes, state the failing dimension)
-  - **Evidence**: link to benchmarks, coverage, profiling, or diffs
+  # Pre-merge checks for PR descriptions
+  pre_merge_checks:
+    custom_checks:
+      - name: "PR description sections"
+        mode: "warning"
+        instructions: |
+          Verify PR description contains:
+          - Conveyance Summary
+          - W/R/H/T Mapping
+          - Performance Evidence
+          - Tests & Compatibility
 
 # Chat settings
 chat:
   auto_reply: true
-
-# PR description requirements (supply inputs for the scorecard)
-pr_description:
-  required_sections:
-    - "Conveyance Summary"
-    - "Time Stance and T Metrics"
-    - "Ctx Breakdown (L/I/A/G + weights + α)"
-    - "W/R/H Mapping"
-    - "Performance & Complexity Evidence"
-    - "Compatibility & Migration Plan"
-    - "Tests & Observability"
-    - "Docs & Changelog"
-    - "Risks & Rollback"
-
-# Complexity thresholds
-complexity:
-  max_complexity: 15
-
-# Documentation requirements
-documentation:
-  require_docstrings: true
-  docstring_style: "google"
