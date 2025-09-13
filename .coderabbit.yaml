@@ -1,0 +1,111 @@
+# CodeRabbit Configuration
+# This file enables CodeRabbit to review PRs on all branches, not just main
+
+# Review triggers
+reviews:
+  # Enable auto-review on all branches
+  auto_review:
+    enabled: true
+    # Review PRs targeting any branch (not just default)
+    base_branches:
+      - "main"
+      - "feature/*"
+      - "feature/**/*"
+      - "develop"
+      - "release/*"
+      - "hotfix/*"
+
+    # Skip drafts
+    draft: false
+
+  # Review settings
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  # Tools and checks
+  tools:
+    # Enable all built-in tools
+    ruff: true
+    markdownlint: true
+    languagetool: false  # Can be noisy for technical docs
+    shellcheck: true
+    yamllint: true
+
+  # Path filters - review all files by default
+  path_filters:
+    # Review all Python files
+    - "**/*.py"
+    # Review all configuration files
+    - "**/*.yaml"
+    - "**/*.yml"
+    - "**/*.json"
+    - "**/*.toml"
+    # Review documentation
+    - "**/*.md"
+    - "**/*.rst"
+    # Review shell scripts
+    - "**/*.sh"
+    - "**/*.bash"
+
+  # Paths to ignore
+  path_ignores:
+    - "**/node_modules/**"
+    - "**/__pycache__/**"
+    - "**/.pytest_cache/**"
+    - "**/venv/**"
+    - "**/.venv/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/*.pyc"
+    - "**/*.pyo"
+    - "**/*.egg-info/**"
+    - "**/Acheron/**"  # Our deprecated code archive
+
+# Language-specific settings
+language_settings:
+  python:
+    # Enforce Python best practices
+    linting_enabled: true
+
+# Custom review instructions
+instructions: |
+  Focus on:
+  1. Consistency with the Conveyance Framework (WHERE × WHAT × CONVEYANCE × TIME = Information)
+  2. Proper error handling and logging
+  3. Factory pattern implementations
+  4. Interface compliance with base classes
+  5. Backward compatibility maintenance
+  6. Performance implications
+
+  For this restructure project specifically:
+  - Ensure all moved files maintain their functionality
+  - Verify import paths are updated correctly
+  - Check that deprecation warnings are properly implemented
+  - Validate that test coverage is adequate
+
+  Note: This is a major restructure project (Issue #35) with multiple phases.
+  Phase branches merge to feature/core-restructure, which will eventually merge to main.
+
+# Chat settings
+chat:
+  # Enable chat commands
+  auto_reply: true
+
+# PR description requirements
+pr_description:
+  # Require certain sections in PR descriptions
+  required_sections: []  # We handle this manually
+
+# Complexity thresholds
+complexity:
+  # Flag files with high complexity
+  max_complexity: 15
+
+# Documentation requirements
+documentation:
+  # Require docstrings for public functions
+  require_docstrings: true
+  docstring_style: "google"  # We use Google-style docstrings
