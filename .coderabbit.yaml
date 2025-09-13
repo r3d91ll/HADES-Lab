@@ -55,7 +55,7 @@ reviews:
 
   # Path-specific instructions - apply to all paths
   path_instructions:
-    - paths: ["**/*"]
+    - path: "**/*"
       instructions: |
         # HADES — Conveyance Framework (Efficiency view default)
 
