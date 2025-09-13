@@ -23,12 +23,12 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
 
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult
 )
-from core.database.arango_db_manager import ArangoDBManager
+from core.database.arango.arango_client import ArangoDBManager
 
 logger = logging.getLogger(__name__)
 

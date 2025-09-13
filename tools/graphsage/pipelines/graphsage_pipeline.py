@@ -218,9 +218,9 @@ class GraphSAGEPipeline:
             batch_size=self.config.model_config.batch_size
         )
         
-        # Store in graph store
-        if self.graph_store.node_embeddings is not None:
-            self.graph_store.node_embeddings[:] = embeddings
+        # Store in graph store (as separate GraphSAGE embeddings)
+        # Don't overwrite original embeddings which have different dimensions
+        self.graph_store.graphsage_embeddings = embeddings
         
         self.stats['embedding_time'] = time.time() - start
         

@@ -11,20 +11,20 @@ arango:
 # GraphSAGE Model Configuration
 model:
   input_dim: 2048  # Jina v4 embedding dimension
-  hidden_dims: [512, 256]  # Hidden layer dimensions
+  hidden_dims: [256]  # Single layer for now (multi-layer needs implementation)
   output_dim: 256  # Final embedding dimension
-  num_layers: 2  # Number of GraphSAGE layers (K-hop)
+  num_layers: 1  # Start with 1 layer (multi-layer needs full implementation)
   aggregator_type: 'mean'  # mean, pool, lstm, gcn
   dropout: 0.5
   concat: true  # Concatenate self and neighbor features
   batch_size: 512
-  num_neighbors: [25, 10]  # Sample 25 neighbors at layer 1, 10 at layer 2
+  num_neighbors: [25]  # Sample 25 neighbors for single layer
   device: 'cuda'  # or 'cpu'
 
 # Neighborhood Sampling Configuration
 sampling:
   strategy: 'adaptive'  # uniform, importance, adaptive
-  num_neighbors: [25, 10]  # Must match model config
+  num_neighbors: [25]  # Must match model config
   seed: 42
 
 # Bridge Discovery Configuration

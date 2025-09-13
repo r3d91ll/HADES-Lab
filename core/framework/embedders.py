@@ -118,6 +118,8 @@ class JinaV4Embedder:
         
         # Set parameters with config as defaults, overridable by arguments
         self.device = device or config.get('device', 'cuda')
+        # Use full Jina model with task='retrieval' for our use case
+        # The retrieval-only model requires vLLM which would need refactoring
         self.model_name = config.get('model_name', 'jinaai/jina-embeddings-v4')
         self.chunk_size_tokens = chunk_size_tokens or config.get('chunk_size_tokens', 1000)
         self.chunk_overlap_tokens = chunk_overlap_tokens or config.get('chunk_overlap_tokens', 200)
@@ -139,11 +141,20 @@ class JinaV4Embedder:
         # Load model directly to the target device to avoid Flash Attention warning
         # Check if device starts with "cuda" to handle both "cuda" and "cuda:0", "cuda:1", etc.
         if self.device.startswith("cuda") and torch.cuda.is_available():
+            # For now, use single GPU to avoid tensor device mismatch with auto device_map
+            # The Jina model doesn't properly handle distributed tensors
+            if self.device == "cuda":
+                # Default to first GPU
+                device_to_use = "cuda:0"
+            else:
+                device_to_use = self.device
+                
+            logger.info(f"Loading model on {device_to_use}")
             self.model = AutoModel.from_pretrained(
                 self.model_name,
                 trust_remote_code=True,
                 torch_dtype=dtype,
-                device_map=self.device
+                device_map=device_to_use
             )
         else:
             self.model = AutoModel.from_pretrained(
@@ -156,6 +167,18 @@ class JinaV4Embedder:
                 self.model = self.model.to(self.device)
         
         self.model.eval()
+        
+        # Store model device for later use
+        # With multi-GPU, model.device doesn't exist, so we track it ourselves
+        if hasattr(self.model, 'hf_device_map'):
+            # Model is distributed across multiple GPUs
+            self.model_device = 'cuda:0'  # Use first GPU for input tensors
+            logger.info(f"Model distributed across GPUs: {list(set(self.model.hf_device_map.values()))}")
+        elif hasattr(self.model, 'device'):
+            self.model_device = self.model.device
+        else:
+            self.model_device = self.device
+        
         logger.info("Jina v4 model loaded with late chunking support")
         
     def embed_texts(self, 
@@ -740,8 +763,8 @@ class JinaV4Embedder:
         )
         
         # Move to device
-        input_ids = tokens['input_ids'].to(self.model.device)
-        attention_mask = tokens['attention_mask'].to(self.model.device)
+        input_ids = tokens['input_ids'].to(self.model_device)
+        attention_mask = tokens['attention_mask'].to(self.model_device)
         offset_mapping = tokens['offset_mapping'][0].cpu().numpy()
         
         with torch.no_grad():

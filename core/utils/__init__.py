@@ -11,7 +11,8 @@ standardized tools that can be transported across different contexts while
 maintaining their essential properties.
 """
 
-from .state_manager import StateManager, CheckpointManager
+# StateManager moved to core/workflows/workflow_state_manager.py
+# Import from there if needed: from core.workflows.workflow_state_manager import StateManager, CheckpointManager
 from .preflight import PreflightChecker, standard_pipeline_checks
 from .batch_processor import (
     BatchProcessor,
@@ -20,8 +21,6 @@ from .batch_processor import (
 )
 
 __all__ = [
-    'StateManager',
-    'CheckpointManager',
     'PreflightChecker',
     'standard_pipeline_checks',
     'BatchProcessor',

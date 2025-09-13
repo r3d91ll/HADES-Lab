@@ -11,8 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tools.github.github_document_manager import GitHubDocumentManager
-from core.processors.generic_document_processor import GenericDocumentProcessor
-from core.database.arango_db_manager import ArangoDBManager
+from core.workflows.workflow_pdf_batch import GenericDocumentProcessor
+from core.database.arango.arango_client import ArangoDBManager
 from typing import List, Dict, Any
 import logging
 from datetime import datetime

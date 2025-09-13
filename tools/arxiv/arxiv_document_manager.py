@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from core.processors.generic_document_processor import DocumentTask
+from core.workflows.workflow_pdf_batch import DocumentTask
 
 logger = logging.getLogger(__name__)
 
