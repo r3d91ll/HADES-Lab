@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tools.github.github_document_manager import GitHubDocumentManager
 from core.processors.generic_document_processor import GenericDocumentProcessor
-from core.framework.extractors.code_extractor import CodeExtractor
+from core.extractors import CodeExtractor
 import os
 import logging
 

@@ -13,17 +13,19 @@ from .embedders_factory import EmbedderFactory
 
 # Auto-register available embedders
 try:
-    from .embedders_jina import JinaV4Embedder
+    from .embedders_jina import JinaV4Embedder, ChunkWithEmbedding
     EmbedderFactory.register("jina", JinaV4Embedder)
 except ImportError:
-    pass
+    JinaV4Embedder = None
+    ChunkWithEmbedding = None
 
 # Backward compatibility exports
 __all__ = [
     'EmbedderBase',
     'EmbeddingConfig',
     'EmbedderFactory',
-    'JinaV4Embedder',  # May not be available
+    'JinaV4Embedder',
+    'ChunkWithEmbedding',
 ]
 
 # Convenience function for backward compatibility

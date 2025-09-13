@@ -49,7 +49,7 @@ def test_tree_sitter_extraction():
     logger.info(f"Generated {len(tasks)} document tasks")
     
     # Test Tree-sitter extraction on a few files
-    from core.framework.extractors.code_extractor import CodeExtractor
+    from core.extractors import CodeExtractor
     
     code_extractor = CodeExtractor(use_tree_sitter=True)
     

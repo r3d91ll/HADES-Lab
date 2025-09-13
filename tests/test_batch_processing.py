@@ -21,7 +21,7 @@ import sys
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult

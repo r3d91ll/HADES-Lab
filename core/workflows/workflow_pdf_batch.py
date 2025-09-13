@@ -300,11 +300,11 @@ def _init_extraction_worker(gpu_devices, extraction_config):
     
     if extraction_type == 'code':
         # Use CodeExtractor for code files
-        from core.framework.extractors.code_extractor import CodeExtractor
+        from core.extractors import CodeExtractor
         WORKER_DOCLING = CodeExtractor()
     else:
         # Use RobustExtractor for PDFs
-        from core.framework.extractors.robust_extractor import RobustExtractor
+        from core.extractors import RobustExtractor
         WORKER_DOCLING = RobustExtractor(
             use_ocr=extraction_config.get('docling', {}).get('use_ocr', False),
             extract_tables=extraction_config.get('docling', {}).get('extract_tables', True),
@@ -405,7 +405,7 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
     """
     global WORKER_EMBEDDER, WORKER_DB_MANAGER
     import os
-    from core.framework.embedders import JinaV4Embedder
+    from core.embedders import JinaV4Embedder
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))

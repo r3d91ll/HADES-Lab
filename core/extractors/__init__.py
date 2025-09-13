@@ -19,8 +19,8 @@ except ImportError:
     pass
 
 try:
-    from .extractors_latex import LatexExtractor
-    ExtractorFactory.register("latex", LatexExtractor)
+    from .extractors_latex import LaTeXExtractor
+    ExtractorFactory.register("latex", LaTeXExtractor)
 except ImportError:
     pass
 
@@ -42,6 +42,32 @@ try:
 except ImportError:
     pass
 
+# Make all classes available at module level
+try:
+    from .extractors_docling import DoclingExtractor
+except ImportError:
+    DoclingExtractor = None
+
+try:
+    from .extractors_latex import LaTeXExtractor
+except ImportError:
+    LaTeXExtractor = None
+
+try:
+    from .extractors_code import CodeExtractor
+except ImportError:
+    CodeExtractor = None
+
+try:
+    from .extractors_treesitter import TreeSitterExtractor
+except ImportError:
+    TreeSitterExtractor = None
+
+try:
+    from .extractors_robust import RobustExtractor
+except ImportError:
+    RobustExtractor = None
+
 # Backward compatibility exports
 __all__ = [
     'ExtractorBase',
@@ -49,7 +75,7 @@ __all__ = [
     'ExtractionResult',
     'ExtractorFactory',
     'DoclingExtractor',
-    'LatexExtractor',
+    'LaTeXExtractor',
     'CodeExtractor',
     'TreeSitterExtractor',
     'RobustExtractor',

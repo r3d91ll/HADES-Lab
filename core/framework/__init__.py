@@ -14,7 +14,14 @@ from .base_processor import BaseProcessor
 from .config import ConfigManager, Config
 from .logging import LogManager
 from .metrics import MetricsCollector
-from .storage import StorageManager
+
+# Backward compatibility imports with deprecation warnings
+try:
+    from . import embedders_compat as embedders
+    from . import extractors_compat as extractors
+    from . import storage_compat as storage
+except ImportError:
+    pass
 
 __all__ = [
     'BaseProcessor',
@@ -22,7 +29,9 @@ __all__ = [
     'Config',
     'LogManager',
     'MetricsCollector',
-    'StorageManager'
+    'embedders',
+    'extractors',
+    'storage'
 ]
 
 __version__ = '1.5.0'

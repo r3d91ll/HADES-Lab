@@ -16,7 +16,8 @@ import logging
 from .config import ConfigManager, Config
 from .logging import LogManager
 from .metrics import MetricsCollector
-from .storage import StorageManager
+# StorageManager has been moved to core.workflows.storage
+# from .storage import StorageManager
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,9 @@ class BaseProcessor(ABC):
         )
         
         # Initialize database connection
-        self.db = StorageManager.get_connection(self.config.database)
+        # StorageManager moved to core.workflows.storage
+        # self.db = StorageManager.get_connection(self.config.database)
+        self.db = None  # Placeholder - implement storage in derived classes
         
         # Initialize metrics collector
         self.metrics = MetricsCollector(processor_name)

@@ -23,9 +23,8 @@ from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict, field
 import numpy as np
 
-from core.framework.extractors.docling_extractor import DoclingExtractor
-from core.framework.extractors.latex_extractor import LaTeXExtractor
-from core.framework.embedders import JinaV4Embedder, ChunkWithEmbedding
+from core.extractors import DoclingExtractor, LaTeXExtractor
+from core.embedders import JinaV4Embedder, ChunkWithEmbedding
 
 logger = logging.getLogger(__name__)
 

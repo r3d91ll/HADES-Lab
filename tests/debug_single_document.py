@@ -15,8 +15,8 @@ import traceback
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.framework.extractors.docling_extractor import DoclingExtractor
-from core.framework.embedders import JinaV4Embedder
+from core.extractors import DoclingExtractor
+from core.embedders import JinaV4Embedder
 
 # Setup detailed logging
 logging.basicConfig(
