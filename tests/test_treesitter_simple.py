@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.framework.extractors.tree_sitter_extractor import TreeSitterExtractor
+from core.extractors import TreeSitterExtractor
 import logging
 
 logging.basicConfig(level=logging.DEBUG)

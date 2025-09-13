@@ -8,19 +8,23 @@ local filesystem, S3, and RamFS for high-speed staging.
 try:
     from .storage_local import LocalStorage
 except ImportError:
-    pass
+    LocalStorage = None
 
 try:
     from .storage_s3 import S3Storage
 except ImportError:
-    pass
+    S3Storage = None
 
 try:
     from .storage_ramfs import RamFSStorage
 except ImportError:
-    pass
+    RamFSStorage = None
+
+# Import base class
+from .storage_base import StorageBase
 
 __all__ = [
+    'StorageBase',
     'LocalStorage',
     'S3Storage',
     'RamFSStorage',

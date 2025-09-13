@@ -13,17 +13,18 @@ from pathlib import Path
 from typing import List
 import sys
 
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult,
     ExtractionResult
 )
-from core.processors.chunking_strategies import (
-    ChunkingStrategyFactory,
-    TokenBasedChunking,
-    SemanticChunking
-)
+# Note: chunking strategies may need to be updated based on new module structure
+# from core.processors.chunking_strategies import (
+#     ChunkingStrategyFactory,
+#     TokenBasedChunking,
+#     SemanticChunking
+# )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ def test_processing_result_serialization():
     )
     
     # Create mock processing result
-    from core.framework.embedders import ChunkWithEmbedding
+    from core.embedders import ChunkWithEmbedding
     import numpy as np
     
     mock_chunks = [

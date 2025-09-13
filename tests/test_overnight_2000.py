@@ -79,7 +79,7 @@ if MOCK_EMBEDDER:
                 List[ChunkWithEmbedding]: Mock chunks with random embeddings suitable for testing late-chunking behavior.
             """
             import numpy as np
-            from core.framework.embedders import ChunkWithEmbedding
+            from core.embedders import ChunkWithEmbedding
             
             words = text.split()
             chunk_size = 256
@@ -111,7 +111,7 @@ if MOCK_EMBEDDER:
 else:
     logger.info("Using REAL Jina embedder - this will be slower")
 
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult

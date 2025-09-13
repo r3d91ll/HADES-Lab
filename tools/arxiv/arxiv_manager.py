@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
 
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult
@@ -497,7 +497,7 @@ class ArXivManager:
             except Exception as e:
                 logger.error(f"Failed to process {arxiv_id}: {e}")
                 # Create failed result
-                from core.processors.document_processor import ProcessingResult, ExtractionResult
+                from core.workflows.workflow_pdf import ProcessingResult, ExtractionResult
                 failed_result = ProcessingResult(
                     extraction=ExtractionResult(full_text=""),
                     chunks=[],

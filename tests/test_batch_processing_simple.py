@@ -63,7 +63,7 @@ class MockEmbedder:
             List[ChunkWithEmbedding]: List of chunk objects with mock embeddings and metadata populated.
         """
         import numpy as np
-        from core.framework.embedders import ChunkWithEmbedding
+        from core.embedders import ChunkWithEmbedding
         
         # Simple chunking for testing
         words = text.split()
@@ -95,7 +95,7 @@ class MockEmbedder:
 import core.framework.embedders
 core.framework.embedders.JinaV4Embedder = MockEmbedder
 
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult

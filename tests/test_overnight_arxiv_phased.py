@@ -43,8 +43,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import our processors
-from core.framework.extractors.docling_extractor import DoclingExtractor
-from core.framework.embedders import JinaV4Embedder
+from core.extractors import DoclingExtractor
+from core.embedders import JinaV4Embedder
 
 # Staging directory for inter-phase communication
 STAGING_DIR = Path("/dev/shm/overnight_staging")

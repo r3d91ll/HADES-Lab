@@ -14,7 +14,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.framework.extractors.robust_extractor import RobustExtractor
+from core.extractors import RobustExtractor
 
 # Setup logging
 logging.basicConfig(

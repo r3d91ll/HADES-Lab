@@ -15,7 +15,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from tools.github.github_document_manager import GitHubDocumentManager
-from core.framework.extractors.code_extractor import CodeExtractor
+from core.extractors import CodeExtractor
 
 # Setup logging
 logging.basicConfig(
