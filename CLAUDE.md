@@ -20,7 +20,7 @@ All reasoning, evaluation, and design choices must be framed as applications of 
   * **A**: actionability
   * **G**: grounding
 * **Ctx** = wL·L + wI·I + wA·A + wG·G  (0 ≤ each component ≤ 1; weights default to 0.25 unless specified)
-* **α** ∈ \[1.5, 2.0] (super-linear amplification exponent applied to **Ctx only**)
+* **α** ∈ [1.5, 2.0] (super-linear amplification exponent applied to **Ctx only**)
 
 ## Canonical equations
 
@@ -50,7 +50,7 @@ Note: puts time inside the exponent and muddies α's interpretation. Only use if
 
 ### 4) Self-optimization (sleep cycle)
 
-Given a target conveyance C\_target:
+Given a target conveyance C_target:
 
 ```math
 H = (C_target · T) / (W · R · Ctx^α)
@@ -86,7 +86,7 @@ If any of {W, R, H} = 0 or T → ∞ ⇒ C = 0.
 
 For each run/condition:
 
-* Outcome: **C** (e.g., EM/F1/pass\@k/quality).
+* Outcome: **C** (e.g., EM/F1/pass@k/quality).
 * Factors: **W, R, H, T**, and **L, I, A, G** (→ **Ctx**).
 * Protocol: model/decoding params, retrieval policy, steps/halting, dataset split.
 
@@ -374,7 +374,7 @@ phases:
 Configuration files are located in:
 
 * `tools/arxiv/configs/` - ArXiv processing
-* `tools/github/configs/` - GitHub processing  
+* `tools/github/configs/` - GitHub processing
 * `experiments/*/config/` - Experiment-specific
 
 ## Import Conventions
@@ -468,12 +468,12 @@ python github_pipeline_manager.py --repo "owner/repository"
 def calculate_conveyance(document):
     """
     Calculate the CONVEYANCE dimension - actionability of information.
-    
-    From Information Reconstructionism theory: measures how readily 
-    information transforms from theory to practice. High conveyance 
+
+    From Information Reconstructionism theory: measures how readily
+    information transforms from theory to practice. High conveyance
     indicates clear procedural pathways with implementation instructions.
-    
-    In Actor-Network Theory terms, this quantifies the "translation" 
+
+    In Actor-Network Theory terms, this quantifies the "translation"
     potential - how easily knowledge crosses network boundaries.
     """
 ```

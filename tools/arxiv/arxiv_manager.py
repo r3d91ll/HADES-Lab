@@ -28,7 +28,7 @@ from core.workflows.workflow_pdf import (
     ProcessingConfig,
     ProcessingResult
 )
-from core.database.arango_db_manager import ArangoDBManager
+from core.database.arango.arango_client import ArangoDBManager
 
 logger = logging.getLogger(__name__)
 
