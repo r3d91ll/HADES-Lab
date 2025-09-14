@@ -438,6 +438,20 @@ class SentenceTransformersEmbedder(EmbedderBase):
 
         return chunks
 
+    def embed_texts(self, texts: List[str], task: str = "retrieval.passage", batch_size: int = None) -> np.ndarray:
+        """
+        Embed multiple texts (required by base interface).
+
+        Args:
+            texts: List of texts to embed
+            task: Task type
+            batch_size: Batch size for processing
+
+        Returns:
+            2D embedding array
+        """
+        return self.embed_batch(texts, batch_size=batch_size or self.batch_size, task=task)
+
     def embed_single(self, text: str, task: str = "retrieval.passage") -> np.ndarray:
         """
         Embed a single text (required by base interface).

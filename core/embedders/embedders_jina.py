@@ -129,9 +129,9 @@ class JinaV4Embedder(EmbedderBase):
         self.model.eval()
         logger.info("Jina v4 model loaded with late chunking support")
         
-    def embed_texts(self, 
-                    texts: List[str], 
-                    task: str = "retrieval",
+    def embed_texts(self,
+                    texts: List[str],
+                    task: str = "retrieval.passage",
                     batch_size: int = 4) -> np.ndarray:
         """
         Embed texts using Jina v4.
@@ -151,12 +151,28 @@ class JinaV4Embedder(EmbedderBase):
             for i in range(0, len(texts), batch_size):
                 batch = texts[i:i+batch_size]
                 
-                # Use Jina v4's encode_text method
-                embeddings = self.model.encode_text(
-                    texts=batch,
-                    task=task,
-                    batch_size=len(batch)  # Process whole batch at once
-                )
+                # Use Jina's encode method
+                if hasattr(self.model, 'encode'):
+                    # Jina v3/v4 with encode method
+                    embeddings = self.model.encode(
+                        batch,
+                        task=task
+                    )
+                else:
+                    # Fallback to tokenizer + forward pass
+                    inputs = self.tokenizer(
+                        batch,
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True,
+                        max_length=self.MAX_TOKENS
+                    ).to(self.device)
+
+                    with torch.no_grad():
+                        outputs = self.model(**inputs)
+                        # Mean pooling
+                        embeddings = outputs.last_hidden_state.mean(dim=1)
+                        embeddings = embeddings.cpu().numpy()
                 
                 # Debug: Check what type of object we got
                 logger.debug(f"Embeddings type: {type(embeddings)}")
@@ -207,7 +223,7 @@ class JinaV4Embedder(EmbedderBase):
         
         return result
     
-    def embed_single(self, text: str, task: str = "retrieval") -> np.ndarray:
+    def embed_single(self, text: str, task: str = "retrieval.passage") -> np.ndarray:
         """
         Embed a single text (required by EmbedderBase interface).
 
@@ -367,7 +383,7 @@ class JinaV4Embedder(EmbedderBase):
     
     def embed_with_late_chunking(self,
                                  text: str,
-                                 task: str = "retrieval") -> List[ChunkWithEmbedding]:
+                                 task: str = "retrieval.passage") -> List[ChunkWithEmbedding]:
         """
         Context-aware chunking implementation for Jina v4.
         
@@ -394,7 +410,7 @@ class JinaV4Embedder(EmbedderBase):
     
     def embed_batch_with_late_chunking(self,
                                        texts: List[str],
-                                       task: str = "retrieval") -> List[List[ChunkWithEmbedding]]:
+                                       task: str = "retrieval.passage") -> List[List[ChunkWithEmbedding]]:
         """
         Batch version of embed_with_late_chunking for GPU efficiency.
         
@@ -442,11 +458,14 @@ class JinaV4Embedder(EmbedderBase):
             # Call model directly for maximum efficiency
             with torch.no_grad():
                 # Process all context windows in optimal batches
-                context_embeddings = self.model.encode_text(
-                    texts=all_context_windows,
-                    task=task,
-                    batch_size=32  # Larger batch size for better GPU utilization
-                )
+                if hasattr(self.model, 'encode'):
+                    context_embeddings = self.model.encode(
+                        all_context_windows,
+                        task=task
+                    )
+                else:
+                    # Fallback to batch processing
+                    context_embeddings = self.embed_texts(all_context_windows, task=task, batch_size=32)
                 
                 # Convert to numpy if needed
                 if torch.is_tensor(context_embeddings):
@@ -566,7 +585,7 @@ class JinaV4Embedder(EmbedderBase):
     
     def _chunk_with_context_windows(self,
                                     text: str,
-                                    task: str = "retrieval") -> List[ChunkWithEmbedding]:
+                                    task: str = "retrieval.passage") -> List[ChunkWithEmbedding]:
         """
         Create chunks with contextual embeddings using overlapping windows.
         
@@ -595,12 +614,14 @@ class JinaV4Embedder(EmbedderBase):
             # Embed the context window (not just the chunk)
             with torch.no_grad():
                 try:
-                    # Use encode_text which works with Jina v4's actual API
-                    context_embedding = self.model.encode_text(
-                        texts=[context_text],
-                        task=task,
-                        batch_size=1
-                    )
+                    # Use encode method which works with Jina models
+                    if hasattr(self.model, 'encode'):
+                        context_embedding = self.model.encode(
+                            [context_text],
+                            task=task
+                        )
+                    else:
+                        context_embedding = self.embed_texts([context_text], task=task, batch_size=1)
                 except RuntimeError as e:
                     if "out of memory" in str(e).lower():
                         logger.warning(f"OOM on chunk {chunk_index}, clearing cache and retrying")
@@ -610,11 +631,13 @@ class JinaV4Embedder(EmbedderBase):
                         
                         # Try again with cleared cache
                         try:
-                            context_embedding = self.model.encode_text(
-                                texts=[context_text],
-                                task=task,
-                                batch_size=1
-                            )
+                            if hasattr(self.model, 'encode'):
+                                context_embedding = self.model.encode(
+                                    [context_text],
+                                    task=task
+                                )
+                            else:
+                                context_embedding = self.embed_texts([context_text], task=task, batch_size=1)
                         except RuntimeError as e2:
                             if "out of memory" in str(e2).lower():
                                 # Still OOM - try with smaller context
@@ -625,11 +648,13 @@ class JinaV4Embedder(EmbedderBase):
                                 # Use just the chunk without context
                                 smaller_context = chunk_text[:min(len(chunk_text), 8000)]  # Limit to ~2k tokens
                                 try:
-                                    context_embedding = self.model.encode_text(
-                                        texts=[smaller_context],
-                                        task=task,
-                                        batch_size=1
-                                    )
+                                    if hasattr(self.model, 'encode'):
+                                        context_embedding = self.model.encode(
+                                            [smaller_context],
+                                            task=task
+                                        )
+                                    else:
+                                        context_embedding = self.embed_texts([smaller_context], task=task, batch_size=1)
                                 except Exception as e3:
                                     logger.error(f"Failed even with reduced context: {e3}")
                                     # Return zero embedding as last resort
@@ -713,7 +738,7 @@ class JinaV4Embedder(EmbedderBase):
 
     def encode_full_document(self, 
                            text: str, 
-                           task: str = "retrieval") -> Tuple[torch.Tensor, Dict]:
+                           task: str = "retrieval.passage") -> Tuple[torch.Tensor, Dict]:
         """
         Encode a full document to get token-level embeddings (first step of late chunking).
         
@@ -815,17 +840,12 @@ class JinaV4Embedder(EmbedderBase):
             
             # Apply pooling or projection if needed to get to 2048 dims
             # (Jina v4 uses a projection layer for final embeddings)
-            if hasattr(self.model, 'encode_text'):
+            if hasattr(self.model, 'encode'):
                 # Use Jina's projection mechanism
                 # We need to pool to get document embedding first
                 pooled = token_embeddings.mean(dim=0, keepdim=True)
-                # Then project to final dimension
-                final_embedding = self.model.encode_text(
-                    texts=[""],  # Dummy text since we already have embeddings
-                    task=task,
-                    batch_size=1,
-                    token_embeddings=pooled  # Pass pre-computed embeddings if supported
-                )
+                # For now, we'll just use the pooled embeddings directly
+                # since we can't pass pre-computed embeddings to encode
                 # Use this as a reference for projection
             else:
                 # Direct use of token embeddings
@@ -939,7 +959,7 @@ class JinaV4Embedder(EmbedderBase):
     
     def process_long_document(self,
                              text: str,
-                             task: str = "retrieval") -> List[ChunkWithEmbedding]:
+                             task: str = "retrieval.passage") -> List[ChunkWithEmbedding]:
         """
         Process a document that may exceed 32k tokens.
         
