@@ -33,24 +33,35 @@ class DoclingExtractor:
     transforming the document format.
     """
     
-    def __init__(self, use_ocr: bool = False, extract_tables: bool = True, use_fallback: bool = False):
+    def __init__(self, config=None):
         """
         Initialize Docling extractor.
-        
+
         Args:
-            use_ocr: Whether to use OCR for scanned PDFs
-            extract_tables: Whether to extract table structures
-            use_fallback: Whether to use PyMuPDF fallback when Docling fails (default: False for consistency)
+            config: ExtractorConfig object or None for defaults
         """
-        self.use_ocr = use_ocr
-        self.extract_tables = extract_tables
-        self.use_fallback = use_fallback
+        # Handle both old-style params and new config object
+        if config is None:
+            # Default values
+            self.use_ocr = False
+            self.extract_tables = True
+            self.use_fallback = False
+        elif hasattr(config, 'ocr_enabled'):
+            # It's an ExtractorConfig
+            self.use_ocr = config.ocr_enabled
+            self.extract_tables = config.extract_tables
+            self.use_fallback = False
+        else:
+            # Old-style direct params (for backwards compatibility)
+            self.use_ocr = config
+            self.extract_tables = True
+            self.use_fallback = False
         
         if DOCLING_AVAILABLE:
             # Configure pipeline options - Docling v2 doesn't accept None for table_structure_options
-            if extract_tables:
+            if self.extract_tables:
                 self.pipeline_options = PipelineOptions(
-                    do_ocr=use_ocr,
+                    do_ocr=self.use_ocr,
                     do_table_structure=True,
                     table_structure_options=TableStructureOptions(
                         do_cell_matching=True
@@ -58,7 +69,7 @@ class DoclingExtractor:
                 )
             else:
                 self.pipeline_options = PipelineOptions(
-                    do_ocr=use_ocr,
+                    do_ocr=self.use_ocr,
                     do_table_structure=False
                     # Don't include table_structure_options when not extracting tables
                 )
@@ -67,7 +78,7 @@ class DoclingExtractor:
             self.converter = DocumentConverter(
                 pipeline_options=self.pipeline_options
             )
-            logger.info(f"Initialized Docling extractor (OCR: {use_ocr}, Tables: {extract_tables})")
+            logger.info(f"Initialized Docling extractor (OCR: {self.use_ocr}, Tables: {self.extract_tables})")
         else:
             self.converter = None
             logger.warning("Docling not available - using fallback text extraction")

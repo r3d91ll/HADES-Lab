@@ -63,59 +63,36 @@ class JinaV4Embedder(EmbedderBase):
     MAX_TOKENS = 32768  # Jina v4's context window
     EMBEDDING_DIM = 2048
     
-    def __init__(self, 
-                 device: str = None,
-                 use_fp16: bool = None,
-                 chunk_size_tokens: int = None,
-                 chunk_overlap_tokens: int = None,
-                 config_path: str = None):
+    def __init__(self, config=None):
         """
         Initialize Jina v4 embedder with late chunking support.
-        
+
         Args:
-            device: Device to use (cuda/cpu) - overrides config
-            use_fp16: Use half precision for efficiency - overrides config
-            chunk_size_tokens: Size of chunks in tokens - overrides config
-            chunk_overlap_tokens: Overlap between chunks - overrides config
-            config_path: Path to embedder configuration file
+            config: EmbeddingConfig object or dict/None for defaults
         """
-        # Try to load config if path provided or default exists
-        config = {}
-        if config_path:
-            import yaml
-            try:
-                with open(config_path, 'r') as f:
-                    loaded = yaml.safe_load(f)
-                    if not isinstance(loaded, dict):
-                        logger.warning(f"Invalid YAML structure in {config_path}, using defaults")
-                        config = {}
-                    else:
-                        config = loaded.get('embedder', {})
-                        logger.debug(f"Loaded embedder config from {config_path}")
-            except (yaml.YAMLError, IOError) as e:
-                logger.warning(f"Failed to load config {config_path}: {e}, using defaults")
-                config = {}
-        else:
-            # Try default location
-            import os
-            default_config = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'configs', 'embedder.yaml'
-            )
-            if os.path.exists(default_config):
-                import yaml
-                try:
-                    with open(default_config, 'r') as f:
-                        loaded = yaml.safe_load(f)
-                        if not isinstance(loaded, dict):
-                            logger.warning(f"Invalid YAML structure in {default_config}, using defaults")
-                            config = {}
-                        else:
-                            config = loaded.get('embedder', {})
-                            logger.info(f"Loaded embedder config from {default_config}")
-                except (yaml.YAMLError, IOError) as e:
-                    logger.warning(f"Failed to load default config {default_config}: {e}, using defaults")
-                    config = {}
+        # Handle both old-style params and new config object
+        if config is None:
+            config = {}
+        elif hasattr(config, 'device'):
+            # It's an EmbeddingConfig object - extract values
+            old_config = config
+            config = {
+                'device': old_config.device,
+                'use_fp16': old_config.use_fp16,
+                'batch_size': old_config.batch_size,
+                'chunk_size_tokens': 1000,
+                'chunk_overlap_tokens': 200
+            }
+        elif not isinstance(config, dict):
+            # Old-style single param (device)
+            config = {'device': str(config)}
+
+        # Remove config_path handling since we have the config already
+        device = None
+        use_fp16 = None
+        chunk_size_tokens = None
+        chunk_overlap_tokens = None
+        # Config is already processed above, no need to load from file
         
         # Set parameters with config as defaults, overridable by arguments
         self.device = device or config.get('device', 'cuda')
