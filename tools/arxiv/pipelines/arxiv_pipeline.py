@@ -481,7 +481,7 @@ class PhaseManager:
         import torch
         import os
         import logging
-        from core.framework.extractors.docling_extractor import DoclingExtractor
+        from core.extractors.extractors_docling import DoclingExtractor
         
         # Set up logging
         logger = logging.getLogger(__name__)
@@ -520,7 +520,7 @@ class PhaseManager:
         import torch
         import os
         import logging
-        from core.framework.embedders import JinaV4Embedder
+        from core.embedders.embedders_jina import JinaV4Embedder
         # ArangoDBManager is already imported at module level
         
         # Set up logging for worker

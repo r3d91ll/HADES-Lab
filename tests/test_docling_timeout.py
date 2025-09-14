@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def extract_document(pdf_path: str) -> dict:
     """Extract a single document."""
-    from core.framework.extractors.docling_extractor import DoclingExtractor
+    from core.extractors import DoclingExtractor
     
     try:
         extractor = DoclingExtractor(

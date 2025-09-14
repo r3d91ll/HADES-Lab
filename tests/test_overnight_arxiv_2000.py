@@ -38,7 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import our processors
-from core.processors.document_processor import (
+from core.workflows.workflow_pdf import (
     DocumentProcessor,
     ProcessingConfig,
     ProcessingResult

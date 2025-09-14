@@ -1,0 +1,116 @@
+# CodeRabbit Configuration (HADES — Conveyance-aligned)
+# Enables CodeRabbit to review PRs on all branches, not just main
+
+# Review triggers
+reviews:
+  auto_review:
+    enabled: true
+    # Review PRs targeting any branch (not just default)
+    base_branches:
+      - "^main$"
+      - "^feature/.*$"
+      - "^develop$"
+      - "^release/.*$"
+      - "^hotfix/.*$"
+
+    # Skip drafts (false => do review drafts)
+    drafts: false
+
+  # Review settings
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  # Tools and checks
+  tools:
+    ruff:
+      enabled: true
+    markdownlint:
+      enabled: true
+    languagetool:
+      enabled: false
+    shellcheck:
+      enabled: true
+    yamllint:
+      enabled: true
+
+  # Path filters - review all files by default, with exclusions
+  path_filters:
+    - "**/*"                    # Review all files
+    - "!**/node_modules/**"
+    - "!**/__pycache__/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/.mypy_cache/**"
+    - "!**/venv/**"
+    - "!**/.venv/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/*.pyc"
+    - "!**/*.pyo"
+    - "!**/*.egg-info/**"
+    - "!**/Acheron/**"         # Our deprecated code archive
+
+  # Path-specific instructions - apply to all paths
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        # HADES — Conveyance Framework (Efficiency view default)
+
+        ## CRITICAL: Correct Formula
+        C = (W · R · H / T) · Ctx^α
+
+        NOT "WHERE × WHAT × CONVEYANCE × TIME" (this is WRONG)
+
+        - W = What (signal/content quality)
+        - R = Where (relational/topological positioning)
+        - H = Who (agent/capability leverage)
+        - T = Time to converge (DIVIDES, not multiplies!)
+        - Ctx = wL·L + wI·I + wA·A + wG·G (weights default 0.25)
+        - α ∈ [1.5, 2.0], default 1.7, applies ONLY to Ctx
+
+        ## Red flags to request changes:
+        - TIME multiplied rather than divided (look for "× TIME")
+        - "CONVEYANCE" used as an input factor (C is the outcome, not input)
+        - Missing WHO (H) in the efficiency equation
+        - α applied to anything other than Ctx
+        - Evidence of double-counting time
+
+        ## Review Focus Areas
+
+        1. **Todd's 3 Laws**:
+           - Data is sacrosanct: validate inputs, no silent data loss
+           - Reliability: controlled failure modes
+           - Ownership: comprehensive logging
+
+        2. **Factory patterns & interfaces** (H, R)
+        3. **Backward compatibility** (R, T)
+        4. **Performance evidence** (T, W)
+        5. **Observability** (H, T)
+        6. **Security** (W, R)
+
+        ## Conveyance Scorecard Output
+        - Time stance: Efficiency (default) or Capability (if T fixed)
+        - W/R/H/T summary
+        - L/I/A/G scores (each in [0,1])
+        - α value (default 1.7)
+        - Zero-propagation check
+        - Evidence links
+
+  # Pre-merge checks for PR descriptions
+  pre_merge_checks:
+    custom_checks:
+      - name: "PR description sections"
+        mode: "warning"
+        instructions: |
+          Verify PR description contains:
+          - Conveyance Summary
+          - W/R/H/T Mapping
+          - Performance Evidence
+          - Tests & Compatibility
+
+# Chat settings
+chat:
+  auto_reply: true
