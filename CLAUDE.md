@@ -92,6 +92,39 @@ For each run/condition:
 
 **All analyses, critiques, and designs must conform to this framework and explicitly state which view (efficiency vs capability) is used and why.**
 
+## 🚨 CRITICAL: Late Chunking Principle
+
+**MANDATORY**: All text chunking MUST use late chunking. Never use naive chunking.
+
+### Why Late Chunking is Required
+
+From the Conveyance Framework: **C = (W·R·H/T)·Ctx^α**
+
+- **Naive chunking** breaks context awareness → Ctx approaches 0 → **C = 0** (zero-propagation)
+- **Late chunking** preserves full document context → Ctx remains high → **C is maximized**
+
+### Implementation Requirements
+
+1. **Process full text first**: Always tokenize and encode the complete document (up to model limits)
+2. **Then chunk with context**: Create chunks from the contextualized representation
+3. **Never chunk before encoding**: This loses critical semantic relationships
+
+```python
+# ❌ WRONG - Naive chunking (forbidden)
+chunks = split_text(document, chunk_size=512)
+embeddings = [embed(chunk) for chunk in chunks]  # Each chunk lacks context
+
+# ✅ CORRECT - Late chunking (mandatory)
+full_encoding = encode_full_document(document)  # Process entire document
+chunks = create_chunks_with_context(full_encoding, chunk_size=512)  # Context-aware chunks
+```
+
+### Embedder Selection
+
+- **High throughput (48+ papers/sec)**: Use `SentenceTransformersEmbedder`
+- **Sophisticated processing**: Use `JinaV4Embedder` (transformers)
+- **Both MUST use late chunking**: This is non-negotiable
+
 ## 🚨 CRITICAL: Development Cycle
 
 **ALWAYS follow this development cycle for new features:**
