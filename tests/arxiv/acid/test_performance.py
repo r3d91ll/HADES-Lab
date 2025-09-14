@@ -26,7 +26,7 @@ import yaml
 import numpy as np
 
 # Import the ACID processor
-from tools.arxiv.arxiv_pipeline import ACIDPhasedPipeline
+from core.tools.arxiv.arxiv_pipeline import ACIDPhasedPipeline
 from core.database.arango.arango_client import ArangoDBManager
 
 def load_config() -> Dict[str, Any]:

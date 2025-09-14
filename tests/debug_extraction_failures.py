@@ -15,7 +15,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from tools.arxiv.arxiv_document_manager import ArXivDocumentManager
+from core.tools.arxiv.arxiv_document_manager import ArXivDocumentManager
 from core.processors.generic_document_processor import GenericDocumentProcessor
 import yaml
 

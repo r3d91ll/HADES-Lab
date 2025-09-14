@@ -386,7 +386,7 @@ from core.framework.extractors import DoclingExtractor
 from core.framework.storage import ArangoStorage
 
 # From tools (when in experiments/ or other tools/)
-from tools.arxiv.pipelines.arxiv_pipeline import AcidPipeline
+from core.tools.arxiv.pipelines.arxiv_pipeline import AcidPipeline
 
 # Within same module
 from .utils import helper_function

@@ -19,11 +19,11 @@ from unittest.mock import Mock, patch
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from tools.arxiv.pipelines.arango_acid_processor import ArangoACIDProcessor, ProcessingResult
-from tools.arxiv.pipelines.worker_pool import ProcessingWorkerPool as ArangoWorkerPool
-from tools.arxiv.utils.on_demand_processor import OnDemandProcessor
-from tools.arxiv.monitoring.acid_monitoring import ArangoMonitor
-from tools.arxiv.utils.migration_strategy import MigrationStrategy
+from core.tools.arxiv.pipelines.arango_acid_processor import ArangoACIDProcessor, ProcessingResult
+from core.tools.arxiv.pipelines.worker_pool import ProcessingWorkerPool as ArangoWorkerPool
+from core.tools.arxiv.utils.on_demand_processor import OnDemandProcessor
+from core.tools.arxiv.monitoring.acid_monitoring import ArangoMonitor
+from core.tools.arxiv.utils.migration_strategy import MigrationStrategy
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

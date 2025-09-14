@@ -21,6 +21,11 @@ try:
 except ImportError:
     pass
 
+try:
+    from .workflow_arxiv_metadata import ArxivMetadataWorkflow
+except ImportError:
+    pass
+
 # State management
 from .state import StateManager, CheckpointManager
 
@@ -33,4 +38,5 @@ __all__ = [
     'CheckpointManager',
     'PDFWorkflow',
     'BatchPDFWorkflow',
+    'ArxivMetadataWorkflow',
 ]

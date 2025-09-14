@@ -17,8 +17,8 @@ else:
     # Fallback path handling
     sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from tools.arxiv.utils.on_demand_processor import OnDemandProcessor
-from tools.arxiv.monitoring.acid_monitoring import ArangoMonitor
+from core.tools.arxiv.utils.on_demand_processor import OnDemandProcessor
+from core.tools.arxiv.monitoring.acid_monitoring import ArangoMonitor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
