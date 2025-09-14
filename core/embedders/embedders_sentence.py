@@ -81,7 +81,7 @@ class SentenceTransformersEmbedder(EmbedderBase):
             }
 
         # Set parameters
-        self.model_name = config.get('model_name', 'jinaai/jina-embeddings-v3')
+        self.model_name = config.get('model_name', 'jinaai/jina-embeddings-v4')  # Default to v4
         self.device = config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         self.batch_size = config.get('batch_size', 128)  # High batch size for throughput
         self.chunk_size_tokens = config.get('chunk_size_tokens', 512)
@@ -170,24 +170,23 @@ class SentenceTransformersEmbedder(EmbedderBase):
         # Add task-specific parameters for Jina models
         if 'jina' in self.model_name.lower():
             # Map task to Jina format
+            # Jina v4 with sentence-transformers uses: retrieval, text-matching, code
             task_mapping = {
-                'retrieval': 'retrieval.passage',
-                'retrieval.passage': 'retrieval.passage',
-                'retrieval.query': 'retrieval.query',
+                'retrieval': 'retrieval',
+                'retrieval.passage': 'retrieval',
+                'retrieval.query': 'retrieval',
                 'text-matching': 'text-matching',
-                'classification': 'classification',
-                'separation': 'separation',
-                'code': 'text-matching'
+                'classification': 'text-matching',  # Use text-matching as fallback
+                'separation': 'text-matching',
+                'code': 'code'
             }
 
-            mapped_task = task_mapping.get(task, 'retrieval.passage')
+            mapped_task = task_mapping.get(task, 'retrieval')
 
-            # For Jina v3+, we can pass task and prompt_name
-            if hasattr(self.model[0], 'encode'):
-                # Access the underlying Jina model
-                encode_kwargs['task'] = mapped_task
-                if prompt_name:
-                    encode_kwargs['prompt_name'] = prompt_name
+            # For Jina v4 with sentence-transformers 4.1.0
+            encode_kwargs['task'] = mapped_task
+            if prompt_name:
+                encode_kwargs['prompt_name'] = prompt_name
 
         logger.debug(f"Encoding {len(texts)} texts with batch_size={batch_size}")
 
