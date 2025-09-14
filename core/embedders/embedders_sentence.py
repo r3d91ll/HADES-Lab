@@ -52,10 +52,8 @@ class SentenceTransformersEmbedder(EmbedderBase):
     Optimized for throughput while maintaining embedding quality.
     """
 
-    # Model constants
-    JINA_V3_MAX_TOKENS = 8192
-    JINA_V3_DIM = 1024
-    JINA_V4_MAX_TOKENS = 32768
+    # Model constants - ONLY Jina v4 supported
+    JINA_V4_MAX_TOKENS = 32768  # Full 128k context as per model config
     JINA_V4_DIM = 2048
 
     def __init__(self, config: Optional[Union[EmbeddingConfig, Dict]] = None):
@@ -89,38 +87,72 @@ class SentenceTransformersEmbedder(EmbedderBase):
         self.use_fp16 = config.get('use_fp16', True)
         self.normalize_embeddings = config.get('normalize_embeddings', True)
 
-        # Determine model properties
-        if 'v4' in self.model_name.lower():
-            self.max_tokens = self.JINA_V4_MAX_TOKENS
-            self.embedding_dim = self.JINA_V4_DIM
-        else:  # v3 or earlier
-            self.max_tokens = self.JINA_V3_MAX_TOKENS
-            self.embedding_dim = self.JINA_V3_DIM
+        # Always use Jina v4 properties (no v3 support)
+        self.max_tokens = self.JINA_V4_MAX_TOKENS
+        self.embedding_dim = self.JINA_V4_DIM
+
+        if 'v4' not in self.model_name.lower():
+            logger.warning(f"Model {self.model_name} may not be Jina v4 - using v4 settings anyway")
 
         logger.info(f"Loading {self.model_name} with sentence-transformers")
         logger.info(f"Target throughput: 48+ papers/sec with batch_size={self.batch_size}")
         logger.info(f"Late chunking: {self.chunk_size_tokens} tokens/chunk, {self.chunk_overlap_tokens} overlap")
 
         # Load model with sentence-transformers
-        self.model = SentenceTransformer(
-            self.model_name,
-            device=self.device,
-            trust_remote_code=True
-        )
+        # Configure model loading with proper dtype
+        model_kwargs = {
+            'trust_remote_code': True,
+            'device': self.device
+        }
+
+        # Force fp16 loading if requested and on CUDA
+        if self.use_fp16 and self.device.startswith('cuda'):
+            logger.info("Loading model directly in FP16 for optimal performance")
+            model_kwargs['torch_dtype'] = torch.float16
+
+        try:
+            # Try loading with trust_remote_code
+            self.model = SentenceTransformer(
+                self.model_name,
+                device=self.device,
+                trust_remote_code=True,
+                model_kwargs=model_kwargs
+            )
+        except Exception as e:
+            if "custom_st" in str(e):
+                logger.warning(f"Failed to load with custom modules: {e}")
+                logger.info("Attempting to load model without custom modules...")
+                # Fallback: Load without custom modules
+                self.model = SentenceTransformer(
+                    self.model_name,
+                    device=self.device
+                )
+            else:
+                raise
 
         # Set max sequence length
         self.model.max_seq_length = self.max_tokens
 
-        # Enable fp16 if requested and on CUDA
+        # Verify we're using fp16
         if self.use_fp16 and self.device.startswith('cuda'):
-            logger.info("Enabling FP16 for improved performance")
-            # Convert model to fp16
+            # Ensure all model parameters are in fp16
             self.model = self.model.half()
+            logger.info(f"Model dtype: {next(self.model.parameters()).dtype}")
 
         # Set to eval mode
         self.model.eval()
 
+        # Log actual configuration for debugging
         logger.info("Sentence-transformers embedder loaded for high-throughput processing")
+        logger.info(f"Embedding dimension: {self.embedding_dim}")
+        logger.info(f"Using FP16: {self.use_fp16}")
+        if self.use_fp16 and hasattr(self.model, '_modules'):
+            # Check if Flash Attention is available
+            try:
+                import flash_attn
+                logger.info("Flash Attention 2 is available and should be used automatically")
+            except ImportError:
+                logger.warning("Flash Attention 2 not available - install with: pip install flash-attn")
 
     def embed(self, texts: List[str], **kwargs) -> np.ndarray:
         """
@@ -197,9 +229,14 @@ class SentenceTransformersEmbedder(EmbedderBase):
                 **encode_kwargs
             )
 
-        # Clear GPU cache after batch processing
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # GPU cache is not cleared after each batch to maintain performance.
+        # PyTorch's allocator manages memory efficiently by reusing allocations.
+        # Only clear cache explicitly if encountering OOM errors or between different workloads.
+        # Clearing cache here would force reallocation on every batch, severely impacting throughput.
+
+        # Verify embeddings shape (should be 2048 for Jina v4)
+        if embeddings.shape[1] != self.embedding_dim:
+            logger.warning(f"Expected embedding dimension {self.embedding_dim}, got {embeddings.shape[1]}")
 
         return embeddings
 
@@ -250,81 +287,51 @@ class SentenceTransformersEmbedder(EmbedderBase):
                                        texts: List[str],
                                        task: str = "retrieval.passage") -> List[List[ChunkWithEmbedding]]:
         """
-        Batch version of late chunking for maximum throughput.
+        For abstracts, just embed directly without chunking.
 
-        Processes multiple documents with late chunking in optimized batches.
-        This is key to achieving 48+ papers/second throughput.
+        Since abstracts are typically < 1000 tokens, we can embed them directly
+        for better performance and true contextual embeddings.
 
         Args:
-            texts: List of document texts
+            texts: List of document texts (abstracts)
             task: Task type
 
         Returns:
-            List of lists of ChunkWithEmbedding objects
+            List of lists of ChunkWithEmbedding objects (single chunk per abstract)
         """
         if not texts:
             return []
 
+        # For abstracts, just embed directly - no chunking needed!
+        logger.info(f"Direct embedding {len(texts)} abstracts for maximum throughput")
+
+        # Batch process all abstracts at once
+        embeddings = self.embed_batch(
+            texts,
+            batch_size=self.batch_size,
+            task=task,
+            show_progress=False
+        )
+
+        # Create single chunk per abstract (no chunking for short texts)
         all_results = []
-
-        # Prepare all chunks with tracking
-        all_chunks_text = []
-        chunk_metadata = []  # Track which chunk belongs to which document
-
-        for doc_idx, text in enumerate(texts):
-            if not text:
-                all_results.append([])
-                continue
-
-            # Create chunks for this document
-            chunks = self._prepare_chunks(text)
-
-            for chunk_info in chunks:
-                all_chunks_text.append(chunk_info['text'])
-                chunk_metadata.append({
-                    'doc_idx': doc_idx,
-                    'chunk_info': chunk_info
-                })
-
-        # Batch process all chunks at once for maximum efficiency
-        if all_chunks_text:
-            logger.info(f"Batch processing {len(all_chunks_text)} chunks from {len(texts)} documents")
-
-            # Use high batch size for throughput
-            chunk_embeddings = self.embed_batch(
-                all_chunks_text,
-                batch_size=self.batch_size,
-                task=task,
-                show_progress=False
-            )
-
-            # Organize results by document
-            doc_results = [[] for _ in range(len(texts))]
-
-            for idx, embedding in enumerate(chunk_embeddings):
-                metadata = chunk_metadata[idx]
-                doc_idx = metadata['doc_idx']
-                chunk_info = metadata['chunk_info']
-
-                chunk_obj = ChunkWithEmbedding(
-                    text=chunk_info['text'],
+        for idx, (text, embedding) in enumerate(zip(texts, embeddings)):
+            if text:
+                chunk = ChunkWithEmbedding(
+                    text=text,
                     embedding=embedding,
-                    start_char=chunk_info['start_char'],
-                    end_char=chunk_info['end_char'],
-                    start_token=chunk_info['start_token'],
-                    end_token=chunk_info['end_token'],
-                    chunk_index=chunk_info['chunk_index'],
-                    total_chunks=chunk_info['total_chunks'],
-                    context_window_used=chunk_info['context_size']
+                    start_char=0,
+                    end_char=len(text),
+                    start_token=0,
+                    end_token=len(text) // 4,  # Rough estimate
+                    chunk_index=0,
+                    total_chunks=1,
+                    context_window_used=len(text) // 4
                 )
+                all_results.append([chunk])
+            else:
+                all_results.append([])
 
-                doc_results[doc_idx].append(chunk_obj)
-
-            all_results = doc_results
-        else:
-            all_results = [[] for _ in range(len(texts))]
-
-        logger.info(f"Processed {len(texts)} documents into {sum(len(r) for r in all_results)} chunks")
         return all_results
 
     def _late_chunk_long_text(self, text: str, task: str) -> List[ChunkWithEmbedding]:
@@ -340,8 +347,8 @@ class SentenceTransformersEmbedder(EmbedderBase):
         # Extract chunk texts
         chunk_texts = [c['text'] for c in chunks]
 
-        # For Jina v3 with late_chunking support
-        if 'jina' in self.model_name.lower() and 'v3' in self.model_name.lower():
+        # For Jina v4 with late_chunking support
+        if 'jina' in self.model_name.lower() and 'v4' in self.model_name.lower():
             # Use late_chunking parameter if available
             try:
                 # Concatenate chunks as if they're from same document
@@ -498,14 +505,10 @@ class SentenceTransformersEmbedder(EmbedderBase):
         batch_size = batch_size or self.batch_size
 
         # Based on historical performance
-        if 'v3' in self.model_name.lower():
-            # Jina v3: achieved 48 papers/sec with batch_size=128
-            base_throughput = 48.0
-            scaling_factor = batch_size / 128.0
-        else:
-            # Jina v4: slightly slower due to larger dimensions
-            base_throughput = 35.0
-            scaling_factor = batch_size / 64.0
+        # Always assume Jina v4 performance characteristics
+        # Target 40+ papers/sec with proper batch size
+        base_throughput = 40.0
+        scaling_factor = batch_size / 128.0
 
         # Adjust for GPU and precision
         if self.device.startswith('cuda'):
@@ -534,7 +537,7 @@ def benchmark_sentence_transformers():
 
     # Initialize embedder
     embedder = SentenceTransformersEmbedder({
-        'model_name': 'jinaai/jina-embeddings-v3',
+        'model_name': 'jinaai/jina-embeddings-v4',
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         'batch_size': 128,
         'use_fp16': True

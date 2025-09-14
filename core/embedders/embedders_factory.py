@@ -102,9 +102,9 @@ class EmbedderFactory:
         elif "transformers" in model_lower:
             return "jina"  # Uses transformers library
         elif "jina" in model_lower:
-            # Default to sentence-transformers for performance
-            # Can override with "jina-transformers" for transformers version
-            return "sentence"
+            # Jina v4 requires transformers backend due to custom modules
+            # sentence-transformers can't load it properly
+            return "jina"
         elif "openai" in model_lower or "text-embedding" in model_lower:
             return "openai"
         elif "cohere" in model_lower:

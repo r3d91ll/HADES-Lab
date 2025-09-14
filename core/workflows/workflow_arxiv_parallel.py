@@ -62,6 +62,7 @@ def worker_process_with_gpu(config, input_queue, output_queue, stop_event, gpu_i
     from core.embedders.embedders_factory import EmbedderFactory
     from core.logging.logging import LogManager
     from queue import Empty
+    import time
 
     # Setup structured logging
     worker_logger = LogManager.get_logger(
@@ -83,9 +84,9 @@ def worker_process_with_gpu(config, input_queue, output_queue, stop_event, gpu_i
         embedder_config = {
             'device': 'cuda:0',  # Always cuda:0 since we isolated the GPU
             'use_fp16': config.use_fp16,
-            'batch_size': config.batch_size,
-            'chunk_size_tokens': 512,
-            'chunk_overlap_tokens': 128
+            'batch_size': config.embedding_batch_size,  # Use embedding batch size (128), not record batch size (1000)!
+            'chunk_size_tokens': 500,  # Match the JinaV4Embedder settings
+            'chunk_overlap_tokens': 200
         }
 
         embedder = EmbedderFactory.create(
@@ -128,10 +129,14 @@ def worker_process_with_gpu(config, input_queue, output_queue, stop_event, gpu_i
 
                 if abstracts_to_embed:
                     # Use the working method from single-GPU workflow
+                    worker_logger.info(f"Worker {config.worker_id}: Processing {len(abstracts_to_embed)} abstracts")
+                    start_embed = time.time()
                     all_chunks = embedder.embed_batch_with_late_chunking(
                         abstracts_to_embed,
                         task="retrieval.passage"
                     )
+                    embed_time = time.time() - start_embed
+                    worker_logger.info(f"Worker {config.worker_id}: Embedded in {embed_time:.2f}s = {len(abstracts_to_embed)/embed_time:.1f} docs/sec")
 
                     # Package results
                     for record, record_chunks in zip(records_with_abstracts, all_chunks):
@@ -187,6 +192,7 @@ class WorkerConfig:
     worker_id: int
     gpu_device: str
     batch_size: int
+    embedding_batch_size: int
     model_name: str
     use_fp16: bool
 
@@ -246,9 +252,9 @@ class EmbeddingWorker(mp.Process):
             embedder_config = {
                 'device': 'cuda:0',  # Always use cuda:0 since we set CUDA_VISIBLE_DEVICES
                 'use_fp16': self.config.use_fp16,
-                'batch_size': self.config.batch_size,
-                'chunk_size_tokens': 512,
-                'chunk_overlap_tokens': 128
+                'batch_size': self.config.embedding_batch_size,  # Use embedding batch size, not record batch size!
+                'chunk_size_tokens': 500,  # Match JinaV4Embedder default
+                'chunk_overlap_tokens': 200  # Match JinaV4Embedder default
                 # Late chunking is implemented in the embedder itself
             }
 
@@ -516,7 +522,8 @@ class ArxivParallelWorkflow(WorkflowBase):
             worker_configs.append(WorkerConfig(
                 worker_id=i,
                 gpu_device=gpu_device,
-                batch_size=self.metadata_config.embedding_batch_size,
+                batch_size=self.metadata_config.batch_size,
+                embedding_batch_size=self.metadata_config.embedding_batch_size,
                 model_name=self.metadata_config.embedder_model,
                 use_fp16=self.metadata_config.use_fp16
             ))

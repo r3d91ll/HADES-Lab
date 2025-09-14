@@ -43,10 +43,10 @@ class ArxivMetadataConfig(BaseConfig):
         description="Records per batch for processing"
     )
     embedding_batch_size: int = Field(
-        default=32,  # Reduced from 128 to prevent OOM
+        default=128,  # Optimal for A6000 GPUs
         ge=1,
-        le=128,  # Reduced max from 512
-        description="Batch size for embedder (reduced to prevent OOM)"
+        le=512,  # Allow higher batch sizes for better throughput
+        description="Batch size for embedder (adjust based on GPU memory)"
     )
     num_workers: int = Field(
         default=2,
