@@ -162,7 +162,8 @@ class JinaV4Embedder(EmbedderBase):
         all_embeddings = []
         batch_size = batch_size or self.batch_size
 
-        logger.info(f"Processing {len(texts)} texts with batch_size={batch_size}")
+        # Commented out for performance - this was logging 30+ times per second
+        # logger.info(f"Processing {len(texts)} texts with batch_size={batch_size}")
 
         with torch.no_grad():
             # Process in batches
@@ -172,7 +173,7 @@ class JinaV4Embedder(EmbedderBase):
                 # Use Jina's encode method if available
                 if hasattr(self.model, 'encode'):
                     # Jina v4 with encode method
-                    logger.debug(f"Using model.encode for batch of {len(batch)} texts")
+                    # logger.debug(f"Using model.encode for batch of {len(batch)} texts")
                     # Jina v4 uses 'retrieval' not 'retrieval.passage'
                     jina_task = 'retrieval' if 'retrieval' in task else task
                     embeddings = self.model.encode(
@@ -181,7 +182,7 @@ class JinaV4Embedder(EmbedderBase):
                     )
                 else:
                     # Jina v4 requires task_label when using forward pass
-                    logger.debug(f"Using forward pass with task_label for batch of {len(batch)} texts")
+                    # logger.debug(f"Using forward pass with task_label for batch of {len(batch)} texts")
                     # Map task to the correct LoRA adapter name
                     # Jina v4 uses: 'retrieval', 'retrieval.query', 'text-matching', 'classification', 'separation'
                     task_mapping = {
@@ -223,7 +224,7 @@ class JinaV4Embedder(EmbedderBase):
                             embeddings = embeddings.numpy()
                 
                 # Debug: Check what type of object we got
-                logger.debug(f"Embeddings type: {type(embeddings)}")
+                # logger.debug(f"Embeddings type: {type(embeddings)}")
                 
                 # Handle different return types - prioritize torch.is_tensor check
                 if torch.is_tensor(embeddings):
@@ -261,10 +262,12 @@ class JinaV4Embedder(EmbedderBase):
                         raise
                     
                 all_embeddings.append(embeddings)
-                
-                # Explicitly clear GPU memory after each batch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+
+                # DO NOT clear GPU cache after each batch - this kills performance!
+                # PyTorch's allocator efficiently reuses memory.
+                # Only clear cache if encountering OOM errors.
+                # if torch.cuda.is_available():
+                #     torch.cuda.empty_cache()
         
         # Concatenate all batches
         result = np.vstack(all_embeddings) if all_embeddings else np.empty((0, 2048))
@@ -533,7 +536,7 @@ class JinaV4Embedder(EmbedderBase):
         
         # Batch process all context windows at once
         if all_context_windows:
-            logger.info(f"Batch processing {len(all_context_windows)} context windows from {len(texts)} documents")
+            # logger.info(f"Batch processing {len(all_context_windows)} context windows from {len(texts)} documents")
             
             # Call model directly for maximum efficiency
             with torch.no_grad():
@@ -573,7 +576,7 @@ class JinaV4Embedder(EmbedderBase):
                     else:
                         context_embeddings = np.array(context_embeddings)
                     
-                logger.info(f"Generated embeddings shape: {context_embeddings.shape}")
+                # logger.info(f"Generated embeddings shape: {context_embeddings.shape}")
             
             # Organize results back by document
             doc_results = [[] for _ in range(len(texts))]
@@ -608,8 +611,8 @@ class JinaV4Embedder(EmbedderBase):
             # No valid texts
             all_results = [[] for _ in range(len(texts))]
         
-        logger.info(f"Batch late chunking complete: processed {len(texts)} documents, "
-                   f"generated {sum(len(doc) for doc in all_results)} total chunks")
+        # logger.info(f"Batch late chunking complete: processed {len(texts)} documents, "
+        #            f"generated {sum(len(doc) for doc in all_results)} total chunks")
         
         return all_results
     

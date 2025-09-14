@@ -865,7 +865,7 @@ class ArxivParallelWorkflow(WorkflowBase):
             self._initialize_components()
 
             # Start monitoring
-            self.performance_monitor.start_monitoring()
+            #self.performance_monitor.start_monitoring()
 
             # Process metadata file
             self._process_metadata_file()
@@ -881,7 +881,7 @@ class ArxivParallelWorkflow(WorkflowBase):
                 self.storage_thread.join()
 
             # Stop monitoring
-            self.performance_monitor.stop_monitoring()
+            #self.performance_monitor.stop_monitoring()
 
             # Calculate final metrics
             end_time = datetime.now()
