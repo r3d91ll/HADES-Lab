@@ -494,8 +494,8 @@ class ArxivParallelWorkflow(WorkflowBase):
 
         # Initialize queues using spawn context for inter-process communication
         ctx = mp.get_context('spawn')
-        self.input_queue = ctx.Queue(maxsize=100)  # Limit queue size to control memory
-        self.output_queue = ctx.Queue(maxsize=100)
+        self.input_queue = ctx.Queue(maxsize=500)  # Limit queue size to control memory
+        self.output_queue = ctx.Queue(maxsize=500)
         self.stop_event = ctx.Event()
 
         # Determine number of workers and GPU assignment
@@ -586,7 +586,7 @@ class ArxivParallelWorkflow(WorkflowBase):
         logger.info("Storage worker started")
 
         batch_buffer = []
-        batch_size = 100  # Store in batches for efficiency
+        batch_size = 500  # Store in batches for efficiency
 
         while not self.stop_event.is_set() or not self.output_queue.empty():
             try:
@@ -600,11 +600,13 @@ class ArxivParallelWorkflow(WorkflowBase):
                 # Add to batch buffer
                 batch_buffer.extend(result['results'])
 
-                # Update embedding generation progress
-                self.progress_tracker.update_step(
-                    "embedding_generation",
-                    completed=len(result['results'])
-                )
+                # Update embedding generation progress less frequently
+                # Accumulate counts and update in batches
+                if len(batch_buffer) % 500 == 0:  # Every 500 items
+                    self.progress_tracker.update_step(
+                        "embedding_generation",
+                        completed=500  # Update in chunks
+                    )
 
                 # Store when batch is full
                 if len(batch_buffer) >= batch_size:
@@ -728,14 +730,17 @@ class ArxivParallelWorkflow(WorkflowBase):
             # Update counters
             self.processed_count += len(batch)
 
-            # Update progress tracker
-            self.progress_tracker.update_step(
-                "database_storage",
-                completed=len(batch)
-            )
+            # Update progress tracker less frequently for better performance
+            # Only update for larger batches to reduce overhead
+            if len(batch) >= 100:
+                self.progress_tracker.update_step(
+                    "database_storage",
+                    completed=len(batch)
+                )
 
-            # Log progress
-            if self.processed_count % self.metadata_config.monitor_interval == 0:
+            # Log progress less frequently to reduce I/O overhead
+            # Changed from 100 to 1000 for better performance
+            if self.processed_count % 1000 == 0:
                 elapsed = (datetime.now() - self.start_time).total_seconds()
                 throughput = self.processed_count / elapsed
                 logger.info(
@@ -795,17 +800,20 @@ class ArxivParallelWorkflow(WorkflowBase):
                         self.input_queue.put(batch)
                         batches_queued += 1
 
-                        # Update metadata loading progress
-                        self.progress_tracker.update_step(
-                            "metadata_loading",
-                            completed=len(batch)
-                        )
+                        # Update metadata loading progress less frequently
+                        if batches_queued % 10 == 0:
+                            self.progress_tracker.update_step(
+                                "metadata_loading",
+                                completed=len(batch) * 10  # Account for batches since last update
+                            )
 
-                        self.logger.info("batch_queued",
-                            batch_number=batches_queued,
-                            batch_size=len(batch),
-                            queue_size=self.input_queue.qsize() if hasattr(self.input_queue, 'qsize') else 'unknown'
-                        )
+                        # Only log every 10th batch to reduce I/O
+                        if batches_queued % 10 == 0:
+                            self.logger.info("batch_queued",
+                                batch_number=batches_queued,
+                                batch_size=len(batch),
+                                queue_size=self.input_queue.qsize() if hasattr(self.input_queue, 'qsize') else 'unknown'
+                            )
 
                         batch = []
 

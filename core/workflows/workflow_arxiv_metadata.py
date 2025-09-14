@@ -584,8 +584,8 @@ def test_workflow():
 
     # Configure for testing
     config = ArxivMetadataConfig(
-        max_records=1000,  # Test with 1000 records
-        batch_size=100,
+        #max_records=1000,  # Test with 1000 records
+        batch_size=1000,
         checkpoint_interval=500,
         drop_collections=True  # Clean start for testing
     )

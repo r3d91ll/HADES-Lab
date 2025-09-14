@@ -480,7 +480,7 @@ class JinaV4Embedder(EmbedderBase):
         # BUT we still process them with full document context (late chunking principle)
         max_tokens_estimate = max((len(text) // 4 for text in texts if text), default=0)
         if max_tokens_estimate <= self.chunk_size_tokens:
-            logger.info(f"Fast path: Processing {len(texts)} texts directly (max ~{max_tokens_estimate} tokens, batch_size={self.batch_size})")
+            #logger.info(f"Fast path: Processing {len(texts)} texts directly (max ~{max_tokens_estimate} tokens, batch_size={self.batch_size})")
 
             # Process with full document context - this IS late chunking
             # Each document is processed in its entirety, maintaining full context
