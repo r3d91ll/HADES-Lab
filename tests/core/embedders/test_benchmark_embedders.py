@@ -20,8 +20,8 @@ from datetime import datetime
 import psutil
 import GPUtil
 
-from embedders_sentence import SentenceTransformersEmbedder
-from embedders_jina import JinaV4Embedder
+from core.embedders.embedders_sentence import SentenceTransformersEmbedder
+from core.embedders.embedders_jina import JinaV4Embedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

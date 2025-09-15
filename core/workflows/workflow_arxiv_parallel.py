@@ -22,6 +22,7 @@ Optimizes C = (W·R·H/T)·Ctx^α by:
 import os
 import json
 import logging
+import time
 import multiprocessing as mp
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
@@ -428,6 +429,7 @@ class ArxivParallelWorkflow(WorkflowBase):
         # Counters
         self.processed_count = 0
         self.failed_count = 0
+        self.skipped_count = 0  # Track skipped records when resuming
         self.start_time = None
 
         # Database connection
@@ -625,6 +627,44 @@ class ArxivParallelWorkflow(WorkflowBase):
 
         logger.info("Storage worker finished")
 
+    def _load_existing_ids(self) -> set:
+        """
+        Load all existing arxiv_ids from database for resume functionality.
+
+        Returns:
+            Set of arxiv_ids that already have embeddings
+        """
+        if not self.metadata_config.resume_from_checkpoint:
+            return set()
+
+        self.logger.info("loading_existing_ids_for_resume")
+        start_time = time.time()
+
+        try:
+            # Query all existing IDs from the embeddings collection
+            cursor = self.db.aql.execute('''
+                FOR doc IN arxiv_abstract_embeddings
+                    RETURN doc.arxiv_id
+            ''', ttl=300, batch_size=10000)  # 5 minute timeout, large batch size
+
+            # Convert to set for O(1) lookups
+            existing_ids = set(cursor)
+
+            elapsed = time.time() - start_time
+            self.logger.info("existing_ids_loaded",
+                count=len(existing_ids),
+                elapsed_seconds=elapsed,
+                memory_mb=len(existing_ids) * 50 / 1024 / 1024  # Rough estimate
+            )
+
+            return existing_ids
+
+        except Exception as e:
+            self.logger.error("failed_to_load_existing_ids", error=str(e))
+            # If we can't load existing IDs, safer to process everything
+            # rather than risk skipping records incorrectly
+            return set()
+
     def _store_batch(self, batch: List[Dict]):
         """
         Store a batch of records in database.
@@ -743,10 +783,16 @@ class ArxivParallelWorkflow(WorkflowBase):
             if self.processed_count % 1000 == 0:
                 elapsed = (datetime.now() - self.start_time).total_seconds()
                 throughput = self.processed_count / elapsed
-                logger.info(
-                    f"Progress: {self.processed_count:,}/{self.metadata_config.max_records:,} "
-                    f"({throughput:.2f} rec/s)"
-                )
+                if self.metadata_config.max_records:
+                    logger.info(
+                        f"Progress: {self.processed_count:,}/{self.metadata_config.max_records:,} "
+                        f"({throughput:.2f} rec/s)"
+                    )
+                else:
+                    logger.info(
+                        f"Progress: {self.processed_count:,} processed "
+                        f"({throughput:.2f} rec/s)"
+                    )
 
         except Exception as e:
             logger.error(f"Failed to store batch: {e}")
@@ -763,11 +809,16 @@ class ArxivParallelWorkflow(WorkflowBase):
         if not metadata_file.exists():
             raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
 
+        # Load existing IDs if resuming
+        existing_ids = self._load_existing_ids()
+
         self.logger.info("processing_metadata_file",
             file=str(metadata_file),
             max_records=self.metadata_config.max_records,
             batch_size=self.metadata_config.batch_size,
-            num_workers=len(self.workers)
+            num_workers=len(self.workers),
+            resume_mode=bool(existing_ids),
+            existing_count=len(existing_ids)
         )
 
         # Track progress
@@ -775,19 +826,34 @@ class ArxivParallelWorkflow(WorkflowBase):
 
         batch = []
         total_processed = 0
+        total_skipped = 0
         batches_queued = 0
+        records_scanned = 0
 
         with open(metadata_file, 'r') as f:
             for line_num, line in enumerate(f, 1):
-                # Check if we've reached max records
+                # Check if we've reached max records (based on NEW records processed)
                 if self.metadata_config.max_records and total_processed >= self.metadata_config.max_records:
                     break
 
                 try:
                     record = json.loads(line)
+                    records_scanned += 1
 
                     # Skip if no abstract
                     if not record.get('abstract'):
+                        continue
+
+                    # Skip if already processed (when resuming)
+                    arxiv_id = record.get('id')
+                    if arxiv_id and arxiv_id in existing_ids:
+                        total_skipped += 1
+                        # Log progress every 10,000 skipped records
+                        if total_skipped % 10000 == 0:
+                            self.logger.info("skipping_processed_records",
+                                skipped_count=total_skipped,
+                                line_number=line_num
+                            )
                         continue
 
                     batch.append(record)
@@ -812,7 +878,9 @@ class ArxivParallelWorkflow(WorkflowBase):
                             self.logger.info("batch_queued",
                                 batch_number=batches_queued,
                                 batch_size=len(batch),
-                                queue_size=self.input_queue.qsize() if hasattr(self.input_queue, 'qsize') else 'unknown'
+                                queue_size=self.input_queue.qsize() if hasattr(self.input_queue, 'qsize') else 'unknown',
+                                total_processed=total_processed,
+                                total_skipped=total_skipped
                             )
 
                         batch = []
@@ -845,8 +913,13 @@ class ArxivParallelWorkflow(WorkflowBase):
             self.input_queue.put(None)
             self.logger.info("poison_pill_sent", worker_id=worker_id)
 
+        # Save skipped count for final reporting
+        self.skipped_count = total_skipped
+
         self.logger.info("metadata_loading_complete",
             total_records=total_processed,
+            total_skipped=total_skipped,
+            records_scanned=records_scanned,
             total_batches=batches_queued,
             workers=len(self.workers)
         )
@@ -888,7 +961,9 @@ class ArxivParallelWorkflow(WorkflowBase):
             duration = (end_time - self.start_time).total_seconds()
 
             logger.info(f"Workflow completed in {duration:.2f} seconds")
-            logger.info(f"Processed: {self.processed_count:,} records")
+            logger.info(f"Processed: {self.processed_count:,} new records")
+            if self.skipped_count > 0:
+                logger.info(f"Skipped: {self.skipped_count:,} already-processed records")
             logger.info(f"Failed: {self.failed_count:,} records")
             logger.info(f"Throughput: {self.processed_count / duration:.2f} records/second")
 
@@ -904,10 +979,12 @@ class ArxivParallelWorkflow(WorkflowBase):
                 metadata={
                     'throughput': self.processed_count / duration if duration > 0 else 0,
                     'duration_seconds': duration,
+                    'items_skipped': self.skipped_count,
                     'num_workers': len(self.workers),
                     'metadata_file': str(self.metadata_config.metadata_file),
                     'embedder_model': self.metadata_config.embedder_model,
-                    'batch_size': self.metadata_config.batch_size
+                    'batch_size': self.metadata_config.batch_size,
+                    'resume_mode': self.metadata_config.resume_from_checkpoint
                 }
             )
 
@@ -984,8 +1061,8 @@ if __name__ == "__main__":
     parser.add_argument(
         '--count',
         type=int,
-        default=1000,
-        help='Number of records to process (default: 1000)'
+        default=None,
+        help='Number of records to process (default: all remaining if --resume, else 1000)'
     )
 
     parser.add_argument(
@@ -1030,24 +1107,45 @@ if __name__ == "__main__":
         print("Please set: export ARANGO_PASSWORD='your-password'")
         sys.exit(1)
 
+    # Determine record count
+    # If --count not specified:
+    #   - With --resume: process all remaining (None)
+    #   - Without --resume: default to 1000
+    if args.count is None:
+        if args.resume:
+            max_records = None  # Process all remaining
+            display_count = "all remaining"
+        else:
+            max_records = 1000  # Default for non-resume
+            display_count = "1000"
+    else:
+        max_records = args.count
+        display_count = str(args.count)
+
     # Create configuration
     from core.tools.arxiv.arxiv_metadata_config import ArxivMetadataConfig
 
+    # Calculate checkpoint interval safely
+    if max_records:
+        checkpoint_interval = min(1000, max_records // 10)
+    else:
+        checkpoint_interval = 10000  # Default for unlimited processing
+
     config = ArxivMetadataConfig(
-        max_records=args.count,
+        max_records=max_records,
         batch_size=args.batch_size,
         embedding_batch_size=args.embedding_batch_size,
         num_workers=args.workers,
         drop_collections=args.drop_collections,
         resume_from_checkpoint=args.resume,
-        checkpoint_interval=min(1000, args.count // 10),  # Checkpoint every 10% or 1000 records
+        checkpoint_interval=checkpoint_interval,
         monitor_interval=100
     )
 
     print("=" * 60)
     print("ArXiv Parallel Processing")
     print("=" * 60)
-    print(f"Records: {args.count}")
+    print(f"Records: {display_count}")
     print(f"Batch size: {args.batch_size}")
     print(f"Embedding batch: {args.embedding_batch_size}")
     print(f"Workers: {args.workers}")
