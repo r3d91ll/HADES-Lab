@@ -281,10 +281,16 @@ class ArxivMemoryWorkflow(WorkflowBase):
 
         load_time = time.time() - start_time
 
-        # Calculate accurate deep memory usage using JSON serialization
-        # This gives us the actual size of all the data
-        import json
-        memory_usage_bytes = len(json.dumps(all_records).encode('utf-8'))
+        # Estimate memory usage without duplicating data (avoids OOM)
+        try:
+            import psutil  # optional dependency
+            memory_usage_bytes = psutil.Process(os.getpid()).memory_info().rss
+        except Exception:
+            # Cheap fallback: approximate size without creating copies
+            import sys
+            # Rough estimate: number of records * average size per record
+            # Assumes ~2KB per record (typical for ArXiv metadata)
+            memory_usage_bytes = len(all_records) * 2048
         memory_usage_gb = memory_usage_bytes / (1024**3)
 
         self.logger.info("dataset_loaded",
