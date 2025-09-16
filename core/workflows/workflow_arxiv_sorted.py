@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-ArXiv Parallel Processing Workflow
-===================================
+ArXiv Size-Sorted Processing Workflow
+=====================================
 
-Production-ready workflow for processing ArXiv metadata with parallel
-embedding generation using multiple GPU workers.
+Optimized workflow for processing ArXiv metadata with size-based sorting
+for improved throughput and GPU utilization.
 
 This workflow implements the complete pipeline:
-1. Load metadata from JSON file
-2. Process abstracts with late chunking
+1. Load and sort metadata by abstract size (smallest first)
+2. Process abstracts with late chunking in size order
 3. Generate embeddings in parallel using multiple GPU workers
-4. Store everything atomically in ArangoDB
+4. Store everything atomically in ArangoDB with position tracking
 
 Theory Connection (Conveyance Framework):
 Optimizes C = (W·R·H/T)·Ctx^α by:
-- Minimizing T through parallel GPU processing
-- Maximizing H through multi-worker architecture
+- Minimizing T through size-ordered processing (small docs process faster)
+- Maximizing H through better GPU batch utilization
 - Preserving Ctx through late chunking
+- Amplifying efficiency by processing similar-sized documents together
 """
 
 import os
@@ -59,11 +60,20 @@ def worker_process_with_gpu(config, input_queue, output_queue, stop_event, gpu_i
     os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
+    print(f"Worker process started - GPU {gpu_id}, PID {os.getpid()}")
+
     # NOW import CUDA-dependent modules
-    from core.embedders.embedders_factory import EmbedderFactory
-    from core.logging.logging import LogManager
-    from queue import Empty
-    import time
+    try:
+        from core.embedders.embedders_factory import EmbedderFactory
+        from core.logging.logging import LogManager
+        from queue import Empty
+        import time
+        print(f"Worker {config.worker_id} - imports successful")
+    except Exception as e:
+        print(f"Worker {config.worker_id} - IMPORT FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return
 
     # Setup structured logging
     worker_logger = LogManager.get_logger(
@@ -241,6 +251,9 @@ class EmbeddingWorker(mp.Process):
             f"gpu_{gpu_id}_{datetime.now().isoformat()}"
         )
 
+        # Log that worker is starting
+        print(f"WORKER {self.config.worker_id} STARTING on GPU {gpu_id}")
+
         try:
             # Initialize embedder for this worker
             worker_logger.info("worker_initializing",
@@ -287,7 +300,8 @@ class EmbeddingWorker(mp.Process):
                     worker_logger.info("batch_received",
                         worker_id=self.config.worker_id,
                         batch_size=len(batch),
-                        batch_number=batches_processed + 1
+                        batch_number=batches_processed + 1,
+                        first_record_id=batch[0].get('arxiv_id', 'unknown') if batch else 'empty'
                     )
 
                     # Process batch
@@ -297,7 +311,8 @@ class EmbeddingWorker(mp.Process):
                     worker_logger.info("batch_processed",
                         worker_id=self.config.worker_id,
                         batch_number=batches_processed,
-                        results_count=len(results)
+                        results_count=len(results),
+                        chunks_created=len(results) if results else 0
                     )
 
                     # Send results back
@@ -375,11 +390,11 @@ class EmbeddingWorker(mp.Process):
         return results
 
 
-class ArxivParallelWorkflow(WorkflowBase):
+class ArxivSortedWorkflow(WorkflowBase):
     """
-    Parallel processing workflow for ArXiv metadata with multi-GPU embedding.
+    Size-sorted processing workflow for ArXiv metadata with multi-GPU embedding.
 
-    Implements a producer-consumer pattern:
+    Implements a size-ordered producer-consumer pattern:
     - Main thread: Reads JSON and produces batches
     - Worker processes: Consume batches and generate embeddings
     - Storage thread: Consumes results and stores in database
@@ -542,12 +557,14 @@ class ArxivParallelWorkflow(WorkflowBase):
             gpu_id = config.gpu_device.split(':')[-1] if ':' in config.gpu_device else '0'
 
             # Create worker with spawn context
+            print(f"Starting worker {config.worker_id} on GPU {gpu_id}")
             worker = ctx.Process(
                 target=worker_process_with_gpu,
                 args=(config, self.input_queue, self.output_queue, self.stop_event, gpu_id)
             )
             worker.start()
             self.workers.append(worker)
+            print(f"Worker {config.worker_id} started, PID: {worker.pid}")
             self.logger.info("worker_started",
                 worker_id=config.worker_id,
                 gpu_device=config.gpu_device,
@@ -691,40 +708,17 @@ class ArxivParallelWorkflow(WorkflowBase):
             for item in batch:
                 record = item['record']
                 chunk = item['chunk']
-                arxiv_id = record.get('id', '')
+                # Handle both cases: 'id' from file loading, 'arxiv_id' from database query
+                arxiv_id = record.get('arxiv_id') or record.get('id', '')
 
                 if not arxiv_id:
                     continue
 
                 sanitized_id = arxiv_id.replace('.', '_').replace('/', '_')
 
-                # Store metadata (once per paper)
+                # Track unique papers for counting
                 if arxiv_id not in papers_seen:
                     papers_seen.add(arxiv_id)
-
-                    metadata_doc = {
-                        '_key': sanitized_id,
-                        'arxiv_id': arxiv_id,
-                        'submitter': record.get('submitter'),
-                        'authors': record.get('authors'),
-                        'title': record.get('title'),
-                        'comments': record.get('comments'),
-                        'journal_ref': record.get('journal-ref'),
-                        'doi': record.get('doi'),
-                        'report_no': record.get('report-no'),
-                        'categories': record.get('categories'),
-                        'license': record.get('license'),
-                        'abstract': record.get('abstract'),
-                        'versions': record.get('versions', []),
-                        'update_date': record.get('update_date'),
-                        'authors_parsed': record.get('authors_parsed', []),
-                        'processed_at': datetime.now().isoformat(),
-                        'has_abstract': bool(record.get('abstract'))
-                    }
-
-                    txn.collection(self.metadata_config.metadata_collection).insert(
-                        metadata_doc, overwrite=True
-                    )
 
                 # Store chunk
                 chunk_id = f"{sanitized_id}_chunk_{chunk.chunk_index}"
@@ -767,8 +761,14 @@ class ArxivParallelWorkflow(WorkflowBase):
             # Commit transaction
             txn.commit_transaction()
 
-            # Update counters
-            self.processed_count += len(batch)
+            # Update counters - count unique papers, not chunks
+            unique_papers = len(papers_seen)
+            self.processed_count += unique_papers
+
+            self.logger.info("batch_stored",
+                papers=unique_papers,
+                chunks=len(batch),
+                total_processed=self.processed_count)
 
             # Update progress tracker less frequently for better performance
             # Only update for larger batches to reduce overhead
@@ -802,23 +802,329 @@ class ArxivParallelWorkflow(WorkflowBase):
                 pass
             self.failed_count += len(batch)
 
-    def _process_metadata_file(self):
-        """Process the ArXiv metadata JSON file."""
+    def _load_metadata_to_database(self):
+        """
+        Load metadata from JSON file into database.
+        Only called when --drop-collections is used.
+        """
         metadata_file = Path(self.metadata_config.metadata_file)
 
         if not metadata_file.exists():
             raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
 
-        # Load existing IDs if resuming
-        existing_ids = self._load_existing_ids()
+        self.logger.info("loading_metadata_to_database",
+            file=str(metadata_file))
 
-        self.logger.info("processing_metadata_file",
-            file=str(metadata_file),
-            max_records=self.metadata_config.max_records,
+        batch = []
+        batch_size = 10000
+        total_loaded = 0
+        total_lines = 0
+
+        with open(metadata_file, 'r') as f:
+            self.logger.info("starting_file_read",
+                file=metadata_file,
+                batch_size=batch_size)
+
+            # Add detailed tracking variables
+            lines_read = 0
+            records_with_abstract = 0
+            records_without_abstract = 0
+            batches_imported = 0
+
+            for line_num, line in enumerate(f, 1):
+                total_lines = line_num
+                lines_read += 1
+
+                # More frequent progress logging for debugging
+                if line_num % 1000 == 0:
+                    self.logger.info("detailed_reading_progress",
+                        line_num=line_num,
+                        lines_read=lines_read,
+                        loaded_so_far=total_loaded,
+                        with_abstract=records_with_abstract,
+                        without_abstract=records_without_abstract,
+                        in_current_batch=len(batch),
+                        batches_imported=batches_imported)
+
+                # Extra logging at critical points
+                if line_num == 9000:
+                    self.logger.warning("AT_LINE_9000",
+                        loaded=total_loaded,
+                        batch_size=len(batch))
+                elif line_num == 10000:
+                    self.logger.warning("AT_LINE_10000",
+                        loaded=total_loaded,
+                        batch_size=len(batch))
+                elif line_num == 11000:
+                    self.logger.warning("PASSED_LINE_11000",
+                        loaded=total_loaded,
+                        batch_size=len(batch))
+
+                try:
+                    record = json.loads(line)
+
+                    # Skip if no abstract
+                    if not record.get('abstract'):
+                        records_without_abstract += 1
+                        continue
+
+                    records_with_abstract += 1
+
+                    # Store in database
+                    doc = {
+                        '_key': record.get('id', '').replace('.', '_').replace('/', '_'),
+                        'arxiv_id': record.get('id'),
+                        'title': record.get('title'),
+                        'abstract': record.get('abstract'),
+                        'authors': record.get('authors'),
+                        'categories': record.get('categories'),
+                        'update_date': record.get('update_date'),
+                        'journal_ref': record.get('journal_ref'),
+                        'doi': record.get('doi'),
+                        'abstract_length': len(record.get('abstract', ''))
+                    }
+                    batch.append(doc)
+                    total_loaded += 1
+
+                    if len(batch) >= batch_size:
+                        self.logger.info("batch_full_importing",
+                            batch_size=len(batch),
+                            line_num=line_num,
+                            total_loaded_before=total_loaded)
+
+                        # Import with on_duplicate='replace' to handle any duplicates
+                        try:
+                            result = self.db[self.metadata_config.metadata_collection].import_bulk(
+                                batch,
+                                on_duplicate='replace',
+                                details=True
+                            )
+
+                            batches_imported += 1
+
+                            # Calculate actual successful imports
+                            successful = result.get('created', 0) + result.get('updated', 0)
+
+                            self.logger.info("batch_imported_detailed",
+                                batch_number=batches_imported,
+                                batch_size=len(batch),
+                                total_loaded=total_loaded,
+                                created=result.get('created', 0),
+                                updated=result.get('updated', 0),
+                                errors=result.get('errors', 0),
+                                successful=successful,
+                                line_num=line_num)
+
+                            # If there were errors, log them but continue
+                            if result.get('errors', 0) > 0:
+                                self.logger.warning("import_errors_detailed",
+                                    batch_number=batches_imported,
+                                    errors=result.get('errors'),
+                                    details=result.get('details', [])[:10])  # Log first 10 error details
+
+                                # Log high error count but CONTINUE loading
+                                if result.get('errors', 0) > 100:
+                                    self.logger.warning("high_error_count_but_continuing",
+                                        batch_number=batches_imported,
+                                        errors=result.get('errors'),
+                                        successful=successful,
+                                        batch_size=len(batch),
+                                        continuing_at_line=line_num)
+                                    # DON'T raise exception - continue loading rest of file!
+                        except Exception as e:
+                            self.logger.error("batch_import_failed",
+                                error=str(e),
+                                batch_size=len(batch),
+                                batch_number=batches_imported,
+                                line_num=line_num)
+                            import traceback
+                            self.logger.error("traceback", tb=traceback.format_exc())
+                            # Continue with next batch instead of failing
+                        finally:
+                            batch = []
+                            self.logger.info("batch_reset_continuing",
+                                line_num=line_num,
+                                total_loaded=total_loaded)
+
+                    # Log progress every 100k records
+                    if total_loaded % 100000 == 0:
+                        self.logger.info("loading_milestone",
+                            loaded=total_loaded,
+                            line_number=line_num)
+
+                except json.JSONDecodeError as e:
+                    self.logger.warning("invalid_json",
+                        line=line_num,
+                        error=str(e))
+                    continue
+                except Exception as e:
+                    self.logger.error("unexpected_error_in_line_processing",
+                        line=line_num,
+                        error=str(e),
+                        type=type(e).__name__)
+                    import traceback
+                    self.logger.error("traceback", tb=traceback.format_exc())
+                    # Don't let one bad record stop everything
+                    continue
+
+        # Log that we exited the file reading loop
+        self.logger.warning("FILE_READING_LOOP_EXITED",
+            total_lines_read=total_lines,
+            total_loaded=total_loaded,
+            records_with_abstract=records_with_abstract,
+            records_without_abstract=records_without_abstract,
+            batches_imported=batches_imported,
+            final_batch_size=len(batch))
+
+        # Import remaining batch
+        if batch:
+            result = self.db[self.metadata_config.metadata_collection].import_bulk(
+                batch,
+                on_duplicate='replace',
+                details=True
+            )
+            self.logger.info("final_batch_imported",
+                batch_size=len(batch),
+                created=result.get('created', 0),
+                updated=result.get('updated', 0),
+                errors=result.get('errors', 0))
+
+        self.logger.info("metadata_load_complete",
+            total_loaded=total_loaded,
+            total_lines_read=total_lines,
+            final_batch_size=len(batch) if batch else 0)
+
+        # Verify what actually made it to database
+        actual_count = self.db[self.metadata_config.metadata_collection].count()
+        self.logger.info("metadata_verification",
+            loaded_count=total_loaded,
+            database_count=actual_count,
+            difference=total_loaded - actual_count)
+
+        return actual_count  # Return what's actually in database, not what we tried to load
+
+    def _get_unprocessed_records_sorted(self):
+        """
+        Query for unprocessed records sorted by abstract length.
+        Returns all records that don't have embeddings yet.
+        """
+        self.logger.info("querying_unprocessed_records")
+
+        # Check if embeddings collection is empty (common after drop-collections)
+        embeddings_count = self.db[self.metadata_config.embeddings_collection].count()
+
+        if embeddings_count == 0:
+            # Fast path: No embeddings exist, so ALL records are unprocessed
+            # Just get all records with abstracts sorted by length
+            self.logger.info("fast_path_no_embeddings_exist")
+
+            if self.metadata_config.max_records:
+                query = f"""
+                FOR doc IN {self.metadata_config.metadata_collection}
+                    FILTER doc.abstract != null
+                    SORT doc.abstract_length ASC
+                    LIMIT {self.metadata_config.max_records}
+                    RETURN {{
+                        'id': doc.arxiv_id,
+                        'record': doc,
+                        'abstract_length': doc.abstract_length
+                    }}
+                """
+            else:
+                query = f"""
+                FOR doc IN {self.metadata_config.metadata_collection}
+                    FILTER doc.abstract != null
+                    SORT doc.abstract_length ASC
+                    RETURN {{
+                        'id': doc.arxiv_id,
+                        'record': doc,
+                        'abstract_length': doc.abstract_length
+                    }}
+                """
+        else:
+            # Slower path: Need to check which records have embeddings
+            self.logger.info("checking_for_existing_embeddings",
+                embeddings_count=embeddings_count)
+
+            # Original query with embedding check
+            query = f"""
+            FOR doc IN {self.metadata_config.metadata_collection}
+                FILTER doc.abstract != null
+                LET has_embedding = FIRST(
+                    FOR e IN {self.metadata_config.embeddings_collection}
+                        FILTER e.arxiv_id == doc.arxiv_id
+                        LIMIT 1
+                        RETURN 1
+                )
+                FILTER has_embedding == null
+                SORT doc.abstract_length ASC
+                {'LIMIT ' + str(self.metadata_config.max_records) if self.metadata_config.max_records else ''}
+                RETURN {{
+                    'id': doc.arxiv_id,
+                    'record': doc,
+                    'abstract_length': doc.abstract_length
+                }}
+            """
+
+        # Execute query and load all results into memory
+        cursor = self.db.aql.execute(
+            query,
+            batch_size=10000,
+            count=True
+        )
+
+        # Load all results into memory (we have 256GB RAM)
+        records = list(cursor)
+
+        self.logger.info("unprocessed_records_loaded",
+            total_records=len(records))
+
+        # Log size distribution
+        if records:
+            min_chars = records[0]['abstract_length']
+            max_chars = records[-1]['abstract_length']
+            median_chars = records[len(records)//2]['abstract_length'] if len(records) > 0 else 0
+
+            self.logger.info("size_distribution",
+                min_chars=min_chars,
+                max_chars=max_chars,
+                median_chars=median_chars,
+                total_records=len(records))
+
+        return records
+
+    # Removed _store_processing_order and _get_resume_position methods - no longer needed
+    # The query-based approach handles resume automatically by finding unprocessed records
+
+    def _process_metadata_file(self):
+        """Process the ArXiv metadata in size-sorted order."""
+        self.logger.info("starting_sorted_processing")
+
+        # If drop_collections, load metadata from file first
+        if self.metadata_config.drop_collections:
+            self.logger.info("loading_metadata_from_file")
+            loaded_count = self._load_metadata_to_database()
+            self.logger.info("finished_loading_metadata", count=loaded_count)
+
+            # Verify the load worked
+            actual_count = self.db[self.metadata_config.metadata_collection].count()
+            self.logger.info("verified_collection_count", count=actual_count)
+
+        # Query for unprocessed records sorted by size
+        sorted_records = self._get_unprocessed_records_sorted()
+
+        # Process in sorted order
+        if sorted_records:
+            self._process_sorted_records(sorted_records)
+        else:
+            self.logger.info("no_unprocessed_records")
+
+    def _process_sorted_records(self, sorted_records):
+        """Process pre-sorted records from smallest to largest."""
+        self.logger.info("processing_sorted_records",
+            total_records=len(sorted_records),
             batch_size=self.metadata_config.batch_size,
-            num_workers=len(self.workers),
-            resume_mode=bool(existing_ids),
-            existing_count=len(existing_ids)
+            num_workers=len(self.workers)
         )
 
         # Track progress
@@ -826,81 +1132,54 @@ class ArxivParallelWorkflow(WorkflowBase):
 
         batch = []
         total_processed = 0
-        total_skipped = 0
         batches_queued = 0
-        records_scanned = 0
 
-        with open(metadata_file, 'r') as f:
-            for line_num, line in enumerate(f, 1):
-                # Check if we've reached max records (based on NEW records processed)
-                if self.metadata_config.max_records and total_processed >= self.metadata_config.max_records:
-                    break
+        # Process all records (they're already filtered for unprocessed)
+        for position, item in enumerate(sorted_records):
+            record = item['record']
 
-                try:
-                    record = json.loads(line)
-                    records_scanned += 1
+            # Add position and abstract length for tracking
+            record['size_order_position'] = position
+            record['abstract_length'] = item['abstract_length']
 
-                    # Skip if no abstract
-                    if not record.get('abstract'):
-                        continue
+            batch.append(record)
+            total_processed += 1
 
-                    # Skip if already processed (when resuming)
-                    arxiv_id = record.get('id')
-                    if arxiv_id and arxiv_id in existing_ids:
-                        total_skipped += 1
-                        # Log progress every 10,000 skipped records
-                        if total_skipped % 10000 == 0:
-                            self.logger.info("skipping_processed_records",
-                                skipped_count=total_skipped,
-                                line_number=line_num
-                            )
-                        continue
+            # Send batch to workers when full
+            if len(batch) >= self.metadata_config.batch_size:
+                self.input_queue.put(batch)
+                batches_queued += 1
 
-                    batch.append(record)
-                    total_processed += 1
-
-                    # Send batch to workers when full
-                    if len(batch) >= self.metadata_config.batch_size:
-                        # Don't split batches - queue the whole batch
-                        # Workers will take batches from queue as they're ready
-                        self.input_queue.put(batch)
-                        batches_queued += 1
-
-                        # Update metadata loading progress less frequently
-                        if batches_queued % 10 == 0:
-                            self.progress_tracker.update_step(
-                                "metadata_loading",
-                                completed=len(batch) * 10  # Account for batches since last update
-                            )
-
-                        # Only log every 10th batch to reduce I/O
-                        if batches_queued % 10 == 0:
-                            self.logger.info("batch_queued",
-                                batch_number=batches_queued,
-                                batch_size=len(batch),
-                                queue_size=self.input_queue.qsize() if hasattr(self.input_queue, 'qsize') else 'unknown',
-                                total_processed=total_processed,
-                                total_skipped=total_skipped
-                            )
-
-                        batch = []
-
-                except json.JSONDecodeError as e:
-                    self.logger.warning("invalid_json",
-                        line_num=line_num,
-                        error=str(e)
+                # Update metadata loading progress less frequently
+                if batches_queued % 10 == 0:
+                    self.progress_tracker.update_step(
+                        "metadata_loading",
+                        completed=total_processed
                     )
-                    continue
+
+                    # Log progress with size information
+                    current_char_avg = sum(r['abstract_length'] for r in batch) / len(batch)
+                    self.logger.info("batch_queued",
+                        batch_number=batches_queued,
+                        batch_size=len(batch),
+                        position=position,
+                        total=len(sorted_records),
+                        avg_chars=current_char_avg,
+                        queue_size=self.input_queue.qsize() if hasattr(self.input_queue, 'qsize') else 'unknown',
+                        total_processed=total_processed,
+                        progress_pct=(position/len(sorted_records)*100)
+                    )
+
+                batch = []
 
         # Process remaining batch
         if batch:
             self.input_queue.put(batch)
             batches_queued += 1
 
-            # Update metadata loading progress for final batch
             self.progress_tracker.update_step(
                 "metadata_loading",
-                completed=len(batch)
+                completed=total_processed
             )
 
             self.logger.info("final_batch_queued",
@@ -913,13 +1192,9 @@ class ArxivParallelWorkflow(WorkflowBase):
             self.input_queue.put(None)
             self.logger.info("poison_pill_sent", worker_id=worker_id)
 
-        # Save skipped count for final reporting
-        self.skipped_count = total_skipped
-
-        self.logger.info("metadata_loading_complete",
+        self.logger.info("sorted_loading_complete",
             total_records=total_processed,
-            total_skipped=total_skipped,
-            records_scanned=records_scanned,
+            skipped_from_resume=self.skipped_count,
             total_batches=batches_queued,
             workers=len(self.workers)
         )
@@ -1055,7 +1330,7 @@ if __name__ == "__main__":
     import sys
 
     parser = argparse.ArgumentParser(
-        description="Process ArXiv metadata with multi-GPU parallel processing"
+        description="Process ArXiv metadata with size-sorted multi-GPU parallel processing"
     )
 
     parser.add_argument(
@@ -1099,13 +1374,39 @@ if __name__ == "__main__":
         help='Resume from checkpoint'
     )
 
+    parser.add_argument(
+        '--database',
+        type=str,
+        default='arxiv_repository',
+        help='ArangoDB database name (default: arxiv_repository)'
+    )
+
+    parser.add_argument(
+        '--username',
+        type=str,
+        default='arxiv_writer',
+        help='Database username (default: arxiv_writer)'
+    )
+
+    parser.add_argument(
+        '--password-env',
+        type=str,
+        default='ARXIV_WRITER_PASSWORD',
+        help='Environment variable containing password (default: ARXIV_WRITER_PASSWORD)'
+    )
+
     args = parser.parse_args()
 
-    # Check environment
-    if not os.environ.get('ARANGO_PASSWORD'):
-        print("ERROR: ARANGO_PASSWORD environment variable not set")
-        print("Please set: export ARANGO_PASSWORD='your-password'")
-        sys.exit(1)
+    # Check environment for password
+    password = os.environ.get(args.password_env)
+    if not password:
+        # Fallback to ARANGO_PASSWORD for backward compatibility
+        password = os.environ.get('ARANGO_PASSWORD')
+        if not password:
+            print(f"ERROR: {args.password_env} environment variable not set")
+            print(f"Please set: export {args.password_env}='your-password'")
+            print("Or use: export ARANGO_PASSWORD='your-password' (fallback)")
+            sys.exit(1)
 
     # Determine record count
     # If --count not specified: process all documents
@@ -1121,9 +1422,13 @@ if __name__ == "__main__":
 
     # Calculate checkpoint interval safely
     if max_records:
-        checkpoint_interval = min(1000, max_records // 10)
+        # Ensure checkpoint interval is at least 100 (validation requirement)
+        checkpoint_interval = max(100, min(1000, max_records // 10))
     else:
         checkpoint_interval = 10000  # Default for unlimited processing
+
+    # Set password in environment for DatabaseFactory to use
+    os.environ['ARANGO_PASSWORD'] = password
 
     config = ArxivMetadataConfig(
         max_records=max_records,
@@ -1133,12 +1438,17 @@ if __name__ == "__main__":
         drop_collections=args.drop_collections,
         resume_from_checkpoint=args.resume,
         checkpoint_interval=checkpoint_interval,
-        monitor_interval=100
+        monitor_interval=100,
+        arango_database=args.database,  # Use specified database
+        arango_username=args.username   # Use specified username
+        # Password comes from environment variable
     )
 
     print("=" * 60)
-    print("ArXiv Parallel Processing")
+    print("ArXiv Size-Sorted Processing")
     print("=" * 60)
+    print(f"Database: {args.database}")
+    print(f"Username: {args.username}")
     print(f"Records: {display_count}")
     print(f"Batch size: {args.batch_size}")
     print(f"Embedding batch: {args.embedding_batch_size}")
@@ -1148,7 +1458,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # Run workflow
-    workflow = ArxivParallelWorkflow(config)
+    workflow = ArxivSortedWorkflow(config)
     result = workflow.execute()
 
     # Print results

@@ -28,6 +28,10 @@ def main():
                        help='Check interval in seconds (default: 30)')
     parser.add_argument('--collection', default='arxiv_metadata',
                        help='Collection to monitor')
+    parser.add_argument('--database', default='arxiv_repository',
+                       help='Database name (default: arxiv_repository)')
+    parser.add_argument('--username', default='root',
+                       help='Database username (default: root)')
 
     args = parser.parse_args()
 
@@ -39,11 +43,11 @@ def main():
     # Connect to database
     try:
         db = DatabaseFactory.get_arango(
-            database="academy_store",
-            username="root",
+            database=args.database,
+            username=args.username,
             use_unix=True
         )
-        print("✅ Connected to ArangoDB")
+        print(f"✅ Connected to ArangoDB database: {args.database}")
     except Exception as e:
         print(f"❌ Failed to connect: {e}")
         sys.exit(1)
