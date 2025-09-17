@@ -207,9 +207,25 @@ credentials/
 config.ini
 config.yaml
 config.yml
+*_config.json
+secrets*.json
+*.env
+*.env.local
+*.env.production
 !config.example.*
 !config.sample.*
 !config.template.*
+!*.example.env
+
+# Database passwords and API keys
+*password*.txt
+*credential*.json
+*secret*.yml
+arxiv_repository.env
+arango_password.txt
+!*example*
+!*template*
+!*sample*
 
 # Data files (customize as needed)
 /data/
