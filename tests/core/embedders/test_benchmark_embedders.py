@@ -209,7 +209,7 @@ class EmbedderBenchmark:
 
         # Sentence-transformers (high performance)
         st_embedder = SentenceTransformersEmbedder({
-            'model_name': 'jinaai/jina-embeddings-v3',
+            'model_name': 'jinaai/jina-embeddings-v4',
             'device': self.device,
             'batch_size': 128,
             'use_fp16': self.use_fp16
@@ -217,7 +217,7 @@ class EmbedderBenchmark:
 
         # Transformers (sophisticated)
         tf_embedder = JinaV4Embedder({
-            'model_name': 'jinaai/jina-embeddings-v3',
+            'model_name': 'jinaai/jina-embeddings-v4',
             'device': self.device,
             'use_fp16': self.use_fp16
         })

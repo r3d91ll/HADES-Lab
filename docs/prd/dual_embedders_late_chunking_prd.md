@@ -131,7 +131,7 @@ def late_chunk(text: str, max_tokens: int, chunk_size: int, overlap: int):
 ```yaml
 embedders:
   sentence_transformers:
-    model: "jinaai/jina-embeddings-v3-base-en"
+    model: "jinaai/jina-embeddings-v4-base-en"
     batch_size: 128
     max_length: 8192
     use_late_chunking: true  # Always true, non-configurable

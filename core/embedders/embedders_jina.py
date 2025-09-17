@@ -63,7 +63,7 @@ class JinaV4Embedder(EmbedderBase):
     MAX_TOKENS = 32768  # Jina v4's context window
     EMBEDDING_DIM = 2048
     
-    def __init__(self, config=None):
+    def __init__(self, config: Optional[Union[EmbeddingConfig, Dict[str, Any]]] = None) -> None:
         """
         Initialize Jina v4 embedder with late chunking support.
 
@@ -74,14 +74,16 @@ class JinaV4Embedder(EmbedderBase):
         if config is None:
             config = {}
         elif hasattr(config, 'device'):
-            # It's an EmbeddingConfig object - extract values
+            # It's an EmbeddingConfig object - extract ALL values
             old_config = config
             config = {
-                'device': old_config.device,
-                'use_fp16': old_config.use_fp16,
-                'batch_size': old_config.batch_size,
-                'chunk_size_tokens': 1000,
-                'chunk_overlap_tokens': 200
+                'device': getattr(old_config, 'device', 'cuda'),
+                'use_fp16': getattr(old_config, 'use_fp16', True),
+                'batch_size': getattr(old_config, 'batch_size', 128),
+                'chunk_size_tokens': getattr(old_config, 'chunk_size_tokens', 500),
+                'chunk_overlap_tokens': getattr(old_config, 'chunk_overlap_tokens', 200),
+                'model_name': getattr(old_config, 'model_name', 'jinaai/jina-embeddings-v4'),
+                'normalize_embeddings': getattr(old_config, 'normalize_embeddings', True)
             }
         elif not isinstance(config, dict):
             # Old-style single param (device)
@@ -93,10 +95,17 @@ class JinaV4Embedder(EmbedderBase):
         chunk_size_tokens = None
         chunk_overlap_tokens = None
         # Config is already processed above, no need to load from file
-        
+
+        # Determine default device based on CUDA availability
+        default_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
         # Set parameters with config as defaults, overridable by arguments
-        self.device = device or config.get('device', 'cuda')
+        self.device = device or config.get('device', default_device)
         self.model_name = config.get('model_name', 'jinaai/jina-embeddings-v4')
+
+        # Log if we had to fallback to CPU
+        if config.get('device', default_device) == 'cuda' and not torch.cuda.is_available():
+            logger.warning("CUDA requested but not available, falling back to CPU")
         self.batch_size = config.get('batch_size', 128)  # Default to 128 for better throughput
         # Chunk size set to handle most abstracts without chunking, but chunk when needed
         self.chunk_size_tokens = chunk_size_tokens or config.get('chunk_size_tokens', 500)  # Most abstracts < 500 tokens
@@ -308,7 +317,7 @@ class JinaV4Embedder(EmbedderBase):
         """Whether this embedder supports multimodal inputs."""
         return True  # Jina v4 supports images
 
-    def embed_code(self, 
+    def embed_code(self,
                    code_snippets: List[str],
                    batch_size: int = 4) -> np.ndarray:
         """
@@ -436,28 +445,46 @@ class JinaV4Embedder(EmbedderBase):
                                  text: str,
                                  task: str = "retrieval.passage") -> List[ChunkWithEmbedding]:
         """
-        Context-aware chunking implementation for Jina v4.
-        
-        Uses a sliding window approach with significant overlap to preserve context.
-        Each chunk is embedded with awareness of surrounding text through larger
-        context windows, achieving similar benefits to traditional late chunking.
-        
-        This maintains the WHERE dimension of information even when physically chunked,
-        preventing zero-propagation in the WHAT dimension by ensuring each chunk
-        contains awareness of its surrounding context.
-        
+        Universal chunking - handles any length text consistently.
+
+        Simple approach: Always chunk based on chunk_size_tokens.
+        This fixes the edge case where texts at boundaries were failing.
+
         Args:
             text: Full document text to process
             task: Task type (retrieval, text-matching, separation, classification)
-            
+
         Returns:
-            List of ChunkWithEmbedding objects with contextually-aware embeddings
+            List of ChunkWithEmbedding objects
         """
         if not text:
             return []
-        
-        # Use the process_long_document method which handles both short and long texts
-        return self.process_long_document(text, task)
+
+        # Use simple chunking approach that always works
+        chunks = self._prepare_simple_chunks(text)
+
+        # Extract chunk texts
+        chunk_texts = [c['text'] for c in chunks]
+
+        # Embed all chunks
+        embeddings = self.embed_texts(chunk_texts, task=task, batch_size=len(chunk_texts))
+
+        # Create ChunkWithEmbedding objects
+        result = []
+        for chunk_info, embedding in zip(chunks, embeddings):
+            result.append(ChunkWithEmbedding(
+                text=chunk_info['text'],
+                embedding=embedding,
+                start_char=chunk_info['start_char'],
+                end_char=chunk_info['end_char'],
+                start_token=chunk_info['start_token'],
+                end_token=chunk_info['end_token'],
+                chunk_index=chunk_info['chunk_index'],
+                total_chunks=chunk_info['total_chunks'],
+                context_window_used=chunk_info['context_size']
+            ))
+
+        return result
     
     def embed_batch_with_late_chunking(self,
                                        texts: List[str],
@@ -479,143 +506,76 @@ class JinaV4Embedder(EmbedderBase):
         if not texts:
             return []
 
-        # FAST PATH: If all texts are short (< chunk_size), they each form a single chunk
-        # BUT we still process them with full document context (late chunking principle)
-        max_tokens_estimate = max((len(text) // 4 for text in texts if text), default=0)
-        if max_tokens_estimate <= self.chunk_size_tokens:
-            #logger.info(f"Fast path: Processing {len(texts)} texts directly (max ~{max_tokens_estimate} tokens, batch_size={self.batch_size})")
-
-            # Process with full document context - this IS late chunking
-            # Each document is processed in its entirety, maintaining full context
-            embeddings = self.embed_texts(texts, task=task, batch_size=self.batch_size)
-
-            # Create single chunk per text with full context awareness
-            results = []
-            for text, embedding in zip(texts, embeddings):
-                if text:
-                    # This chunk was created with full document awareness (late chunking)
-                    chunk = ChunkWithEmbedding(
-                        text=text,
-                        embedding=embedding,
-                        start_char=0,
-                        end_char=len(text),
-                        start_token=0,
-                        end_token=len(text) // 4,
-                        chunk_index=0,
-                        total_chunks=1,
-                        context_window_used=len(text) // 4  # Full document was used for context
-                    )
-                    results.append([chunk])
-                else:
-                    results.append([])
-            return results
-
-        # SLOW PATH: Need actual chunking for long documents
+        # Process each text individually to handle varying lengths correctly
         all_results = []
 
-        # For efficiency, we'll batch process context windows across documents
-        # But first, let's collect all context windows with document tracking
-        all_context_windows = []
-        document_chunk_map = []  # Maps context window index to (doc_idx, chunk_info)
-        
-        for doc_idx, text in enumerate(texts):
+        for text in texts:
             if not text:
                 all_results.append([])
                 continue
-            
-            # Generate chunk boundaries for this document
-            doc_chunks = self._prepare_chunks_for_batch(text, doc_idx)
-            
-            # Add to global context windows list
-            for chunk_info in doc_chunks:
-                all_context_windows.append(chunk_info['context_text'])
-                document_chunk_map.append({
-                    'doc_idx': doc_idx,
-                    'chunk_info': chunk_info
-                })
-        
-        # Batch process all context windows at once
-        if all_context_windows:
-            # logger.info(f"Batch processing {len(all_context_windows)} context windows from {len(texts)} documents")
-            
-            # Call model directly for maximum efficiency
-            with torch.no_grad():
-                # Process all context windows in optimal batches
-                if hasattr(self.model, 'encode'):
-                    context_embeddings = self.model.encode(
-                        all_context_windows,
-                        task=task
-                    )
-                else:
-                    # Fallback to batch processing
-                    context_embeddings = self.embed_texts(all_context_windows, task=task, batch_size=self.batch_size)
-                
-                # Convert to numpy if needed
-                if torch.is_tensor(context_embeddings):
-                    if context_embeddings.is_cuda:
-                        context_embeddings = context_embeddings.cpu()
-                    context_embeddings = context_embeddings.numpy()
-                elif hasattr(context_embeddings, 'detach'):
-                    context_embeddings = context_embeddings.detach()
-                    if hasattr(context_embeddings, 'is_cuda') and context_embeddings.is_cuda:
-                        context_embeddings = context_embeddings.cpu()
-                    context_embeddings = context_embeddings.numpy()
-                elif isinstance(context_embeddings, np.ndarray):
-                    pass  # Already numpy
-                else:
-                    # Convert to numpy as fallback
-                    # Check if it's a list of tensors
-                    if isinstance(context_embeddings, list) and len(context_embeddings) > 0:
-                        first_item = context_embeddings[0]
-                        if torch.is_tensor(first_item):
-                            # Convert all tensors to CPU then numpy
-                            context_embeddings = [t.cpu().numpy() if t.is_cuda else t.numpy() for t in context_embeddings]
-                            context_embeddings = np.array(context_embeddings)
-                        else:
-                            context_embeddings = np.array(context_embeddings)
-                    else:
-                        context_embeddings = np.array(context_embeddings)
-                    
-                # logger.info(f"Generated embeddings shape: {context_embeddings.shape}")
-            
-            # Organize results back by document
-            doc_results = [[] for _ in range(len(texts))]
-            
-            for ctx_idx, embedding in enumerate(context_embeddings):
-                map_info = document_chunk_map[ctx_idx]
-                doc_idx = map_info['doc_idx']
-                chunk_info = map_info['chunk_info']
-                
-                # Create ChunkWithEmbedding object
-                chunk_with_embedding = ChunkWithEmbedding(
-                    text=chunk_info['chunk_text'],
-                    embedding=embedding,
-                    start_char=chunk_info['start_char'],
-                    end_char=chunk_info['end_char'],
-                    start_token=chunk_info['start_token'],
-                    end_token=chunk_info['end_token'],
-                    chunk_index=chunk_info['chunk_index'],
-                    total_chunks=chunk_info['total_chunks'],
-                    context_window_used=chunk_info['context_window_used']
-                )
-                
-                doc_results[doc_idx].append(chunk_with_embedding)
-            
-            # Update total chunks count for each document
-            for doc_idx, doc_chunks in enumerate(doc_results):
-                for chunk in doc_chunks:
-                    chunk.total_chunks = len(doc_chunks)
-            
-            all_results = doc_results
-        else:
-            # No valid texts
-            all_results = [[] for _ in range(len(texts))]
-        
-        # logger.info(f"Batch late chunking complete: processed {len(texts)} documents, "
-        #            f"generated {sum(len(doc) for doc in all_results)} total chunks")
-        
+
+            # Process this text through standard chunking
+            # This handles both short and long texts correctly
+            chunks = self.embed_with_late_chunking(text, task=task)
+            all_results.append(chunks)
+
         return all_results
+
     
+    def _prepare_simple_chunks(self, text: str) -> List[Dict]:
+        """
+        Simple chunking method that always works.
+        Creates chunks based on chunk_size_tokens with overlap.
+        """
+        chunks = []
+
+        # Character-based chunking (rough token estimate)
+        chars_per_token = 4
+        chunk_size_chars = self.chunk_size_tokens * chars_per_token
+        overlap_chars = self.chunk_overlap_tokens * chars_per_token
+
+        start_char = 0
+        chunk_index = 0
+
+        while start_char < len(text):
+            # Define chunk boundaries
+            end_char = min(start_char + chunk_size_chars, len(text))
+
+            # Try to break at sentence boundary if possible
+            if end_char < len(text):
+                # Look for sentence end near boundary
+                search_start = max(start_char, end_char - 100)
+                sentence_end = text.find('. ', search_start, end_char)
+                if sentence_end != -1:
+                    end_char = sentence_end + 2
+
+            chunk_text = text[start_char:end_char]
+
+            chunks.append({
+                'text': chunk_text,
+                'start_char': start_char,
+                'end_char': end_char,
+                'start_token': start_char // chars_per_token,
+                'end_token': end_char // chars_per_token,
+                'chunk_index': chunk_index,
+                'total_chunks': 0,  # Will be updated
+                'context_size': len(chunk_text) // chars_per_token
+            })
+
+            # Move to next chunk with overlap
+            if end_char >= len(text):
+                break
+
+            start_char = end_char - overlap_chars
+            chunk_index += 1
+
+        # Update total chunks
+        total = len(chunks)
+        for chunk in chunks:
+            chunk['total_chunks'] = total
+
+        return chunks
+
     def _prepare_chunks_for_batch(self, text: str, doc_idx: int) -> List[Dict]:
         """
         Prepare chunks and context windows for a single document in batch processing.
@@ -670,154 +630,17 @@ class JinaV4Embedder(EmbedderBase):
                                     text: str,
                                     task: str = "retrieval.passage") -> List[ChunkWithEmbedding]:
         """
-        Create chunks with contextual embeddings using overlapping windows.
-        
-        Each chunk is embedded with surrounding context to preserve semantic
-        relationships across boundaries. This is Jina v4's practical approach
-        to achieving the benefits of late chunking.
+        DEPRECATED: This method has O(N^2) complexity due to redundant encoding.
+
+        Use embed_with_late_chunking() instead which properly chunks without
+        redundant model calls. This method is kept only for backward compatibility
+        and will be removed in future versions.
         """
-        # Estimate chunk size in characters (rough: ~4 chars per token)
-        chunk_size_chars = self.chunk_size_tokens * 4
-        context_window_chars = min(self.chunk_size_tokens * 8, self.MAX_TOKENS * 4)  # 2x context on each side
-        
-        chunks = []
-        chunk_index = 0
-        start_char = 0
-        
-        while start_char < len(text):
-            # Define chunk boundaries
-            end_char = min(start_char + chunk_size_chars, len(text))
-            chunk_text = text[start_char:end_char]
-            
-            # Define context window (chunk + surrounding text)
-            context_start = max(0, start_char - chunk_size_chars)
-            context_end = min(len(text), end_char + chunk_size_chars)
-            context_text = text[context_start:context_end]
-            
-            # Embed the context window (not just the chunk)
-            with torch.no_grad():
-                try:
-                    # Use encode method which works with Jina models
-                    if hasattr(self.model, 'encode'):
-                        context_embedding = self.model.encode(
-                            [context_text],
-                            task=task
-                        )
-                    else:
-                        context_embedding = self.embed_texts([context_text], task=task, batch_size=1)
-                except RuntimeError as e:
-                    if "out of memory" in str(e).lower():
-                        logger.warning(f"OOM on chunk {chunk_index}, clearing cache and retrying")
-                        torch.cuda.empty_cache()
-                        import time
-                        time.sleep(0.5)  # Brief pause
-                        
-                        # Try again with cleared cache
-                        try:
-                            if hasattr(self.model, 'encode'):
-                                context_embedding = self.model.encode(
-                                    [context_text],
-                                    task=task
-                                )
-                            else:
-                                context_embedding = self.embed_texts([context_text], task=task, batch_size=1)
-                        except RuntimeError as e2:
-                            if "out of memory" in str(e2).lower():
-                                # Still OOM - try with smaller context
-                                logger.warning(f"Still OOM, reducing context window for chunk {chunk_index}")
-                                torch.cuda.empty_cache()
-                                time.sleep(0.5)
-                                
-                                # Use just the chunk without context
-                                smaller_context = chunk_text[:min(len(chunk_text), 8000)]  # Limit to ~2k tokens
-                                try:
-                                    if hasattr(self.model, 'encode'):
-                                        context_embedding = self.model.encode(
-                                            [smaller_context],
-                                            task=task
-                                        )
-                                    else:
-                                        context_embedding = self.embed_texts([smaller_context], task=task, batch_size=1)
-                                except Exception as e3:
-                                    logger.error(f"Failed even with reduced context: {e3}")
-                                    # Return zero embedding as last resort
-                                    context_embedding = np.zeros((1, 2048), dtype=np.float32)
-                            else:
-                                raise e2
-                    else:
-                        raise e
-                
-                logger.debug(f"Context embedding type after encode_text: {type(context_embedding)}")
-                if hasattr(context_embedding, 'is_cuda'):
-                    logger.debug(f"Context embedding is_cuda: {context_embedding.is_cuda}")
-                
-                # Convert to numpy - handle both tensor and direct numpy returns
-                if isinstance(context_embedding, list):
-                    # Handle list of tensors (Jina v4 returns list)
-                    logger.debug(f"Context embedding is a list of {len(context_embedding)} items")
-                    if len(context_embedding) > 0:
-                        first_item = context_embedding[0]
-                        if torch.is_tensor(first_item):
-                            if first_item.is_cuda:
-                                logger.debug("Moving list item from CUDA to CPU")
-                                context_embedding = [t.cpu().numpy() if t.is_cuda else t.numpy() for t in context_embedding]
-                            else:
-                                context_embedding = [t.cpu().numpy() if hasattr(t, 'is_cuda') and t.is_cuda else t.numpy() for t in context_embedding]
-                            # Stack if multiple, otherwise just take the first
-                            context_embedding = np.vstack(context_embedding) if len(context_embedding) > 1 else context_embedding[0]
-                        else:
-                            # Try to convert list items to numpy
-                            context_embedding = np.array(context_embedding)
-                elif torch.is_tensor(context_embedding):
-                    # Move to CPU if on CUDA
-                    if context_embedding.is_cuda:
-                        logger.debug("Moving context embedding from CUDA to CPU")
-                        context_embedding = context_embedding.cpu()
-                    context_embedding = context_embedding.numpy()
-                elif hasattr(context_embedding, 'detach'):
-                    context_embedding = context_embedding.detach()
-                    if hasattr(context_embedding, 'is_cuda') and context_embedding.is_cuda:
-                        logger.debug("Moving detached context embedding from CUDA to CPU")
-                        context_embedding = context_embedding.cpu()
-                    context_embedding = context_embedding.numpy()
-                elif not isinstance(context_embedding, np.ndarray):
-                    # Try to convert to numpy
-                    try:
-                        context_embedding = np.array(context_embedding)
-                    except Exception as e:
-                        logger.error(f"Failed to convert context embedding to numpy: {e}")
-                        logger.error(f"Context embedding type: {type(context_embedding)}")
-                        raise
-                
-                # Get first element if batched
-                if context_embedding.ndim > 1:
-                    context_embedding = context_embedding[0]
-            
-            # Create chunk with context-aware embedding
-            chunks.append(ChunkWithEmbedding(
-                text=chunk_text,
-                embedding=context_embedding,
-                start_char=start_char,
-                end_char=end_char,
-                start_token=start_char // 4,  # Rough estimate
-                end_token=end_char // 4,
-                chunk_index=chunk_index,
-                total_chunks=0,  # Will update after loop
-                context_window_used=len(context_text) // 4  # Rough token estimate
-            ))
-            
-            # Move to next chunk with overlap
-            if end_char >= len(text):
-                break
-            start_char = end_char - (self.chunk_overlap_tokens * 4)  # Convert overlap to chars
-            chunk_index += 1
-        
-        # Update total chunks count
-        for chunk in chunks:
-            chunk.total_chunks = len(chunks)
-        
-        logger.debug(f"Created {len(chunks)} context-aware chunks")
-        return chunks
+        logger.warning("_chunk_with_context_windows is deprecated due to O(N^2) complexity. "
+                      "Using embed_with_late_chunking instead for better performance.")
+
+        # Redirect to the efficient implementation
+        return self.embed_with_late_chunking(text, task)
 
     def encode_full_document(self, 
                            text: str, 
@@ -841,6 +664,14 @@ class JinaV4Embedder(EmbedderBase):
         if not text:
             return torch.empty(0, self.EMBEDDING_DIM), {}
         
+        # Check if truncation will be needed
+        estimated_tokens = len(self.tokenizer.encode(text, add_special_tokens=False))
+        if estimated_tokens > self.MAX_TOKENS:
+            logger.warning(
+                f"Document will be truncated from ~{estimated_tokens} to {self.MAX_TOKENS} tokens. "
+                f"Consider using process_long_document() for documents > 32k tokens."
+            )
+
         # Tokenize the full document
         tokens = self.tokenizer(
             text,

@@ -55,7 +55,7 @@ def test_unix_socket_connection():
 
         if not password:
             print("   ❌ ARXIV_WRITER_PASSWORD not set")
-            print("   Run: source config/arxiv_repository.env")
+            print("   Run: source core/config/arxiv_repository.env")
             return False
 
         db = get_database_for_workflow(

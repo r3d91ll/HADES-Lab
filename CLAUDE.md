@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+***THIS PROJECT USES jina_embeddings_v4***
+***ALL CONFIGURATION SCRIPTS AND YAML FILES GO IN THE core/config/ DIRECTORY***
+
+
 ## HADES — Conveyance Framework (System Prompt)
 
 **Mission:**

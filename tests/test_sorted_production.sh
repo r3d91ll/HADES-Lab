@@ -25,11 +25,11 @@ echo "Step 2: Loading credentials..."
 echo "----------------------------------------------"
 
 # Load the generated credentials
-if [ -f "config/arxiv_repository.env" ]; then
-    source config/arxiv_repository.env
-    echo "✅ Loaded credentials from config/arxiv_repository.env"
+if [ -f "core/config/arxiv_repository.env" ]; then
+    source core/config/arxiv_repository.env
+    echo "✅ Loaded credentials from core/config/arxiv_repository.env"
 else
-    echo "❌ ERROR: config/arxiv_repository.env not found"
+    echo "❌ ERROR: core/config/arxiv_repository.env not found"
     echo "Please run: python dev-utils/setup_arxiv_database.py"
     exit 1
 fi
@@ -68,7 +68,7 @@ echo "Test Complete!"
 echo "=========================================="
 echo ""
 echo "To monitor progress (in another terminal):"
-echo "  source config/arxiv_repository.env"
+echo "  source core/config/arxiv_repository.env"
 echo "  python dev-utils/simple_monitor.py \\"
 echo "    --database arxiv_repository \\"
 echo "    --collection arxiv_abstract_embeddings \\"
@@ -76,7 +76,7 @@ echo "    --username arxiv_reader \\"
 echo "    --password-env ARXIV_READER_PASSWORD"
 echo ""
 echo "For full production run:"
-echo "  source config/arxiv_repository.env"
+echo "  source core/config/arxiv_repository.env"
 echo "  python -m core.workflows.workflow_arxiv_sorted \\"
 echo "    --database arxiv_repository \\"
 echo "    --username arxiv_writer \\"

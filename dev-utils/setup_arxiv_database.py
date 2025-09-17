@@ -316,19 +316,19 @@ class ArxivDatabaseSetup:
 
         print("\n🔐 Connection Examples:")
         print("\nFor workflow processing (use arxiv_writer):")
-        print(f"  export ARXIV_WRITER_PASSWORD='{passwords.get('arxiv_writer', 'check config/arxiv_repository.env')}'")
+        print(f"  export ARXIV_WRITER_PASSWORD='{passwords.get('arxiv_writer', 'check core/config/arxiv_repository.env')}'")
         print(f"  python -m core.workflows.workflow_arxiv_sorted \\")
         print(f"    --database {self.db_name} \\")
         print(f"    --username arxiv_writer")
 
         print("\nFor monitoring (use arxiv_reader):")
-        print(f"  export ARXIV_READER_PASSWORD='{passwords.get('arxiv_reader', 'check config/arxiv_repository.env')}'")
+        print(f"  export ARXIV_READER_PASSWORD='{passwords.get('arxiv_reader', 'check core/config/arxiv_repository.env')}'")
         print(f"  python dev-utils/simple_monitor.py \\")
         print(f"    --database {self.db_name} \\")
         print(f"    --username arxiv_reader")
 
         print("\n⚠️  SECURITY NOTES:")
-        print("  1. Credentials saved to config/arxiv_repository.env")
+        print("  1. Credentials saved to core/config/arxiv_repository.env")
         print("  2. Keep this file secure and never commit to git")
         print("  3. Add 'config/*.env' to .gitignore")
         print("  4. Use environment variables in production")

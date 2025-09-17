@@ -112,7 +112,7 @@ class ArxivSortedWorkflow:
     """Simplified size-sorted ArXiv processing workflow.
     
     HADES Framework Implementation:
-    - W (What): High-quality embeddings via jina-v3 model
+    - W (What): High-quality embeddings via jina-v4 model
     - R (Where): Size-sorted processing for optimal GPU cache locality
     - H (Who): Multi-worker GPU agents with configurable parallelism
     - T (Time): Minimized via batching and sorted processing
@@ -239,7 +239,7 @@ class ArxivSortedWorkflow:
                 args=(
                     i,
                     gpu_id,
-                    'jinaai/jina-embeddings-v3',
+                    'jinaai/jina-embeddings-v4',
                     self.input_queue,
                     self.output_queue,
                     self.stop_event
@@ -421,7 +421,7 @@ class ArxivSortedWorkflow:
                     'paper_key': sanitized_id,
                     'embedding': chunk.embedding.tolist(),
                     'embedding_dim': len(chunk.embedding),
-                    'model': 'jinaai/jina-embeddings-v3',
+                    'model': 'jinaai/jina-embeddings-v4',
                     'created_at': datetime.now().isoformat()
                 }
                 txn.collection(self.embeddings_collection).insert(embedding_doc, overwrite=True)

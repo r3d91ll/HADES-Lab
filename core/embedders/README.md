@@ -66,7 +66,7 @@ from core.embedders import JinaV4Embedder
 
 # Initialize with configuration
 embedder = JinaV4Embedder(
-    model_name="jinaai/jina-embeddings-v3",
+    model_name="jinaai/jina-embeddings-v4",
     device="cuda",
     use_fp16=True,  # Memory efficient
     trust_remote_code=True
@@ -95,7 +95,7 @@ from core.embedders import EmbedderFactory
 # From configuration dict
 config = {
     "type": "jina_v4",
-    "model_name": "jinaai/jina-embeddings-v3",
+    "model_name": "jinaai/jina-embeddings-v4",
     "device": "cuda",
     "batch_size": 32
 }
@@ -111,7 +111,7 @@ embedder = EmbedderFactory.from_config("embedding_config.yaml")
 
 ```python
 embedder = JinaV4Embedder(
-    model_name="jinaai/jina-embeddings-v3",
+    model_name="jinaai/jina-embeddings-v4",
     max_seq_length=8192,
     dimensions=1024
 )
@@ -316,7 +316,7 @@ class CachedEmbedder(JinaV4Embedder):
 # embedding_config.yaml
 embedding:
   type: jina_v4
-  model_name: jinaai/jina-embeddings-v3
+  model_name: jinaai/jina-embeddings-v4
   device: cuda
   batch_size: 32
   use_fp16: true
@@ -335,7 +335,7 @@ export CUDA_VISIBLE_DEVICES=0,1
 export EMBEDDING_DEVICE=cuda
 
 # Model settings
-export EMBEDDING_MODEL=jinaai/jina-embeddings-v3
+export EMBEDDING_MODEL=jinaai/jina-embeddings-v4
 export EMBEDDING_BATCH_SIZE=32
 export USE_FP16=true
 ```
@@ -405,7 +405,7 @@ def validate_embeddings(embeddings: np.ndarray) -> bool:
 ```python
 # For general use
 embedder = JinaV4Embedder(
-    model_name="jinaai/jina-embeddings-v3",
+    model_name="jinaai/jina-embeddings-v4",
     dimensions=1024
 )
 

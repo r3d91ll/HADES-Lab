@@ -287,51 +287,64 @@ class SentenceTransformersEmbedder(EmbedderBase):
                                        texts: List[str],
                                        task: str = "retrieval.passage") -> List[List[ChunkWithEmbedding]]:
         """
-        For abstracts, just embed directly without chunking.
+        Universal chunking - handles any length text consistently.
 
-        Since abstracts are typically < 1000 tokens, we can embed them directly
-        for better performance and true contextual embeddings.
+        Simple rule: Always chunk based on chunk_size_tokens.
+        - Text <= chunk_size: 1 chunk
+        - Text > chunk_size: Multiple chunks with overlap
+
+        No special cases, no assumptions about text length.
 
         Args:
-            texts: List of document texts (abstracts)
+            texts: List of document texts (any length)
             task: Task type
 
         Returns:
-            List of lists of ChunkWithEmbedding objects (single chunk per abstract)
+            List of lists of ChunkWithEmbedding objects
         """
         if not texts:
             return []
 
-        # For abstracts, just embed directly - no chunking needed!
-        logger.info(f"Direct embedding {len(texts)} abstracts for maximum throughput")
-
-        # Batch process all abstracts at once
-        embeddings = self.embed_batch(
-            texts,
-            batch_size=self.batch_size,
-            task=task,
-            show_progress=False
-        )
-
-        # Create single chunk per abstract (no chunking for short texts)
         all_results = []
-        for idx, (text, embedding) in enumerate(zip(texts, embeddings)):
-            if text:
-                chunk = ChunkWithEmbedding(
-                    text=text,
-                    embedding=embedding,
-                    start_char=0,
-                    end_char=len(text),
-                    start_token=0,
-                    end_token=len(text) // 4,  # Rough estimate
-                    chunk_index=0,
-                    total_chunks=1,
-                    context_window_used=len(text) // 4
-                )
-                all_results.append([chunk])
-            else:
-                all_results.append([])
 
+        # Process each text through the standard chunking pipeline
+        for text in texts:
+            if not text:
+                all_results.append([])
+                continue
+
+            # Always use the standard chunking logic - no special cases
+            chunks = self._prepare_chunks(text)
+
+            # Extract texts for embedding
+            chunk_texts = [c['text'] for c in chunks]
+
+            # Embed all chunks
+            embeddings = self.embed_batch(
+                chunk_texts,
+                batch_size=min(len(chunk_texts), self.batch_size),
+                task=task,
+                show_progress=False
+            )
+
+            # Create ChunkWithEmbedding objects
+            chunk_objects = []
+            for chunk_info, embedding in zip(chunks, embeddings):
+                chunk_objects.append(ChunkWithEmbedding(
+                    text=chunk_info['text'],
+                    embedding=embedding,
+                    start_char=chunk_info['start_char'],
+                    end_char=chunk_info['end_char'],
+                    start_token=chunk_info['start_token'],
+                    end_token=chunk_info['end_token'],
+                    chunk_index=chunk_info['chunk_index'],
+                    total_chunks=chunk_info['total_chunks'],
+                    context_window_used=chunk_info['context_size']
+                ))
+
+            all_results.append(chunk_objects)
+
+        logger.info(f"Processed {len(texts)} texts into chunks (standard chunking)")
         return all_results
 
     def _late_chunk_long_text(self, text: str, task: str) -> List[ChunkWithEmbedding]:

@@ -27,7 +27,7 @@ class TestEmbedderFactory(unittest.TestCase):
         """Test model name to embedder type mapping."""
         test_cases = [
             ("jinaai/jina-embeddings-v4", "jina"),
-            ("jinaai/jina-embeddings-v3", "jina"),
+            ("jinaai/jina-embeddings-v4", "jina"),
             ("sentence-transformers/all-MiniLM-L6-v2", "sentence"),
             ("st-something", "sentence"),
             ("text-embedding-ada-002", "openai"),
