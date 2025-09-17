@@ -27,11 +27,13 @@ class ArxivDatabaseSetup:
 
     def __init__(self, root_password: str, host: str = 'http://localhost:8529'):
         """
-        Initialize database setup.
-
-        Args:
-            root_password: Root password for ArangoDB
-            host: ArangoDB host URL
+        Initialize an ArxivDatabaseSetup instance and prepare ArangoDB configuration metadata.
+        
+        Creates an ArangoDB client connected to the _system database, sets the target database name (arxiv_repository), and populates in-memory configuration for RBAC users (admin, writer, reader) and the collections with their desired index definitions used later by the setup workflow.
+        
+        Parameters:
+            root_password (str): Root password for the ArangoDB '_system' user used to perform administrative operations.
+            host (str): ArangoDB HTTP endpoint (e.g., 'http://localhost:8529').
         """
         self.client = ArangoClient(hosts=host)
         self.sys_db = self.client.db('_system', username='root', password=root_password)
@@ -100,19 +102,31 @@ class ArxivDatabaseSetup:
         }
 
     def generate_password(self, length: int = 24) -> str:
-        """Generate a secure random password."""
+        """
+        Generate a cryptographically secure random password.
+        
+        Parameters:
+            length (int): Desired length of the password (default 24). Must be a positive integer.
+        
+        Returns:
+            str: A password of the requested length containing ASCII letters, digits, and the symbols !@#$%^&*.
+        """
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
         return ''.join(secrets.choice(alphabet) for _ in range(length))
 
     def create_database(self, drop_existing: bool = False) -> bool:
         """
-        Create the arxiv_repository database.
-
-        Args:
-            drop_existing: Whether to drop existing database
-
+        Create the target ArangoDB database for the repository, optionally dropping an existing one.
+        
+        If the database named by self.db_name already exists, this will either return successfully (no-op)
+        or drop it first when drop_existing is True, then create a fresh database. Any exceptions are
+        caught and cause the method to return False.
+        
+        Parameters:
+            drop_existing (bool): If True, delete an existing database with the same name before creating it.
+        
         Returns:
-            True if database was created or already exists
+            bool: True when the database exists or was created successfully; False on error.
         """
         try:
             if self.sys_db.has_database(self.db_name):
@@ -135,10 +149,17 @@ class ArxivDatabaseSetup:
 
     def create_users(self) -> Dict[str, str]:
         """
-        Create database users with appropriate permissions.
-
+        Create or update the configured ArangoDB users and assign database permissions.
+        
+        For each user defined in self.users this will:
+        - Generate a secure random password and include it in the returned mapping.
+        - Create the user if missing, or update the existing user's password and activate the account.
+        - Set the user's permission for the target database (self.db_name) according to the user's configuration.
+        
+        Errors for individual users are caught and logged (function continues processing other users); exceptions are not propagated.
+        
         Returns:
-            Dictionary of usernames and their passwords
+            Dict[str, str]: Mapping of username -> generated password for each processed user.
         """
         passwords = {}
 
@@ -181,10 +202,16 @@ class ArxivDatabaseSetup:
 
     def create_collections(self) -> bool:
         """
-        Create collections with proper indexes.
-
+        Create the configured collections in the target database and ensure their indexes exist.
+        
+        This connects to the target ArangoDB database using administrative credentials (currently `root`) and, for each collection declared in self.collections:
+        - creates the collection if it does not exist;
+        - creates configured indexes of types `hash`, `skiplist`, and `fulltext` with the provided fields and options (`unique` for hash/skiplist, `minLength` for fulltext).
+        
+        Index creation tolerates already-existing indexes (duplicate-index errors are ignored); other index creation errors are reported and cause the method to continue or abort depending on the collection-level error.
+        
         Returns:
-            True if all collections were created successfully
+            bool: True when all collections and their indexes were ensured successfully; False if any collection or global operation failed.
         """
         try:
             # Connect to the arxiv database with admin user
@@ -240,14 +267,18 @@ class ArxivDatabaseSetup:
 
     def save_credentials(self, passwords: Dict[str, str], output_dir: str = "config") -> bool:
         """
-        Save credentials to secure configuration files.
-
-        Args:
-            passwords: Dictionary of usernames and passwords
-            output_dir: Directory to save configuration files
-
+        Write generated user passwords and a machine-readable config to disk.
+        
+        Creates `output_dir` (if missing) and writes two files for the configured database:
+        - an environment file named `<db_name>.env` containing ARXIV_DB_NAME, ARXIV_DB_HOST, and per-user password variables. Username keys are uppercased and hyphens replaced with underscores (e.g. `arxiv-writer` -> `ARXIV_WRITER_PASSWORD`). The env file is written with restrictive permissions (0600).
+        - a JSON config named `<db_name>_config.json` containing the database name, host, user metadata (description, role, permissions) and the list of collection names. The JSON file is written with permissions 0644.
+        
+        Parameters:
+            passwords (Dict[str, str]): Mapping of username -> plaintext password to persist.
+            output_dir (str): Directory path where the files will be created (default: "config").
+        
         Returns:
-            True if credentials were saved successfully
+            bool: True if both files were written and permission bits applied successfully; False if any error occurred.
         """
         try:
             output_path = Path(output_dir)
@@ -300,7 +331,18 @@ class ArxivDatabaseSetup:
             return False
 
     def print_connection_info(self, passwords: Dict[str, str]):
-        """Print connection information for users."""
+        """
+        Print a concise connection summary and usage examples for the created database users.
+        
+        This writes a human-readable summary to standard output including:
+        - the database name, host, and collection count;
+        - a list of created users with their role and permissions;
+        - example shell commands showing how to export the generated passwords for the `arxiv_writer` and `arxiv_reader` users and example commands to run common workflows/monitoring tools;
+        - brief security reminders about storing and protecting the generated credentials.
+        
+        Parameters:
+            passwords (Dict[str, str]): Mapping of username -> generated password used to populate the example export commands. If a password is missing for a user, the example output points callers to the config file path.
+        """
         print("\n" + "=" * 60)
         print("DATABASE SETUP COMPLETE")
         print("=" * 60)
@@ -336,13 +378,14 @@ class ArxivDatabaseSetup:
 
     def setup(self, drop_existing: bool = False) -> bool:
         """
-        Run complete database setup.
-
-        Args:
-            drop_existing: Whether to drop existing database
-
+        Orchestrate the end-to-end setup of the `arxiv_repository` ArangoDB instance.
+        
+        Performs the full workflow in sequence: create (or optionally drop and recreate) the database, provision RBAC users and generated passwords, create collections and indexes, persist credentials/config files, and print connection/usage information. The process stops and returns False immediately if any step fails.
+        Parameters:
+            drop_existing (bool): If True, drop an existing `arxiv_repository` database before creating it.
+        
         Returns:
-            True if setup completed successfully
+            bool: True when all setup steps complete successfully; False if any step fails.
         """
         print("🚀 Starting ArXiv Repository Database Setup")
         print("=" * 60)
@@ -372,7 +415,17 @@ class ArxivDatabaseSetup:
 
 
 def main():
-    """Main entry point."""
+    """
+    CLI entry point to create and configure the arxiv_repository ArangoDB database.
+    
+    Parses command-line flags:
+    - --drop-existing: if present, an existing database with the same name will be dropped before creation.
+    - --host: ArangoDB host URL (default: "http://localhost:8529").
+    
+    Requires the ARANGO_PASSWORD environment variable to contain the ArangoDB root password; if it is not set the function prints an error and exits with code 1.
+    
+    Orchestrates the setup by instantiating ArxivDatabaseSetup(root_password, host) and calling its setup(drop_existing) method. Exits the process with status code 0 on successful setup or 1 on failure.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(

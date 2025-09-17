@@ -9,7 +9,22 @@ from core.embedders.embedders_jina import JinaV4Embedder
 
 
 def test_jina_v4() -> bool:
-    """Test Jina v4 embedder."""
+    """
+    Run a basic integration test of the JinaV4Embedder.
+    
+    Performs three checks:
+    1. Embeds two text samples with embed_texts and asserts the result has shape (2, 2048).
+    2. Embeds one code snippet with embed_code and asserts the result has shape (1, 2048).
+    3. Processes a long document with process_long_document to verify late-chunking produces chunk metadata and embeddings (prints details of the first chunk if any).
+    
+    The embedder is instantiated on "cuda" when available, otherwise "cpu".
+    
+    Returns:
+        True on success.
+    
+    Raises:
+        AssertionError: if any embedding shape assertion fails.
+    """
     print("Testing Jina v4 Embedder...")
 
     # Initialize embedder

@@ -21,7 +21,17 @@ from core.tools.arxiv.arxiv_metadata_config import ArxivMetadataConfig
 
 
 def main():
-    """Run test with 1000 records."""
+    """
+    Run an end-to-end integration test of the ArXiv metadata workflow using 1,000 records.
+    
+    Validates a test configuration, instantiates ArxivMetadataWorkflow, executes processing, prints a summary of results
+    (including throughput if available), and verifies that the expected ArangoDB collections exist and reports their
+    document counts. Requires the ARANGO_PASSWORD environment variable; if it is not set the function prints an error
+    and exits the process with status 1. The function prints progress and diagnostic information to stdout.
+    
+    Returns:
+        bool: True if the test run completed and reported success, False if the run failed or was interrupted.
+    """
 
     print("=" * 60)
     print("ArXiv Metadata Processing Test")

@@ -20,7 +20,17 @@ sys.path.insert(0, str(project_root))
 from core.database.database_factory import DatabaseFactory
 
 def check_database_status():
-    """Check current database status."""
+    """
+    Get current document counts for the 'arxiv_metadata' and 'arxiv_abstract_embeddings' collections in the 'academy_store' ArangoDB and print a short status report.
+    
+    Returns:
+        tuple: (metadata_count, embeddings_count) — document counts for `arxiv_metadata` and `arxiv_abstract_embeddings`, respectively.
+    
+    Notes:
+        - Connects using DatabaseFactory.get_arango(database='academy_store', username='root', use_unix=True').
+        - Prints a formatted status block to stdout.
+        - Database-related exceptions are not caught and will propagate.
+    """
     db = DatabaseFactory.get_arango(
         database='academy_store',
         username='root',
@@ -39,6 +49,19 @@ def check_database_status():
     return metadata_count, embeddings_count
 
 def main():
+    """
+    Display a guided test run for the ArXiv workflow resume behavior and report current processing progress.
+    
+    Prints:
+    - a header and initial database status by calling check_database_status(),
+    - example commands to run three resume-related scenarios (process 100, process 200 with --resume, and full resume),
+    - a monitoring command suggestion,
+    - a summary that compares a hard-coded total record count (2,828,998) with the number of already processed embeddings and an estimated remaining processing time at 33 docs/sec.
+    
+    Side effects:
+    - Writes multiple informational lines to standard output.
+    - Calls check_database_status(), which may raise exceptions from database access failures.
+    """
     print("=" * 60)
     print("ArXiv Workflow Resume Test")
     print("=" * 60)

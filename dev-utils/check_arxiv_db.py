@@ -43,10 +43,10 @@ class ArxivDBChecker:
 
     def __init__(self, database: str = "academy_store"):
         """
-        Initialize database checker.
-
-        Args:
-            database: ArangoDB database name
+        Create an ArxivDBChecker for the given ArangoDB database.
+        
+        Parameters:
+            database (str): Name of the ArangoDB database to inspect (default: "academy_store").
         """
         self.database = database
         self.db = None
@@ -57,7 +57,12 @@ class ArxivDBChecker:
         self.embeddings_collection = "arxiv_abstract_embeddings"
 
     def connect(self):
-        """Connect to ArangoDB via Unix socket."""
+        """
+        Connect to ArangoDB using a Unix socket and store the client on self.db.
+        
+        Attempts to obtain an ArangoDB connection via DatabaseFactory.get_arango (root user, unix socket).
+        On success sets self.db to the database client and returns True; on failure leaves self.db unset and returns False.
+        """
         try:
             self.db = DatabaseFactory.get_arango(
                 database=self.database,
@@ -73,10 +78,17 @@ class ArxivDBChecker:
 
     def check_collections(self) -> Dict[str, Any]:
         """
-        Check all collections and return basic statistics.
-
-        Returns:
-            Dictionary with collection statistics
+        Return basic statistics for the three ArXiv collections (metadata, chunks, embeddings).
+        
+        Per collection this checks existence in the connected ArangoDB instance, retrieves a document
+        count and collection properties (when present), prints a short human-readable overview,
+        and returns a dictionary keyed by collection name. Each value contains:
+        - 'exists' (bool)
+        - 'count' (int)
+        - 'properties' (dict) — present only when the collection exists.
+        
+        The printed size estimate (when available) is derived from collection properties and is
+        approximate.
         """
         stats = {}
 
@@ -118,13 +130,15 @@ class ArxivDBChecker:
 
     def check_metadata_sample(self, sample_size: int = 3) -> List[Dict]:
         """
-        Check sample metadata documents.
-
+        Retrieve up to `sample_size` sample documents from the metadata collection and print a concise summary for each.
+        
+        If the metadata collection is missing, returns an empty list. For each retrieved document this method prints key fields (arxiv_id, title, authors, categories, has_abstract, abstract length, processed_at) and returns the list of documents.
+        
         Args:
-            sample_size: Number of samples to retrieve
-
+            sample_size (int): Maximum number of metadata documents to fetch and display.
+        
         Returns:
-            List of sample documents
+            List[Dict]: The sampled metadata documents (empty if the collection does not exist).
         """
         if not self.db.has_collection(self.metadata_collection):
             return []
@@ -156,13 +170,15 @@ class ArxivDBChecker:
 
     def check_chunks_sample(self, sample_size: int = 3) -> List[Dict]:
         """
-        Check sample chunk documents.
-
-        Args:
-            sample_size: Number of samples to retrieve
-
+        Retrieve and print a small sample of chunk documents from the chunks collection.
+        
+        Fetches up to `sample_size` documents from the configured chunks collection, prints a concise human-readable summary of each sample (id, arXiv id, chunk index/total, text length and preview, token range, context window), and returns the raw documents as a list of dicts. If the chunks collection does not exist, returns an empty list.
+        
+        Parameters:
+            sample_size (int): Maximum number of chunk documents to retrieve.
+        
         Returns:
-            List of sample documents
+            List[Dict]: The retrieved chunk documents (may be empty).
         """
         if not self.db.has_collection(self.chunks_collection):
             return []
@@ -194,13 +210,15 @@ class ArxivDBChecker:
 
     def check_embeddings_sample(self, sample_size: int = 3) -> List[Dict]:
         """
-        Check sample embedding documents and verify dimensions.
-
-        Args:
-            sample_size: Number of samples to retrieve
-
+        Return a small set of embedding documents from the embeddings collection and print a brief summary for each.
+        
+        If the embeddings collection is not present, an empty list is returned. For each returned document this prints key fields (document key, chunk_id, arxiv_id, embedding_dim, model). If an embedding vector is present, basic statistics (mean, standard deviation, min, max) are computed on the first 100 dimensions and printed.
+        
+        Parameters:
+            sample_size (int): Maximum number of embedding documents to retrieve.
+        
         Returns:
-            List of sample documents
+            List[Dict]: The list of retrieved embedding documents (possibly empty if the collection is missing).
         """
         if not self.db.has_collection(self.embeddings_collection):
             return []
@@ -241,10 +259,21 @@ class ArxivDBChecker:
 
     def calculate_statistics(self) -> Dict[str, Any]:
         """
-        Calculate comprehensive statistics about the processed data.
-
-        Returns:
-            Dictionary with detailed statistics
+        Compute and return detailed verification statistics about the ArXiv collections.
+        
+        Returns a dictionary of computed metrics. Possible keys:
+        - papers_with_chunks (int): Number of distinct papers that have at least one chunk.
+        - avg_chunks_per_paper (float): Mean number of chunks per paper (when chunks exist).
+        - min_chunks_per_paper (int): Minimum chunks found for a paper.
+        - max_chunks_per_paper (int): Maximum chunks found for a paper.
+        - embedding_dimensions (List[int]): Up to 10 distinct embedding dimensions observed in the embeddings collection.
+          Note: the code treats 2048 as the expected embedding dimension (Jina v4).
+        - processing_timeline (dict): Aggregate processing timestamps from metadata documents with these fields:
+            - first (str): ISO8601 timestamp of the earliest processed_at value.
+            - last (str): ISO8601 timestamp of the latest processed_at value.
+            - total (int): Number of metadata documents with a non-null processed_at.
+        
+        Only keys for which data is available are included in the returned dictionary.
         """
         stats = {}
 
@@ -347,11 +376,27 @@ class ArxivDBChecker:
 
     def run_verification(self, detailed: bool = False, sample_size: int = 3):
         """
-        Run complete verification process.
-
-        Args:
-            detailed: Show detailed statistics
-            sample_size: Number of samples to show
+        Run the full verification workflow for the ArXiv database and print a human-readable report.
+        
+        This method orchestrates the end-to-end checks:
+        - establishes a connection to ArangoDB (calls self.connect()); aborts early if connection fails,
+        - inspects the three target collections and gathers counts/properties (self.check_collections()),
+        - optionally prints representative samples from metadata, chunks, and embeddings (controlled by
+          `detailed` and `sample_size` via self.check_metadata_sample / self.check_chunks_sample /
+          self.check_embeddings_sample),
+        - computes and prints aggregated statistics and consistency checks (self.calculate_statistics()),
+        - prints a final verification summary comparing metadata, chunks, and embeddings and reports
+          per-paper chunk ratios when applicable.
+        
+        Parameters:
+            detailed (bool): If True, show detailed output and samples. If False, samples are still shown
+                when `sample_size` > 0.
+            sample_size (int): Number of example documents to fetch and display from each collection
+                when samples are enabled.
+        
+        Side effects:
+            - Prints progress, samples, statistics, and summary to standard output.
+            - May return early without raising if connection fails or no documents are present.
         """
         print("\n" + "="*60)
         print("ARXIV DATABASE VERIFICATION TOOL")
@@ -416,7 +461,17 @@ class ArxivDBChecker:
 
 
 def main():
-    """Main entry point."""
+    """
+    Command-line entry point that parses arguments and runs the ArXiv ArangoDB verification.
+    
+    Parses:
+      --detailed (flag): show detailed statistics and samples.
+      --sample-size (int): number of sample documents to display (default 3).
+      --database (str): ArangoDB database name to inspect (default "academy_store").
+    
+    Requires the ARANGO_PASSWORD environment variable to be set; exits with status 1 if missing.
+    Instantiates ArxivDBChecker with the selected database and invokes run_verification using the parsed options.
+    """
     parser = argparse.ArgumentParser(
         description="Verify ArXiv data in ArangoDB"
     )

@@ -32,14 +32,18 @@ from core.monitoring.progress_tracker import ProgressTracker
 
 def load_config(config_path: str, mode: str = "default") -> ArxivMetadataConfig:
     """
-    Load configuration from YAML file with mode overrides.
-
-    Args:
-        config_path: Path to YAML configuration file
-        mode: Configuration mode (test, development, production)
-
+    Load an ArxivMetadataConfig from a YAML file and apply mode-specific overrides.
+    
+    Loads YAML from config_path, promotes any keys defined under the chosen mode (e.g., "test", "development", "production")
+    into the top-level config (overwriting top-level values), and removes the mode sections before constructing
+    and returning an ArxivMetadataConfig.
+    
+    Parameters:
+        config_path (str): Path to the YAML configuration file.
+        mode (str): Mode whose section should be applied as overrides (commonly "test", "development", or "production").
+    
     Returns:
-        ArxivMetadataConfig instance
+        ArxivMetadataConfig: Config instance built from the merged YAML data.
     """
     # Load YAML file
     with open(config_path, 'r') as f:
@@ -71,7 +75,17 @@ def print_banner():
 
 
 def print_config_summary(config: ArxivMetadataConfig, mode: str):
-    """Print configuration summary."""
+    """
+    Print a concise, human-readable summary of the pipeline configuration to stdout.
+    
+    Displays key settings from the provided ArxivMetadataConfig (metadata file, record limits, batch sizes,
+    database and embedder settings, GPU usage, checkpoint interval, and target throughput) under a header
+    showing the selected mode.
+    
+    Parameters:
+        config (ArxivMetadataConfig): Configuration object whose fields will be summarized.
+        mode (str): Mode name (e.g., "test", "development", "production") shown in the header.
+    """
     print(f"Configuration Mode: {mode.upper()}")
     print("-" * 40)
     print(f"  Metadata file: {config.metadata_file}")
@@ -89,7 +103,11 @@ def print_config_summary(config: ArxivMetadataConfig, mode: str):
 
 
 def confirm_production():
-    """Confirm production run."""
+    """
+    Prompt the user to confirm running in production mode.
+    
+    Displays a prominent warning about processing ~2.8 million records and the estimated runtime, then prompts the user for confirmation. Blocks waiting for stdin and returns True only if the user types "yes" (case-insensitive); otherwise returns False.
+    """
     print("⚠️  WARNING: Production Mode")
     print("This will process approximately 2.8 MILLION records!")
     print("Estimated time: 16+ hours")
@@ -99,7 +117,25 @@ def confirm_production():
 
 
 def main():
-    """Main CLI entry point."""
+    """
+    Entry point for the ArXiv metadata processing CLI.
+    
+    Parses command-line arguments, loads and applies a YAML configuration (with per-mode overrides),
+    applies CLI overrides, validates the final configuration, selects and runs the appropriate workflow
+    (single-GPU or parallel multi-GPU), and prints run results and progress.
+    
+    Behavior notes:
+    - Reads ARANGO_PASSWORD from the environment and aborts early if missing.
+    - Prompts for explicit confirmation when run in production mode unless --confirm is provided.
+    - Supports CLI overrides: drop-collections, --max-records / --count, --resume, --workers, --batch-size, --no-gpu, and log level.
+    - Auto-adjusts batch size when increasing workers if batch size is not explicitly provided.
+    - On successful completion, prints summary statistics (processed, failed, duration, throughput).
+    - If interrupted by KeyboardInterrupt, saves progress to checkpoints and exits with code 130.
+    - On normal completion, exits with code 0 on success or 1 on failure; other failures also result in exit code 1.
+    
+    Side effects:
+    - Writes to stdout/stderr, configures logging, may prompt the user, and may call sys.exit().
+    """
     parser = argparse.ArgumentParser(
         description="Process ArXiv metadata with embeddings"
     )

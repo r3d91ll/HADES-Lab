@@ -20,7 +20,14 @@ def generate_password(length: int = 24) -> str:
 
 
 def main():
-    """Main setup function using environment variables."""
+    """
+    Provision an ArangoDB database, users, collections, and a credentials file using environment variables and optional CLI flags.
+    
+    Reads configuration from environment variables (e.g. DB_NAME, ROOT_PASSWORD, DB_HOST/UNIX_SOCKET, user names/passwords, COLLECTIONS_JSON) and optional flags (--drop-existing, --quiet, --auto). Connects to the ArangoDB _system database as root to create or (optionally) recreate the target database, create or update three role users (admin, writer, reader) and their database permissions, create any specified collections, and write a restricted-permissions environment file with generated or provided credentials into CONFIG_DIR.
+    
+    Returns:
+        int: 0 on successful completion; 1 if any step (connection, database creation, user management, collection creation, or writing the credentials file) fails.
+    """
 
     # Get configuration from environment
     db_name = os.environ.get('DB_NAME', 'arxiv_repository')

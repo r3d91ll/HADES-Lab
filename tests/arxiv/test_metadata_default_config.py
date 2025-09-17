@@ -22,7 +22,14 @@ from core.tools.arxiv.arxiv_metadata_config import ArxivMetadataConfig
 
 
 def test_default_config():
-    """Test that default configuration loads and validates correctly."""
+    """
+    Validate the default ArXiv metadata workflow configuration with lightweight test overrides.
+    
+    Loads the default YAML config at core/config/workflows/arxiv_metadata_default.yaml, applies test-specific overrides (reduced max_records, batch sizes, checkpoint/monitor intervals, and target throughput), instantiates ArxivMetadataConfig, runs full validation and semantic validation, and prints a compact report of selected configuration fields and validation results.
+    
+    Returns:
+        bool: True if full validation succeeded and no blocking semantic errors were found; False if full validation raises an exception or other fatal error occurs.
+    """
 
     print("=" * 60)
     print("Testing Default Configuration")
@@ -83,7 +90,19 @@ def test_default_config():
 
 
 def test_default_workflow():
-    """Test workflow execution with default configuration."""
+    """
+    Execute the ArXiv metadata workflow using the default YAML configuration with test overrides.
+    
+    Loads core/config/workflows/arxiv_metadata_default.yaml, applies lightweight overrides (e.g., max_records, batch_size, embedding_batch_size, checkpoint_interval, monitor_interval, target_throughput, drop_collections), constructs ArxivMetadataConfig and ArxivMetadataWorkflow, then runs workflow.execute().
+    
+    Important behavior:
+    - Requires the ARANGO_PASSWORD environment variable to be set; otherwise the function returns False without running.
+    - The override drop_collections=True will request a clean start for the test run.
+    - Prints a brief execution summary (success flag, processed/failed counts, duration, and throughput when available).
+    
+    Returns:
+        bool: True if the workflow completed successfully (result.success is True); False on configuration/environment issues, execution failure, or exceptions.
+    """
 
     print("=" * 60)
     print("Testing Workflow with Default Configuration")
@@ -146,7 +165,18 @@ def test_default_workflow():
 
 
 def main():
-    """Run all default configuration tests."""
+    """
+    Run the default-configuration test suite.
+    
+    Performs two checks in sequence:
+    1. Validates the default ArXiv metadata configuration using test overrides.
+    2. If validation succeeds, attempts to execute the workflow with the default configuration (and test overrides).
+    
+    Prints progress, warnings, and a final summary to stdout.
+    
+    Returns:
+        bool: True if all tests pass; False if any test fails.
+    """
 
     print("=" * 70)
     print("DEFAULT CONFIGURATION TEST SUITE")

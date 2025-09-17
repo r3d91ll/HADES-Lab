@@ -29,7 +29,11 @@ class TestArxivSortedWorkflow(unittest.TestCase):
     """Test suite for ArxivSortedWorkflow."""
 
     def setUp(self):
-        """Set up test fixtures."""
+        """
+        Prepare test fixtures for ArxivSortedWorkflow tests.
+        
+        Creates a small in-memory dataset of four synthetic paper records with varying abstract lengths, writes them to a temporary JSONL file, and constructs an ArxivMetadataConfig pointing to that file. The config uses batch_size=2, embedding_batch_size=2, single worker, CPU-only embedding, resume_from_checkpoint=False, and a test arango database/collection names.
+        """
         # Create test metadata
         self.test_metadata = [
             {
@@ -83,7 +87,12 @@ class TestArxivSortedWorkflow(unittest.TestCase):
         )
 
     def tearDown(self):
-        """Clean up test fixtures."""
+        """
+        Remove the temporary metadata file created for tests.
+        
+        This teardown method deletes the temporary JSONL file referenced by self.temp_file.
+        If the file is already absent, deletion is ignored (no exception raised).
+        """
         Path(self.temp_file.name).unlink(missing_ok=True)
 
     @patch('core.workflows.workflow_arxiv_sorted.DatabaseFactory')

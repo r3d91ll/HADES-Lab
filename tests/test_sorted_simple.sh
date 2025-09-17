@@ -22,29 +22,34 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
-# Function to print colored output
+# print_header prints a cyan-formatted header block containing the given title string.
 print_header() {
     echo -e "\n${CYAN}========================================${NC}"
     echo -e "${CYAN}$1${NC}"
     echo -e "${CYAN}========================================${NC}\n"
 }
 
+# print_info prints an informational message prefixed with a blue `[INFO]` tag.
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
+# print_success prints a green "[✓] " success message prefix followed by the provided text.
 print_success() {
     echo -e "${GREEN}[✓]${NC} $1"
 }
 
+# print_warning prints a warning message prefixed with a yellow warning symbol (⚠) and resets terminal color.
 print_warning() {
     echo -e "${YELLOW}[⚠]${NC} $1"
 }
 
+# print_error prints an error message (first argument) prefixed with a red cross and resets terminal color.
 print_error() {
     echo -e "${RED}[✗]${NC} $1"
 }
 
+# print_metric prints a colored metric message prefixed with "[METRIC]" to stdout; accepts a single string argument describing the metric.
 print_metric() {
     echo -e "${MAGENTA}[METRIC]${NC} $1"
 }
@@ -117,7 +122,7 @@ if [ -d "$VENV_PATH" ]; then
     print_success "Virtual environment activated"
 fi
 
-# Function to setup database
+# setup_database attempts to initialize the test database (runs dev-utils/create_arxiv_repository_db.py if present) and, if passed true, warns that collections will be dropped and recreated.
 setup_database() {
     local drop_collections=$1
 
@@ -133,7 +138,14 @@ setup_database() {
     fi
 }
 
-# Function to run test
+# run_test executes the workflow script with the given test configuration, captures and parses its output for metrics, measures duration, and reports success or failure.
+# It sets CUDA_VISIBLE_DEVICES when GPUs are requested (and available) and optionally includes --drop-collections to reset database state.
+# Arguments:
+#   records         - number of records to process
+#   workers         - number of worker processes to use
+#   batch_size      - processing batch size (embedding batch size is set to half of this)
+#   gpus            - number of GPUs to request (0 forces CPU)
+#   drop_collections - "true" to pass --drop-collections to the workflow and start from a clean DB
 run_test() {
     local records=$1
     local workers=$2
@@ -218,7 +230,7 @@ run_test() {
     fi
 }
 
-# Function to check database status
+# check_database checks the ArangoDB connection, verifies the required collections (arxiv_metadata, arxiv_abstract_chunks, arxiv_abstract_embeddings), prints per-collection document counts or missing status, and returns non-zero on failure.
 check_database() {
     print_info "Checking database status..."
 
@@ -257,7 +269,7 @@ except Exception as e:
     print_success "Database status checked"
 }
 
-# Function to monitor GPU usage
+# monitor_gpu prints per-GPU utilization and memory usage using `nvidia-smi` when GPUs are available.
 monitor_gpu() {
     if [ "$GPU_COUNT" -gt 0 ]; then
         print_info "GPU Usage:"

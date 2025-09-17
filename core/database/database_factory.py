@@ -35,20 +35,27 @@ class DatabaseFactory:
                    use_unix: bool = True,
                    **kwargs) -> Any:
         """
-        Get ArangoDB connection.
-
-        Args:
-            database: Database name
-            username: Username
-            password: Password (or from env)
-            host: Database host
-            port: Database port
-            use_unix: Use Unix socket if available
-            **kwargs: Additional connection options
-
-        Returns:
-            ArangoDB connection object
-        """
+                   Return an ArangoDB database connection, preferring a Unix-socket client when requested and available.
+                   
+                   If `password` is None, the function reads ARANGO_PASSWORD from the environment and raises ValueError if not set. When `use_unix` is True the function first attempts to obtain a connection via the local Unix-socket helper (`get_database_for_workflow`) and falls back to an HTTP connection using python-arango on ImportError or other failure.
+                   
+                   Parameters:
+                       database (str): ArangoDB database name.
+                       username (str): Username for authentication.
+                       password (Optional[str]): Password for authentication; if None, ARANGO_PASSWORD env var is used.
+                       host (str): Host for HTTP fallback.
+                       port (int): Port for HTTP fallback.
+                       use_unix (bool): If True, try a Unix-socket connection before HTTP.
+                       **kwargs: Additional connection options (passed through where applicable).
+                   
+                   Returns:
+                       Any: A python-arango database connection object (or whatever the Unix-socket helper returns).
+                   
+                   Raises:
+                       ValueError: If no password is provided and ARANGO_PASSWORD is not set.
+                       ImportError: If the HTTP path is chosen but python-arango is not installed.
+                       Exception: Propagates other exceptions raised while attempting connections.
+                   """
         # Get password from environment if not provided
         if password is None:
             password = os.environ.get('ARANGO_PASSWORD')

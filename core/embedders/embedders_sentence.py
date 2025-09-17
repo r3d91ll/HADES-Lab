@@ -58,10 +58,22 @@ class SentenceTransformersEmbedder(EmbedderBase):
 
     def __init__(self, config: Optional[Union[EmbeddingConfig, Dict]] = None):
         """
-        Initialize sentence-transformers embedder with late chunking.
-
-        Args:
-            config: EmbeddingConfig object or dict with configuration
+        Initialize the SentenceTransformersEmbedder and load a SentenceTransformer model configured for high-throughput embedding with mandatory late chunking.
+        
+        This constructor normalizes the provided configuration (accepting either an EmbeddingConfig-like object or a plain dict), sets defaults for model selection, device, batching, chunking, and precision, then loads and prepares a SentenceTransformer model instance. Side effects: sets instance attributes (model_name, device, batch_size, chunk_size_tokens, chunk_overlap_tokens, use_fp16, normalize_embeddings, max_tokens, embedding_dim, model), may convert the model to FP16 on CUDA, and switches the model to evaluation mode. Warnings are logged if the specified model does not appear to be Jina v4 or if optional acceleration libraries (e.g., Flash Attention) are unavailable.
+        
+        Parameters:
+            config (Optional[EmbeddingConfig | dict]): Configuration object or dict. If an EmbeddingConfig-like object is provided it must expose attributes like `model_name`, `device`, `use_fp16`, and `batch_size`. Recognized dict keys:
+                - model_name (str): model identifier (default: "jinaai/jina-embeddings-v4")
+                - device (str): "cuda" or "cpu" (default: "cuda" if available else "cpu")
+                - batch_size (int): batch size for encoding (default: 128)
+                - chunk_size_tokens (int): target chunk size in tokens (default: 512)
+                - chunk_overlap_tokens (int): overlap between chunks in tokens (default: 128)
+                - use_fp16 (bool): whether to load/convert model to FP16 on CUDA (default: True)
+                - normalize_embeddings (bool): whether embeddings should be normalized by the encoder (default: True)
+        
+        Raises:
+            Exception: re-raises non-recoverable exceptions from SentenceTransformer model loading. If loading fails due to custom modules, the constructor will attempt a fallback load without custom modules; other errors are propagated.
         """
         # Handle configuration
         if config is None:
@@ -174,18 +186,19 @@ class SentenceTransformersEmbedder(EmbedderBase):
                    prompt_name: Optional[str] = None,
                    show_progress: bool = False) -> np.ndarray:
         """
-        High-performance batch embedding with optimizations.
-
-        Args:
-            texts: List of texts to embed
-            batch_size: Batch size for processing (default: self.batch_size)
-            task: Task type (retrieval.passage, retrieval.query, etc.)
-            prompt_name: Prompt name for encoding
-            show_progress: Show progress bar
-
-        Returns:
-            Numpy array of embeddings
-        """
+                   Encode a list of texts into embeddings in batches.
+                   
+                   Returns a numpy array of shape (len(texts), embedding_dim). An empty input returns an empty array with shape (0, embedding_dim). The method calls the underlying SentenceTransformer model's encode(...) under torch.no_grad(), passing normalize, batch size, and progress options.
+                   
+                   Parameters:
+                       batch_size: Overrides the embedder's configured batch size when provided.
+                       task: Semantic task hint; when the model name contains "jina", this is mapped to Jina v4 task names (e.g., "retrieval", "text-matching", "code") and passed to the model.
+                       prompt_name: When using Jina models that accept prompt names, this is forwarded to the encoder.
+                       show_progress: If True, enables the model's progress bar during encoding.
+                   
+                   Returns:
+                       np.ndarray: Embeddings as a numpy array with dtype determined by the model; a warning is logged if the returned vector dimensionality does not match the embedder's expected embedding_dimension.
+                   """
         if not texts:
             return np.empty((0, self.embedding_dim))
 
@@ -244,18 +257,18 @@ class SentenceTransformersEmbedder(EmbedderBase):
                                 text: str,
                                 task: str = "retrieval.passage") -> List[ChunkWithEmbedding]:
         """
-        MANDATORY late chunking implementation for long documents.
-
-        Process full document through transformer first, then chunk with context.
-        This is the required approach for all long documents.
-
-        Args:
-            text: Full document text
-            task: Task type
-
-        Returns:
-            List of ChunkWithEmbedding objects with context-aware embeddings
-        """
+                                Embed a long document using mandatory late chunking and return context-aware chunk embeddings.
+                                
+                                If text is empty, returns an empty list. Estimates token count as len(text)//4 and:
+                                - If estimated tokens <= self.chunk_size_tokens, embeds the whole text as a single chunk and returns one ChunkWithEmbedding covering the full document.
+                                - Otherwise delegates to _late_chunk_long_text to produce overlapping, context-aware chunks and their embeddings.
+                                
+                                Parameters:
+                                    task (str): Embedding task name (e.g., "retrieval.passage"); propagated to the encoder when supported.
+                                
+                                Returns:
+                                    List[ChunkWithEmbedding]: One or more chunks each paired with its embedding and chunk metadata.
+                                """
         if not text:
             return []
 
@@ -287,21 +300,19 @@ class SentenceTransformersEmbedder(EmbedderBase):
                                        texts: List[str],
                                        task: str = "retrieval.passage") -> List[List[ChunkWithEmbedding]]:
         """
-        Universal chunking - handles any length text consistently.
-
-        Simple rule: Always chunk based on chunk_size_tokens.
-        - Text <= chunk_size: 1 chunk
-        - Text > chunk_size: Multiple chunks with overlap
-
-        No special cases, no assumptions about text length.
-
-        Args:
-            texts: List of document texts (any length)
-            task: Task type
-
-        Returns:
-            List of lists of ChunkWithEmbedding objects
-        """
+                                       Embed a list of texts using mandatory late chunking: split each document into overlapping chunks, embed each chunk, and return per-document chunk embeddings.
+                                       
+                                       Each input text is chunked deterministically based on the embedder's configured chunk_size_tokens and chunk_overlap_tokens:
+                                       - texts shorter than or equal to chunk size produce a single chunk covering the full text.
+                                       - longer texts are split into multiple overlapping chunks with sentence-boundary-aware end adjustments.
+                                       
+                                       Parameters:
+                                           texts: Sequence of document strings to embed. An empty list returns []; empty strings produce an empty list entry.
+                                           task: Downstream task hint forwarded to the underlying encoder (e.g., "retrieval.passage").
+                                       
+                                       Returns:
+                                           A list (one element per input text) of lists of ChunkWithEmbedding objects. Each ChunkWithEmbedding contains the chunk text, its embedding, character/token span metadata, chunk index/total, and the context window size used.
+                                       """
         if not texts:
             return []
 
@@ -349,10 +360,16 @@ class SentenceTransformersEmbedder(EmbedderBase):
 
     def _late_chunk_long_text(self, text: str, task: str) -> List[ChunkWithEmbedding]:
         """
-        Implement late chunking for long text using sentence-transformers.
-
-        For Jina models that support late_chunking parameter, use it directly.
-        Otherwise, implement our own version.
+        Encode a long document by performing late chunking and returning embeddings for each chunk.
+        
+        The method prepares overlapping text chunks via _prepare_chunks and encodes them as a single document when using a Jina v4 model (attempting to leverage the model's late-chunking behavior). If Jina v4 late-chunking is unavailable or an error occurs, or when using other models, it falls back to standard batched encoding. Each returned item is a ChunkWithEmbedding linking chunk text and metadata to its embedding.
+        
+        Parameters:
+            text (str): The full input document to chunk and embed.
+            task (str): Encoding task name forwarded to the underlying model (e.g., "retrieval.passage").
+        
+        Returns:
+            List[ChunkWithEmbedding]: One ChunkWithEmbedding per chunk in document order. If the input text is empty, returns an empty list.
         """
         # Split text into overlapping chunks
         chunks = self._prepare_chunks(text)
@@ -400,13 +417,24 @@ class SentenceTransformersEmbedder(EmbedderBase):
 
     def _prepare_chunks(self, text: str) -> List[Dict]:
         """
-        Prepare text chunks with metadata for late chunking.
-
-        Args:
-            text: Document text
-
+        Create character-based overlapping chunks from a long text and return per-chunk metadata for late chunking.
+        
+        This uses a fixed estimate of 4 characters per token to convert the configured
+        chunk_size_tokens and chunk_overlap_tokens into character lengths. Each chunk
+        tries to end at a nearby sentence boundary (looks for ". " within the last
+        100 characters before the nominal chunk end) when possible. Overlap between
+        consecutive chunks is honored by advancing the start position by (chunk_size - overlap).
+        
         Returns:
-            List of chunk dictionaries with metadata
+            List[Dict]: A list of chunk metadata dictionaries with these keys:
+                - text (str): chunk text
+                - start_char (int): inclusive start character index in the original text
+                - end_char (int): exclusive end character index in the original text
+                - start_token (int): approximate start token index (start_char // 4)
+                - end_token (int): approximate end token index (end_char // 4)
+                - chunk_index (int): zero-based index of the chunk in sequence
+                - total_chunks (int): total number of chunks for the input text
+                - context_size (int): approximate token count for the chunk (len(text)//4)
         """
         chunks = []
 
@@ -459,40 +487,54 @@ class SentenceTransformersEmbedder(EmbedderBase):
 
     def embed_texts(self, texts: List[str], task: str = "retrieval.passage", batch_size: int = None) -> np.ndarray:
         """
-        Embed multiple texts (required by base interface).
-
-        Args:
-            texts: List of texts to embed
-            task: Task type
-            batch_size: Batch size for processing
-
+        Embed a list of texts and return their vector embeddings.
+        
+        Delegates to embed_batch; processes texts in batches (defaults to the embedder's configured batch size when batch_size is None).
+        
+        Parameters:
+            texts (List[str]): Texts to embed.
+            task (str): Task identifier passed through to the encoder (default "retrieval.passage").
+            batch_size (int, optional): Number of texts per encoding batch. If None, uses the embedder's configured batch size.
+        
         Returns:
-            2D embedding array
+            np.ndarray: 2D array of shape (len(texts), embedding_dimension) containing the embeddings.
         """
         return self.embed_batch(texts, batch_size=batch_size or self.batch_size, task=task)
 
     def embed_single(self, text: str, task: str = "retrieval.passage") -> np.ndarray:
         """
-        Embed a single text (required by base interface).
-
-        Args:
-            text: Text to embed
-            task: Task type
-
+        Embed a single text and return its embedding vector.
+        
+        Embeds the provided `text` using the configured model. If the input is empty or no embedding is produced, returns a zero vector with length equal to the embedder's embedding_dimension.
+        
+        Parameters:
+            text: The text to embed.
+            task: Model task identifier (e.g., "retrieval.passage"); passed through to the underlying encoder.
+        
         Returns:
-            1D embedding array
+            A 1-D numpy.ndarray containing the embedding (shape: (embedding_dimension,)).
         """
         embeddings = self.embed_batch([text], batch_size=1, task=task)
         return embeddings[0] if embeddings.size > 0 else np.zeros(self.embedding_dim)
 
     @property
     def embedding_dimension(self) -> int:
-        """Get embedding dimension."""
+        """
+        Return the dimensionality of embeddings produced by this embedder.
+        
+        Returns:
+            int: Number of elements in each embedding vector (embedding dimension).
+        """
         return self.embedding_dim
 
     @property
     def max_sequence_length(self) -> int:
-        """Get maximum sequence length."""
+        """
+        Return the maximum sequence length, in tokens, supported by this embedder.
+        
+        Returns:
+            int: Maximum token length used for encoding (e.g., 32768 for Jina v4).
+        """
         return self.max_tokens
 
     @property
@@ -502,18 +544,28 @@ class SentenceTransformersEmbedder(EmbedderBase):
 
     @property
     def supports_multimodal(self) -> bool:
-        """Sentence-transformers version focuses on text."""
+        """
+        Return whether this embedder supports multimodal inputs (images/audio/other than text).
+        
+        This embedder is text-only and does not support multimodal data; always returns False.
+        """
         return False
 
     def get_throughput_estimate(self, batch_size: Optional[int] = None) -> float:
         """
-        Estimate throughput in papers/second.
-
-        Args:
-            batch_size: Batch size to estimate for
-
+        Estimate embedding throughput in documents (papers) per second.
+        
+        This returns a heuristic estimate (float) of papers/sec for the configured model and device.
+        The estimate uses a baseline of 40 papers/sec at a batch size of 128 and scales linearly
+        with batch size. If running on CUDA and FP16 is enabled a 1.2x boost is applied;
+        CPU estimates are reduced by a factor of 0.1. The provided batch_size overrides the
+        embedder's configured batch size when given.
+        
+        Parameters:
+            batch_size (Optional[int]): Batch size to use for the estimate. If None, uses self.batch_size.
+        
         Returns:
-            Estimated papers/second
+            float: Estimated papers per second (heuristic).
         """
         batch_size = batch_size or self.batch_size
 
@@ -537,9 +589,17 @@ class SentenceTransformersEmbedder(EmbedderBase):
 
 def benchmark_sentence_transformers():
     """
-    Benchmark sentence-transformers implementation.
-
-    Target: 48+ papers/second throughput
+    Run a benchmark of the SentenceTransformersEmbedder and report throughput results.
+    
+    Performs a warm-up and a timed embedding run over 100 synthetic paper abstracts using a Jina v4 default model (configurable inside the function). Prints progress and diagnostic information to stdout, tests the embedder's late-chunking path on a long synthetic document, and prints an estimated throughput. Returns True when the measured throughput meets or exceeds the target of 48 papers/second.
+    
+    Side effects:
+    - Loads a SentenceTransformers model (may download weights).
+    - Allocates GPU/CPU resources according to the embedder configuration.
+    - Prints benchmarking and diagnostic output to stdout.
+    
+    Returns:
+        bool: True if measured throughput >= 48 papers/second, otherwise False.
     """
     import time
 

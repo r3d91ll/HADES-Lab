@@ -64,19 +64,22 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Function to print colored output
+# print_info prints an informational message prefixed with a blue “[INFO]” tag to stdout.
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
+# print_success prints a green "[SUCCESS]"-prefixed message to stdout; accepts a single argument (the message) and relies on the GREEN and NC color variables.
 print_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
+# print_warning prints a warning message to stdout prefixed with `[WARNING]` in yellow; takes one argument: the message to print.
 print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+# print_error prints its argument as a red "[ERROR]"-prefixed message (ANSI colored) to stdout.
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }

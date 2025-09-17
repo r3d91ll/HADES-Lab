@@ -378,7 +378,17 @@ class ACIDTester:
     
     def test_distributed_locking(self) -> bool:
         """
-        Test distributed locking mechanism with TTL.
+        Validate a TTL-based distributed lock implemented in the arxiv_locks collection.
+        
+        Starts by removing any preexisting lock with the test key, has Worker 1 acquire a lock by inserting a document with an expiresAt timestamp (milliseconds since Unix epoch), verifies that a second insert (Worker 2) is blocked while the lock is active, waits for the TTL to elapse, confirms the lock is logically expired, cleans up the expired lock, and ensures Worker 2 can acquire the lock afterward.
+        
+        Details:
+        - The lock document uses '_key' equal to the test id and an 'expiresAt' field expressed in milliseconds since the Unix epoch.
+        - The test performs inserts and deletes on the arxiv_locks collection and sleeps briefly to allow the TTL to elapse.
+        - Expected behavior: initial attempt by Worker 2 raises a DocumentInsertError (lock contention), after expiry Worker 2 can insert successfully.
+        
+        Returns:
+            bool: True if the distributed locking behavior matches expectations (Worker 2 blocked while active and succeeds after expiry); False on any unexpected outcome or error.
         """
         print("\n" + "="*60)
         print("TEST 5: DISTRIBUTED LOCKING")

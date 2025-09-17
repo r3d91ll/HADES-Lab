@@ -201,7 +201,11 @@ def test_processing_result_serialization():
 
 
 def test_arxiv_manager():
-    """Test ArXiv manager integration."""
+    """
+    Run integration checks for ArXivManager and ArXivValidator.
+    
+    Validates new and old arXiv ID formats, ensures invalid IDs are rejected, parses versioned IDs and year/month components, verifies generated PDF paths, and initializes an ArXivManager with a default ProcessingConfig. Returns False if the arXiv manager module cannot be imported; otherwise returns True. Test failures raise AssertionError.
+    """
     print("\n=== Testing ArXiv Manager ===")
     
     try:

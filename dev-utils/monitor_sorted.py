@@ -38,6 +38,24 @@ def format_time(seconds):
 
 
 def main():
+    """
+    Monitor progress of the sorted workflow by polling ArangoDB collections and printing periodic status updates.
+    
+    This CLI entry point connects to an ArangoDB instance (via DatabaseFactory.get_arango) and monitors three collections:
+    `arxiv_metadata`, `arxiv_abstract_embeddings`, and `arxiv_abstract_chunks`. It periodically samples document counts,
+    computes per-interval and overall rates, reports unprocessed items and ETA for completion, and prints a final summary
+    when interrupted (Ctrl+C) or when embeddings match metadata (completion).
+    
+    CLI flags:
+      --interval (int): Polling interval in seconds (default: 10).
+      --database (str): Database name to connect to (default: "arxiv_repository").
+      --username (str): Database username (default: "root").
+    
+    Notes:
+    - Requires ARANGO_PASSWORD to be set in the environment.
+    - Exits with non-zero status if the database connection fails.
+    - No return value; behaviour is driven by CLI invocation and side effects (console output).
+    """
     parser = argparse.ArgumentParser(description="Monitor sorted workflow progress")
 
     parser.add_argument('--interval', type=int, default=10,

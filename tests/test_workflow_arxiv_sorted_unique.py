@@ -29,7 +29,14 @@ class TestArxivSortedUniqueMethod(unittest.TestCase):
     """Test suite for ArxivSortedWorkflow's unique methods."""
 
     def setUp(self):
-        """Set up test fixtures."""
+        """
+        Prepare test fixtures for ArxivSortedWorkflow unit tests.
+        
+        Creates:
+        - self.test_metadata: a list of four metadata dicts with known abstract lengths (1, 3, 50, 100 characters).
+        - a temporary JSONL metadata file at self.temp_file containing one JSON object per line (from self.test_metadata).
+        - self.config: an ArxivMetadataConfig pointing to the temp file and configured with batch_size=2, num_workers=1, embedding_batch_size=2, use_gpu=False, resume_from_checkpoint=False, metadata_collection='test_arxiv_papers', embedder_model='sentence-transformers/all-MiniLM-L6-v2', and arango_database='test_db'.
+        """
         # Create test metadata with known character counts
         self.test_metadata = [
             {

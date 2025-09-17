@@ -30,7 +30,14 @@ from core.tools.arxiv.arxiv_pipeline import ACIDPhasedPipeline
 from core.database.arango.arango_client import ArangoDBManager
 
 def load_config() -> Dict[str, Any]:
-    """Load configuration."""
+    """
+    Load the ACID phased pipeline YAML configuration and inject the ArangoDB password from the environment.
+    
+    Reads "configs/acid_pipeline_phased.yaml" located three levels up from this file, parses it with yaml.safe_load, and returns the resulting dict with an added 'password' key set from the ARANGO_PASSWORD environment variable (empty string if unset).
+    
+    Returns:
+        dict: Configuration dictionary for the pipeline.
+    """
     config_path = Path(__file__).parent.parent.parent / "configs" / "acid_pipeline_phased.yaml"
     with open(config_path) as f:
         config = yaml.safe_load(f)

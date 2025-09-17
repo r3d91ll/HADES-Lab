@@ -61,10 +61,12 @@ class ArxivMetadataWorkflow(WorkflowBase):
 
     def __init__(self, config: Optional[ArxivMetadataConfig] = None):
         """
-        Initialize metadata workflow.
-
-        Args:
-            config: ArXiv metadata configuration
+        Create an ArxivMetadataWorkflow instance.
+        
+        If no config is provided, a default ArxivMetadataConfig is created and fully validated. The constructor initializes the workflow base (with a derived WorkflowConfig), sets up state and checkpoint managers, progress and performance trackers, and initializes placeholders for the embedder and database as well as counters used during execution.
+        
+        Parameters:
+            config (Optional[ArxivMetadataConfig]): Workflow configuration; when omitted a default configuration is created and validated.
         """
         if config is None:
             config = ArxivMetadataConfig()
@@ -112,7 +114,21 @@ class ArxivMetadataWorkflow(WorkflowBase):
         self.start_time = None
 
     def _initialize_components(self) -> None:
-        """Initialize database and embedder components using core infrastructure."""
+        """
+        Initialize and configure the workflow's ArangoDB connection and embedding engine.
+        
+        This sets up:
+        - self.db: an ArangoDB connection obtained via DatabaseFactory (prefers a Unix socket).
+        - self.embedder: an embedder instance created via EmbedderFactory, configured for
+          device, fp16 usage, embedding batch size, and late-chunking parameters (chunk size
+          and overlap) based on the workflow's ArxivMetadataConfig.
+        
+        Side effects:
+        - Mutates self.db and self.embedder.
+        - Logs initialization progress and the configured target throughput.
+        
+        No return value.
+        """
         logger.info("Initializing workflow components...")
 
         # Use DatabaseFactory to get ArangoDB connection (will try Unix socket first)
@@ -142,7 +158,17 @@ class ArxivMetadataWorkflow(WorkflowBase):
         logger.info(f"Target throughput: {self.metadata_config.target_throughput} papers/second")
 
     def _setup_collections(self) -> None:
-        """Setup ArangoDB collections using StorageManager."""
+        """
+        Ensure required ArangoDB collections exist and optionally drop and recreate them.
+        
+        If `metadata_config.drop_collections` is true, existing metadata, chunks, and embeddings
+        collections are deleted (if present). When collections are dropped, the checkpoint and
+        state managers are cleared to allow a fresh run. After that (or if not dropping), each
+        required collection is created/validated via StorageManager.ensure_collection.
+        
+        Raises:
+            Exception: Propagates any error encountered while deleting or ensuring collections.
+        """
         try:
             # Drop collections if requested
             if self.metadata_config.drop_collections:
@@ -185,10 +211,12 @@ class ArxivMetadataWorkflow(WorkflowBase):
 
     def _stream_metadata_records(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Stream metadata records from JSON file.
-
+        Yield metadata records parsed from the configured JSONL metadata file.
+        
+        Reads the file line-by-line (memory efficient), parsing each line as a JSON object and yielding the resulting dict for downstream processing. Skips records beyond `metadata_config.max_records` when set and skips records already marked processed by the checkpoint manager. On malformed JSON lines the function logs a warning, increments the `parse_errors` stat via the state manager, and continues. Raises FileNotFoundError if the configured metadata file does not exist.
+        
         Yields:
-            Individual metadata records
+            dict: A parsed metadata record (one JSON object per line).
         """
         metadata_path = self.metadata_config.metadata_file
 
@@ -218,13 +246,22 @@ class ArxivMetadataWorkflow(WorkflowBase):
 
     def _process_batch(self, batch: List[Dict[str, Any]]) -> Tuple[int, int]:
         """
-        Process a batch of metadata records.
-
-        Args:
-            batch: List of metadata records
-
+        Process a batch of ArXiv metadata records: generate late-chunked embeddings and persist metadata, chunk, and embedding documents in a single atomic transaction.
+        
+        This method:
+        - Extracts records that contain an abstract and generates embeddings using the embedder's batch late-chunking API.
+        - Associates each embedding chunk with its parent record and writes three kinds of documents to the database within one transaction:
+          - metadata documents (one per record),
+          - chunk documents (one per chunk),
+          - embedding documents (one per chunk embedding).
+        - Uses sanitized ArXiv IDs as ArangoDB document keys.
+        - Marks all successfully persisted record IDs as processed in the checkpoint manager after a committed transaction.
+        
+        Parameters:
+            batch (List[Dict[str, Any]]): A list of metadata records (each expected to include at least an 'id' and optionally an 'abstract'). Records missing an 'id' are counted as failed and skipped.
+        
         Returns:
-            Tuple of (successful_count, failed_count)
+            Tuple[int, int]: (successful_count, failed_count). On embedding generation failure or a transactional error, the batch is treated as failed; on success, successful_count is set to the number of records in the batch.
         """
         successful = 0
         failed = 0
@@ -390,10 +427,14 @@ class ArxivMetadataWorkflow(WorkflowBase):
 
     def validate_inputs(self, **kwargs) -> bool:
         """
-        Validate workflow inputs.
-
+        Validate required inputs for the workflow.
+        
+        Performs two checks:
+        1. The configured metadata file exists on disk.
+        2. The ARANGO_PASSWORD environment variable is set.
+        
         Returns:
-            True if inputs are valid
+            bool: True if both checks pass; False otherwise. Errors are logged when a check fails.
         """
         # Check metadata file exists
         if not self.metadata_config.metadata_file.exists():
@@ -409,10 +450,15 @@ class ArxivMetadataWorkflow(WorkflowBase):
 
     def execute(self, **kwargs) -> WorkflowResult:
         """
-        Execute the metadata processing workflow.
-
+        Run the ArXiv metadata processing workflow: stream records from the configured metadata file, generate late-chunked embeddings, and persist metadata, chunk documents, and embeddings into ArangoDB in atomic batches.
+        
+        This method orchestrates initialization, optional resume from checkpoint, batched processing (using the configured batch size), progress tracking across phases (metadata loading, embedding generation, database storage), periodic checkpoint saves, and final cleanup. On successful completion it optionally clears saved checkpoints/state and returns a WorkflowResult containing throughput, duration, input file, embedder model, and batch size. On failure it catches exceptions, logs the error, and returns a failed WorkflowResult with error details.
+        
+        Parameters:
+            **kwargs: Passed through to input validation (validate_inputs). No other kwargs are required by the workflow.
+        
         Returns:
-            WorkflowResult with execution details
+            WorkflowResult describing success/failure, items processed/failed, start/end times, and a metadata map with runtime metrics (e.g., throughput, duration_seconds, metadata_file, embedder_model, batch_size).
         """
         self.start_time = datetime.now()
 

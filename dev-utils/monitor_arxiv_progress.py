@@ -40,11 +40,13 @@ class ArxivProgressMonitor:
 
     def __init__(self, target_records: int = 2828998, interval: int = 10):
         """
-        Initialize monitor.
-
-        Args:
-            target_records: Total records to process
-            interval: Update interval in seconds
+        Create a new ArxivProgressMonitor.
+        
+        Parameters:
+            target_records (int): Target number of documents to monitor until completion (default 2,828,998).
+            interval (int): Polling interval in seconds between updates (default 10).
+        
+        Sets initial internal tracking state and the metadata collection name ("arxiv_metadata").
         """
         self.target_records = target_records
         self.interval = interval
@@ -60,7 +62,14 @@ class ArxivProgressMonitor:
         self.metadata_collection = "arxiv_metadata"
 
     def connect(self) -> bool:
-        """Connect to database."""
+        """
+        Establish a connection to ArangoDB and store the client on self.db.
+        
+        Attempts to obtain an Arango client for the "academy_store" database and assigns it to self.db. Returns True when the connection is successful; on failure the exception is caught, no exception is propagated, and the method returns False.
+        
+        Returns:
+            bool: True if connected and self.db is set, False otherwise.
+        """
         try:
             self.db = DatabaseFactory.get_arango(
                 database="academy_store",
@@ -73,7 +82,14 @@ class ArxivProgressMonitor:
             return False
 
     def get_current_count(self) -> int:
-        """Get current document count."""
+        """
+        Return the number of documents in the configured metadata collection.
+        
+        If the collection does not exist in the connected database, returns 0.
+        
+        Returns:
+            int: Current document count in `self.metadata_collection`, or 0 if the collection is missing.
+        """
         if not self.db.has_collection(self.metadata_collection):
             return 0
 
@@ -81,7 +97,18 @@ class ArxivProgressMonitor:
         return collection.count()
 
     def get_gpu_stats(self) -> Dict[str, Any]:
-        """Get GPU utilization stats."""
+        """
+        Return per-GPU utilization and memory statistics by invoking `nvidia-smi`.
+        
+        Queries `nvidia-smi` for GPU index, name, GPU utilization percent, memory used, and memory total. On success returns a dictionary keyed by "gpu_<index>" where each value is a dict with:
+        - name (str): GPU model name,
+        - util (float): GPU utilization percent,
+        - mem_used (float): memory used (same units as reported by `nvidia-smi`),
+        - mem_total (float): total memory,
+        - mem_percent (float): memory usage as a percentage of total.
+        
+        If `nvidia-smi` is not available, the command fails, times out, or any parsing error occurs, an empty dict is returned.
+        """
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=index,name,utilization.gpu,memory.used,memory.total",
@@ -112,7 +139,20 @@ class ArxivProgressMonitor:
             return {}
 
     def format_time(self, seconds: float) -> str:
-        """Format seconds into human-readable time."""
+        """
+        Convert a duration in seconds to a concise, human-readable string.
+        
+        Returns "N/A" for negative inputs. Outputs use the largest relevant units:
+        - Days present: "Xd Xh Xm" (days, hours, minutes)
+        - Hours present (no days): "Xh Xm Ys" (hours, minutes, seconds)
+        - Otherwise: "Xm Ys" (minutes, seconds)
+        
+        Parameters:
+            seconds (float): Duration in seconds.
+        
+        Returns:
+            str: Formatted time string as described above (or "N/A" for negative input).
+        """
         if seconds < 0:
             return "N/A"
 
@@ -129,7 +169,23 @@ class ArxivProgressMonitor:
             return f"{minutes}m {seconds}s"
 
     def display_stats(self, current_count: int, elapsed: float, rate: float, instant_rate: float):
-        """Display formatted statistics."""
+        """
+        Render the live monitoring UI for ArXiv ingestion to the terminal.
+        
+        Clears the terminal and prints a formatted status panel showing progress toward the target,
+        throughput metrics, time estimates (elapsed, remaining, total, and ETA when computable),
+        and per-GPU utilization/memory if available. This function has the side effect of writing
+        to standard output and clearing the screen.
+        
+        Parameters:
+            current_count (int): Number of documents currently in the metadata collection.
+            elapsed (float): Seconds elapsed since monitoring started.
+            rate (float): Average processing rate in papers per second since start.
+            instant_rate (float): Processing rate in papers per second measured over the last interval.
+        
+        Returns:
+            None
+        """
         # Clear screen for clean display
         os.system('clear' if os.name == 'posix' else 'cls')
 
@@ -189,7 +245,21 @@ class ArxivProgressMonitor:
         print(f"Press Ctrl+C to stop monitoring")
 
     def run(self):
-        """Run the monitoring loop."""
+        """
+        Start the real-time monitoring loop that tracks ArXiv ingestion progress.
+        
+        This method establishes a database connection, initializes counters and timestamps, then enters a periodic loop that:
+        - sleeps for the configured interval,
+        - reads the current document count from the metadata collection,
+        - computes overall and instantaneous processing rates,
+        - updates a terminal display with progress, ETA, and GPU stats,
+        and exits when the configured target record count is reached.
+        
+        On KeyboardInterrupt the loop stops gracefully and prints final aggregated statistics.
+        
+        Returns:
+            None
+        """
         if not self.connect():
             return
 
@@ -254,7 +324,15 @@ class ArxivProgressMonitor:
 
 
 def main():
-    """Main entry point."""
+    """
+    Parse CLI options and run the ArxivProgressMonitor.
+    
+    This is the module's entry point: it parses the command-line options --interval
+    (update interval in seconds) and --target (target number of records), verifies
+    the ARANGO_PASSWORD environment variable is set (exits with code 1 if missing),
+    creates an ArxivProgressMonitor configured with the parsed values, and starts
+    monitoring by calling monitor.run().
+    """
     parser = argparse.ArgumentParser(
         description="Monitor ArXiv processing progress"
     )

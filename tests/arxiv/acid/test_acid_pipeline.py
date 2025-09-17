@@ -249,9 +249,9 @@ startxref
     
     def test_durability(self) -> bool:
         """
-        Test durability: committed data should persist.
+        Verify durability by processing a paper, simulating a restart, and ensuring the committed record persists.
         
-        Verifies data remains after simulated crash/restart.
+        This test processes a test PDF under a fixed paper_id, then constructs a new ArangoACIDProcessor to simulate a restart. It checks that the sanitized paper key exists in the 'arxiv_papers' collection and that the stored document has status 'PROCESSED'. Returns True if the record is present with the expected status; returns False on any processing failure, missing/incorrect persisted data, or unexpected exception.
         """
         logger.info("Testing DURABILITY...")
         

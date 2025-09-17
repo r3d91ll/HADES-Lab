@@ -100,7 +100,24 @@ def check_dependencies() -> Tuple[bool, List[str]]:
 
 
 def check_database() -> Tuple[bool, List[str]]:
-    """Check database connectivity."""
+    """
+    Check connectivity to the ArangoDB instance and verify required collections exist.
+    
+    Performs the following checks:
+    - Ensures ARANGO_PASSWORD environment variable is set (used for authentication).
+    - Creates an ArangoDBManager using ARANGO_HOST (or a default) and the configured credentials.
+    - Verifies the presence of the required collections:
+      'arxiv_papers', 'arxiv_chunks', 'arxiv_embeddings', 'arxiv_structures'.
+    
+    Side effects:
+    - Prints the document count for each collection found.
+    - Any connection or runtime error is captured and returned as an issue rather than raised.
+    
+    Returns:
+        tuple:
+            - bool: True if no issues were found (connection succeeded and all required collections exist), False otherwise.
+            - List[str]: A list of human-readable issue messages describing missing configuration, missing collections, or connection failures.
+    """
     issues = []
     
     try:

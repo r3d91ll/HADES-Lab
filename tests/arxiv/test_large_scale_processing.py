@@ -164,11 +164,22 @@ class LargeScaleTestSuite:
     
     def test_error_recovery(self, arxiv_ids: List[str], inject_errors: bool = True):
         """
-        Test error recovery and retry mechanisms.
+        Run a targeted error-recovery test over a small subset of ArXiv IDs and record retry metrics.
         
-        Args:
-            arxiv_ids: List of ArXiv IDs to process
-            inject_errors: Whether to inject artificial errors
+        This test processes up to the first 50 IDs from `arxiv_ids`, exercising the pipeline's retry behavior with up to three attempts per paper and exponential backoff between attempts. A per-paper run is considered a successful recovery if the pipeline result reports a success rate >= 80%. Metrics recorded in self.test_results['tests']['error_recovery'] include:
+        - papers_tested
+        - papers_requiring_retry
+        - successful_recoveries (recoveries that succeeded after at least one retry)
+        - average_retries
+        
+        Side effects:
+        - Invokes ACIDPhasedPipeline.process_papers for each tested paper.
+        - Logs progress and errors.
+        - Updates self.test_results with the aggregated metrics.
+        
+        Parameters:
+            arxiv_ids (List[str]): Sequence of ArXiv IDs; only the first 50 are used for this test.
+            inject_errors (bool): Flag intended to enable artificial error injection; currently unused by this implementation.
         """
         test_name = "error_recovery"
         logger.info(f"\n{'='*60}")
@@ -435,7 +446,20 @@ class LargeScaleTestSuite:
             self.test_database_integrity()
             
         except Exception as e:
-            logger.error(f"Test suite failed: {e}")
+            """
+        Orchestrate and run the full suite of tests against the provided ArXiv paper IDs.
+        
+        This records the suite start time, logs a header, and runs the configured sequence of tests:
+        performance benchmarks, batch processing (capped at 1,000 papers), two error-recovery ranges (1000–1050 and a conditional slice), and a database integrity check.
+        Any exceptions raised during the sequence are caught and recorded in self.test_results['errors'].
+        
+        Parameters:
+            arxiv_ids (List[str]): Ordered list of ArXiv IDs to use for the suite; length and ordering determine which subsets are used for batched and error-recovery tests.
+        
+        Returns:
+            None
+        """
+        logger.error(f"Test suite failed: {e}")
             self.test_results['errors'].append({
                 'test': 'suite',
                 'error': str(e)
@@ -454,9 +478,25 @@ class LargeScaleTestSuite:
     
     def compute_hades_metrics(self):
         """
-        Compute HADES Conveyance metrics from test results.
-
-        Formula: C = (W · R · H / T) · Ctx^α
+        Compute the HADES Conveyance score from accumulated test results and store a detailed scorecard in self.test_results['hades'].
+        
+        This method derives the Conveyance metric C using the formula:
+            C = (W · R · H / T) · Ctx^α
+        
+        Where:
+        - W (What): content/signal quality derived from batch processing success rates (falls back to overall success rate or a default). Values are averaged and clamped to [0.01, 1.0].
+        - R (Where): relational/topological integrity derived from database integrity issue counts (orphaned chunks, missing embeddings, inconsistent status); mapped and clamped to [0.01, 1.0].
+        - H (Who): agent capability derived from error recovery results (successful_recoveries / papers_tested), clamped to [0.1, 1.0].
+        - T (Time): latency/cost derived from performance benchmarks (mean_total_time or converted from overall_rate); constrained to be > 0.
+        - Ctx: combined contextual quality computed from config context fields (local_coherence, instruction_fit, actionability, grounding) and context_weights; clamped to [0.01, 1.0].
+        - α (alpha): exponent read from config with bounds [1.5, 2.0].
+        
+        Effects:
+        - Computes W, R, H, T, Ctx, and alpha using values found in self.test_results and self.config (with sensible defaults).
+        - Calculates Conveyance C and stores a structured scorecard under self.test_results['hades'] containing the score, formula, components, context breakdown, and a human-readable interpretation (including a performance class).
+        - Emits an informational scorecard to the module logger.
+        
+        No value is returned; the result is persisted to self.test_results['hades'] and logged.
         """
         logger.info("\nComputing HADES Conveyance Metrics...")
 
@@ -594,7 +634,13 @@ class LargeScaleTestSuite:
         logger.info("="*60)
 
     def save_results(self):
-        """Save test results to file."""
+        """
+        Persist the collected test results to a timestamped JSON file in the current working directory.
+        
+        The file is written as pretty-printed JSON with an indent of 2 and named using the pattern
+        `test_results_YYYYmmdd_HHMMSS.json` based on the current local time. This function has the
+        side effect of creating or overwriting the file and logging the saved file path.
+        """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = f"test_results_{timestamp}.json"
 
@@ -604,7 +650,11 @@ class LargeScaleTestSuite:
         logger.info(f"\nTest results saved to: {results_file}")
     
     def print_summary(self):
-        """Print test summary."""
+        """
+        Print a concise, human-readable summary of the collected test results to stdout.
+        
+        Displays a header followed by each recorded test name and its result fields. Numeric (float) values are formatted to two decimal places. If any errors were recorded in self.test_results['errors'], prints a count and up to the first five error entries with each error's test name and a truncated error message (first 100 characters). Otherwise prints a success message.
+        """
         print("\n" + "="*60)
         print("TEST SUITE SUMMARY")
         print("="*60)

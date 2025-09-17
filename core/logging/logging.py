@@ -31,11 +31,17 @@ class LogManager:
     @staticmethod
     def setup(config_path: Optional[str] = None, log_level: str = "INFO"):
         """
-        Setup logging configuration.
-
-        Args:
-            config_path: Path to logging configuration JSON (optional)
-            log_level: Default log level
+        Initialize structured JSON logging (idempotent).
+        
+        Sets up Python logging and structlog configuration, creates a "logs" directory two levels above this file if missing, and attaches two rotating file handlers: processors.log (10 MB, 5 backups) and errors.log (10 MB, 3 backups, level=ERROR). Configures structlog to produce JSON-formatted logs with contextual fields and enables caching of logger objects. Marks logging as initialized so subsequent calls are no-ops and emits a "logging_initialized" info event.
+        
+        Parameters:
+            config_path (Optional[str]): Currently unused; reserved for future config file support.
+            log_level (str): Logging level name (e.g., "INFO", "DEBUG") used for the main handlers and root logger.
+        
+        Side effects:
+            - Creates filesystem entries under the repository logs directory.
+            - Modifies global logging configuration and the module-level _logging_initialized flag.
         """
         global _logging_initialized
 
@@ -112,14 +118,16 @@ class LogManager:
     @staticmethod
     def get_logger(processor_name: str, run_id: str):
         """
-        Get a logger instance with processor context.
-
-        Args:
-            processor_name: Name of the processor
-            run_id: Run ID for this processing session
-
+        Return a structlog logger bound with processor and run_id context.
+        
+        If logging has not yet been initialized, this will call LogManager.setup() before returning the logger.
+        
+        Parameters:
+            processor_name: Identifier for the processor to attach to every log record.
+            run_id: Unique run identifier to attach to every log record.
+        
         Returns:
-            Configured logger instance
+            A structlog BoundLogger with `processor` and `run_id` already bound.
         """
         # Ensure logging is setup
         if not _logging_initialized:

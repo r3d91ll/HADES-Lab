@@ -20,7 +20,23 @@ from core.tools.arxiv.arxiv_metadata_config import ArxivMetadataConfig
 
 
 def main():
-    """Run test with 100k records on dual GPUs."""
+    """
+    Run a production-scale ArXiv metadata processing test using (ideally) two GPUs.
+    
+    Performs a full end-to-end test of the ArxivMetadataWorkflow configured for 100,000 records:
+    - Validates required environment (requires ARANGO_PASSWORD; will call sys.exit(1) if missing).
+    - Detects available GPUs (uses PyTorch if present) and warns if fewer than two GPUs are available.
+    - Builds a test ArxivMetadataConfig optimized for dual‑GPU throughput (FP16, larger batches, Unix-domain ArangoDB socket).
+    - Initializes and executes ArxivMetadataWorkflow, optionally setting CUDA_VISIBLE_DEVICES to "0,1" when not present.
+    - Prints a summary of results (success, counts, duration, throughput), performs basic ArangoDB collection verification, and prints a simple performance analysis and next steps.
+    
+    Returns:
+        bool: True if the workflow reported success, False if interrupted or an error occurred.
+    
+    Notes:
+    - This function may call sys.exit(1) early when ARANGO_PASSWORD is not set.
+    - KeyboardInterrupt and general exceptions are caught; on exception the function prints the error and returns False.
+    """
 
     print("=" * 60)
     print("ArXiv Metadata Processing - Dual GPU Test")

@@ -53,8 +53,21 @@ logger = logging.getLogger(__name__)
 
 def worker_process_with_gpu(config, input_queue, output_queue, stop_event, gpu_id):
     """
-    Worker process function that sets CUDA_VISIBLE_DEVICES before ANY imports.
-    This ensures proper GPU isolation for multi-GPU processing.
+    Run a single worker process pinned to a specific GPU that embeds batches of ArXiv abstracts and streams results back to the main process.
+    
+    This function is intended to be executed in a multiprocessing child process. It enforces GPU isolation by setting CUDA_VISIBLE_DEVICES to gpu_id before importing any CUDA-dependent libraries, initializes a per-worker embedder, and then repeatedly consumes record batches from input_queue. Each batch is filtered for records that contain an 'abstract'; those abstracts are embedded using late-chunking and each produced chunk is paired with its originating record. Results are emitted to output_queue as dictionaries of the form {'worker_id': <int>, 'results': [ {'record': ..., 'chunk': ...}, ... ]}. If a batch of None is read from input_queue it is treated as a poison pill and causes graceful shutdown.
+    
+    Notable side effects:
+    - Sets environment variables 'CUDA_VISIBLE_DEVICES' and 'TOKENIZERS_PARALLELISM'.
+    - Imports CUDA-dependent modules after setting CUDA_VISIBLE_DEVICES.
+    - Initializes an embedder configured to use 'cuda:0' (because the process's visible device list is isolated to the target GPU).
+    - Emits structured log events via the per-worker logger and places error payloads ( {'worker_id': ..., 'error': <str>} ) on output_queue when exceptions occur.
+    
+    Parameters:
+    - config: WorkerConfig dataclass containing worker_id, model_name, use_fp16, embedding_batch_size, and other per-worker settings.
+    - gpu_id: string or int used to set CUDA_VISIBLE_DEVICES for this process.
+    
+    The function does not return a value.
     """
     # CRITICAL: Set GPU BEFORE any CUDA imports
     os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
@@ -224,14 +237,14 @@ class EmbeddingWorker(mp.Process):
                  output_queue: mp.Queue,
                  stop_event: mp.Event):
         """
-        Initialize embedding worker.
-
-        Args:
-            config: Worker configuration
-            input_queue: Queue of texts to embed
-            output_queue: Queue for embedding results
-            stop_event: Event to signal worker shutdown
-        """
+                 Initialize an embedding worker process.
+                 
+                 Parameters:
+                     config: WorkerConfig with per-worker settings (worker_id, gpu_device, batch sizes, model_name, use_fp16).
+                     input_queue: multiprocessing.Queue providing batches (lists) of records to embed; None is used as a poison pill to stop the worker.
+                     output_queue: multiprocessing.Queue where the worker places embedding results or error records.
+                     stop_event: multiprocessing.Event that can be set by the parent to request early shutdown.
+                 """
         super().__init__()
         self.config = config
         self.input_queue = input_queue
@@ -240,7 +253,27 @@ class EmbeddingWorker(mp.Process):
         self.embedder = None
 
     def run(self):
-        """Main worker loop."""
+        """
+        Run the worker process: initialize the per-GPU embedder, consume record batches from the input queue, produce per-record embedding chunks, and send results or errors to the output queue.
+        
+        This method:
+        - Sets CUDA_VISIBLE_DEVICES so the process is bound to the configured GPU and creates a per-worker logger.
+        - Lazily initializes an embedder configured to run on the worker's GPU (the embedder uses late-chunking internally).
+        - Loops until the shared stop event is set or a None "poison pill" is received:
+          - Reads a batch from self.input_queue with a short timeout to allow for responsive shutdown.
+          - Treats None as a signal to stop and exits the loop.
+          - Processes each batch via self._process_batch, increments a local processed counter, and puts a result dict onto self.output_queue of the form {'worker_id': ..., 'results': ...}.
+        - On batch- or initialization-level exceptions, logs the error and forwards an error entry to self.output_queue of the form {'worker_id': ..., 'error': <str>} so the parent process can handle failures.
+        - Ensures final shutdown logging regardless of success or failure.
+        
+        Side effects:
+        - Mutates the process environment variable CUDA_VISIBLE_DEVICES.
+        - Initializes and retains self.embedder.
+        - Emits structured log events and writes messages into input/output multiprocessing queues.
+        
+        Returns:
+            None
+        """
         # Set GPU for this worker - extract device ID from cuda:X format
         gpu_id = self.config.gpu_device.split(':')[-1] if ':' in self.config.gpu_device else '0'
         os.environ['CUDA_VISIBLE_DEVICES'] = gpu_id
@@ -348,13 +381,18 @@ class EmbeddingWorker(mp.Process):
 
     def _process_batch(self, batch: List[Dict]) -> List[Dict]:
         """
-        Process a batch of records using the SAME method as single-GPU workflow.
-
-        Args:
-            batch: List of records with abstracts
-
+        Embed abstracts from a batch and return per-record embedding chunks.
+        
+        Only records that include a non-empty 'abstract' field are embedded; records without abstracts are ignored. For each input record with an abstract, this calls the instance embedder's embed_batch_with_late_chunking and produces one result entry per returned chunk: a dict with keys 'record' (the original record) and 'chunk' (a single embedding chunk produced for that record).
+        
+        Parameters:
+            batch (List[Dict]): Iterable of record dictionaries; each record is expected to contain an 'abstract' string to be embedded.
+        
         Returns:
-            List of records with chunks and embeddings
+            List[Dict]: A flat list of {'record': record, 'chunk': chunk} mappings for every chunk produced.
+        
+        Raises:
+            Exception: Propagates any exception raised by the embedder (embedding failures are logged before re-raising).
         """
         results = []
 
@@ -402,10 +440,11 @@ class ArxivSortedWorkflow(WorkflowBase):
 
     def __init__(self, config: ArxivMetadataConfig):
         """
-        Initialize parallel workflow.
-
-        Args:
-            config: Workflow configuration
+        Initialize the ArxivSortedWorkflow with configuration and prepare runtime components.
+        
+        Creates and stores the provided ArxivMetadataConfig, initializes structured logging, state and checkpoint managers, progress and performance trackers, and default runtime fields used during execution (worker list, inter-process queues and events, storage thread handle, counters, start time placeholder, and database handle).
+        Parameters:
+            config (ArxivMetadataConfig): Workflow configuration containing runtime options, file paths for state/checkpointing, database and embedding settings.
         """
         super().__init__(config)
         self.metadata_config = config
@@ -451,7 +490,24 @@ class ArxivSortedWorkflow(WorkflowBase):
         self.db = None
 
     def _initialize_components(self):
-        """Initialize workflow components."""
+        """
+        Initialize and wire up all runtime components required by the workflow.
+        
+        Sets up the ArangoDB connection and required collections (optionally dropping and clearing state when
+        drop_collections is enabled), registers progress-tracker steps, creates inter-process IPC primitives
+        (using the "spawn" multiprocessing context), detects available GPUs and builds per-worker configurations,
+        launches per-GPU embedding worker processes, and starts the storage thread that persists embedding chunks
+        to the database.
+        
+        Side effects:
+        - Assigns self.db, self.input_queue, self.output_queue, self.stop_event, self.workers, and self.storage_thread.
+        - May drop and recreate the metadata, chunks, and embeddings collections and clear checkpoint/state managers
+          when metadata_config.drop_collections is true.
+        - May reduce the configured number of workers to match available GPUs.
+        - Starts multiprocessing worker processes (via spawn) and a storage Thread.
+        
+        No return value.
+        """
         self.logger.info("initializing_components")
 
         # Initialize database connection
@@ -581,7 +637,14 @@ class ArxivSortedWorkflow(WorkflowBase):
         )
 
     def _get_available_gpus(self) -> List[int]:
-        """Get list of available GPU indices."""
+        """
+        Return a list of available GPU device indices.
+        
+        Tries to detect GPUs via PyTorch (torch.cuda). If PyTorch is available and reports CUDA devices, returns
+        a list of indices [0..device_count-1]. If PyTorch is not available or reports no devices, falls back to
+        parsing the CUDA_VISIBLE_DEVICES environment variable (comma-separated device IDs); non-integer entries are ignored.
+        Returns an empty list when no GPUs are detected.
+        """
         try:
             import torch
             if torch.cuda.is_available():
@@ -598,9 +661,18 @@ class ArxivSortedWorkflow(WorkflowBase):
 
     def _storage_worker(self):
         """
-        Worker thread for storing results in database.
-
-        Runs in main process to handle database transactions.
+        Storage thread that consumes embedding results from the output queue and writes them to the database in transactional batches.
+        
+        This method runs in the main process and continuously drains self.output_queue until stop_event is set and the queue is empty. It:
+        - Aggregates incoming result items into an internal buffer and calls self._store_batch(...) in batches (default batch size 500) for efficient transactional writes.
+        - Skips and logs any result entries containing an 'error' key.
+        - Periodically updates the "embedding_generation" progress step in 500-item increments.
+        - Flushes any remaining buffer when stopping.
+        
+        Side effects:
+        - Performs database writes via self._store_batch.
+        - Updates self.progress_tracker.
+        - Logs errors and lifecycle events.
         """
         logger.info("Storage worker started")
 
@@ -646,10 +718,9 @@ class ArxivSortedWorkflow(WorkflowBase):
 
     def _load_existing_ids(self) -> set:
         """
-        Load all existing arxiv_ids from database for resume functionality.
-
-        Returns:
-            Set of arxiv_ids that already have embeddings
+        Return the set of arXiv IDs that already have embeddings in the database.
+        
+        If resume_from_checkpoint is False this returns an empty set. On any error while querying the database the method logs the failure and returns an empty set (safer to reprocess all records).
         """
         if not self.metadata_config.resume_from_checkpoint:
             return set()
@@ -684,10 +755,24 @@ class ArxivSortedWorkflow(WorkflowBase):
 
     def _store_batch(self, batch: List[Dict]):
         """
-        Store a batch of records in database.
-
-        Args:
-            batch: List of records with chunks and embeddings
+        Store a batch of record/chunk items into the database atomically.
+        
+        Processes a list of items (each expected to be a dict with keys 'record' and 'chunk'), inserts chunk documents into the configured chunks collection and corresponding embedding documents into the embeddings collection inside a single transaction, and updates in-memory counters and progress tracking.
+        
+        Parameters:
+            batch (List[Dict]): List of items where each item contains:
+                - 'record': a mapping that must include either 'arxiv_id' or 'id' identifying the paper.
+                - 'chunk': an object with attributes used to build documents (chunk_index, total_chunks, text, start_char, end_char, start_token, end_token, context_window_used, embedding).
+        
+        Side effects:
+            - Performs transactional writes to the metadata-configured chunks and embeddings collections.
+            - Increments self.processed_count by the number of unique papers stored.
+            - On error, aborts the transaction (if possible) and increments self.failed_count by len(batch).
+            - Emits progress updates to self.progress_tracker and logs periodic throughput.
+        
+        Notes:
+            - Paper IDs are sanitized (dots and slashes replaced with underscores) to form document keys.
+            - Empty or items without an identifiable arXiv ID are skipped.
         """
         if not batch:
             return
@@ -804,8 +889,21 @@ class ArxivSortedWorkflow(WorkflowBase):
 
     def _load_metadata_to_database(self):
         """
-        Load metadata from JSON file into database.
-        Only called when --drop-collections is used.
+        Load metadata JSON lines into the configured metadata collection and return the number of documents present after the load.
+        
+        This routine:
+        - Reads the metadata file (JSONL) configured at self.metadata_config.metadata_file.
+        - Skips records that do not contain an 'abstract'.
+        - Batches documents (default batch_size=10000) and imports them with on_duplicate='replace' so repeated runs can overwrite existing entries.
+        - Continues on single-record or batch errors (logs warnings/errors but does not raise for malformed lines or partial batch failures).
+        - Emits progress and diagnostic logs at regular intervals and on import results.
+        - After processing the file, imports any remaining documents and verifies the final collection count.
+        
+        Returns:
+            int: The actual number of documents in the metadata collection after the load (collection.count()).
+        
+        Raises:
+            FileNotFoundError: If the configured metadata file does not exist.
         """
         metadata_file = Path(self.metadata_config.metadata_file)
 
@@ -1005,8 +1103,24 @@ class ArxivSortedWorkflow(WorkflowBase):
 
     def _get_unprocessed_records_sorted(self):
         """
-        Query for unprocessed records sorted by abstract length.
-        Returns all records that don't have embeddings yet.
+        Return unprocessed metadata records sorted by abstract length (ascending).
+        
+        This queries the metadata collection and returns records that do not yet have
+        corresponding embeddings, ordered from shortest to longest abstract. If the
+        embeddings collection is empty the function uses a fast path that selects all
+        documents with a non-null abstract; otherwise it filters out documents that
+        already have at least one embedding. The query respects `self.metadata_config.max_records`
+        when set.
+        
+        Returns:
+            list[dict]: A list of result objects, each with keys:
+                - 'id' (str): arXiv identifier (arxiv_id).
+                - 'record' (dict): the full metadata document from the metadata collection.
+                - 'abstract_length' (int): length of the abstract used for sorting.
+        
+        Notes:
+            - All results are loaded into memory before being returned.
+            - Returns an empty list if no matching records are found.
         """
         self.logger.info("querying_unprocessed_records")
 
@@ -1120,7 +1234,21 @@ class ArxivSortedWorkflow(WorkflowBase):
             self.logger.info("no_unprocessed_records")
 
     def _process_sorted_records(self, sorted_records):
-        """Process pre-sorted records from smallest to largest."""
+        """
+        Process size-sorted records, annotate them with ordering metadata, and enqueue them for embedding.
+        
+        Takes a list of pre-filtered, size-sorted records and streams them to worker processes in batches sized by self.metadata_config.batch_size. For each record the method adds two fields in-place on the record dict:
+        - `size_order_position` (int): zero-based index in the sorted sequence
+        - `abstract_length` (int): length used for sorting (copied from the input item)
+        
+        Batches are put onto self.input_queue; progress is reported to self.progress_tracker ("metadata_loading") periodically (every 10 batches) and after the final partial batch. After all records are enqueued, a `None` poison pill is sent once per worker to signal shutdown.
+        
+        Parameters:
+            sorted_records (Sequence[Mapping]): Iterable of items previously returned by _get_unprocessed_records_sorted; each item is expected to contain at least `record` (a dict) and `abstract_length` (int).
+        
+        Returns:
+            None
+        """
         self.logger.info("processing_sorted_records",
             total_records=len(sorted_records),
             batch_size=self.metadata_config.batch_size,
@@ -1201,10 +1329,28 @@ class ArxivSortedWorkflow(WorkflowBase):
 
     def execute(self) -> Any:
         """
-        Execute the parallel workflow.
-
+        Run the full size-sorted ArXiv embedding workflow end-to-end.
+        
+        Initializes components (DB, worker processes, queues), loads and processes metadata in ascending abstract length order, waits for GPU embedding workers to finish, stops the storage thread, computes final metrics, and returns a WorkflowResult summarizing the run.
+        
         Returns:
-            WorkflowResult with execution details
+            WorkflowResult: summary of the run including:
+                - workflow_name (str)
+                - success (bool)
+                - items_processed (int)
+                - items_failed (int)
+                - start_time (datetime)
+                - end_time (datetime)
+                - metadata (dict) with keys such as:
+                    - throughput (float): processed records / duration (records/sec)
+                    - duration_seconds (float)
+                    - items_skipped (int)
+                    - num_workers (int)
+                    - metadata_file (str)
+                    - embedder_model (str)
+                    - batch_size (int)
+                    - resume_mode (bool)
+                    - error (str) — present only when success is False
         """
         try:
             self.start_time = datetime.now()
@@ -1287,11 +1433,20 @@ class ArxivSortedWorkflow(WorkflowBase):
             )
 
     def validate_inputs(self, **kwargs) -> bool:
-        """Validate workflow inputs."""
+        """
+        Validate workflow inputs.
+        
+        This placeholder implementation currently accepts any keyword arguments and always returns True.
+        Override in subclasses to perform concrete validation of configuration or runtime parameters.
+        """
         return True
 
     def cleanup(self):
-        """Clean up resources."""
+        """
+        Shut down processing and release IPC resources.
+        
+        Sets the workflow stop signal, force-terminates any still-running worker processes (joining briefly), and drains the input and output multiprocessing queues to leave the process in a clean state.
+        """
         # Stop event
         if self.stop_event:
             self.stop_event.set()

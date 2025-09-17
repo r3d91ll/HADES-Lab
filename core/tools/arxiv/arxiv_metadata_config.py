@@ -173,7 +173,20 @@ class ArxivMetadataConfig(BaseConfig):
 
     @validator('chunk_overlap_tokens')
     def validate_overlap(cls, v, values):
-        """Ensure overlap is less than chunk size."""
+        """
+        Validate that the chunk overlap is strictly less than the chunk size.
+        
+        Parameters:
+            cls: The validator's class (unused).
+            v (int): Proposed value for `chunk_overlap_tokens`.
+            values (dict): Other field values; expects `chunk_size_tokens` may be present.
+        
+        Returns:
+            int: The validated overlap value `v`.
+        
+        Raises:
+            ValueError: If `v` is greater than or equal to `chunk_size_tokens`.
+        """
         chunk_size = values.get('chunk_size_tokens', 512)
         if v >= chunk_size:
             raise ValueError(f"Overlap ({v}) must be less than chunk size ({chunk_size})")
@@ -181,23 +194,36 @@ class ArxivMetadataConfig(BaseConfig):
 
     @validator('metadata_file')
     def validate_metadata_file(cls, v):
-        """Ensure metadata file exists."""
+        """
+        Validate that the provided metadata file path exists.
+        
+        Parameters:
+            v (Path): Path to the ArXiv metadata file.
+        
+        Returns:
+            Path: The same path if it exists.
+        
+        Raises:
+            ValueError: If the file at `v` does not exist.
+        """
         if not v.exists():
             raise ValueError(f"Metadata file not found: {v}")
         return v
 
     def validate_semantics(self) -> List[str]:
         """
-        Validate semantic consistency of configuration.
-
-        Ensures all Conveyance dimensions remain positive:
-        - W (WHAT): Valid embedder model
-        - R (WHERE): Valid database configuration
-        - H (WHO): Valid GPU/CPU settings
-        - T (TIME): Reasonable batch sizes for throughput
-
+        Validate semantic consistency of the configuration and return any problems found.
+        
+        Performs lightweight, actionable checks and returns a list of human-readable error messages (empty if configuration is semantically valid). Checks performed:
+        - Embedder model compatibility: warns if `embedder_model` does not contain `"jina"` (case-insensitive).
+        - GPU/device consistency: if `use_gpu` is True, requires `gpu_device` to start with `"cuda"`.
+        - Batch-size relationship: ensures `embedding_batch_size` <= `batch_size`.
+        - Checkpoint interval: flags excessively large `checkpoint_interval` (> 100000).
+        - Throughput feasibility: flags unrealistic throughput when `batch_size` < 100 and `target_throughput` > 10.
+        - Collection name uniqueness: ensures `metadata_collection`, `chunks_collection`, and `embeddings_collection` are all distinct.
+        
         Returns:
-            List of validation errors (empty if valid)
+            List[str]: A list of validation error messages; empty when no semantic issues are detected.
         """
         errors = []
 
@@ -230,10 +256,21 @@ class ArxivMetadataConfig(BaseConfig):
 
     def to_workflow_config(self) -> dict:
         """
-        Convert to dictionary for workflow initialization.
-
+        Return a workflow-ready configuration dictionary derived from this ArxivMetadataConfig.
+        
+        The returned dict contains a compact subset of runtime settings used to initialize or run
+        the workflow orchestrator.
+        
         Returns:
-            Configuration dictionary
+            dict: Workflow configuration with the following keys:
+                - name (str): Workflow name.
+                - batch_size (int): Number of records per processing batch.
+                - num_workers (int): Number of worker processes to run.
+                - use_gpu (bool): Whether to enable GPU usage.
+                - checkpoint_enabled (bool): Whether workflow checkpoints/resume are enabled.
+                - checkpoint_interval (int): Records between checkpoints.
+                - staging_path (Path): Local staging directory for temporary files.
+                - timeout_seconds (int): Workflow timeout in seconds.
         """
         return {
             "name": "arxiv_metadata_workflow",
@@ -249,13 +286,9 @@ class ArxivMetadataConfig(BaseConfig):
     @classmethod
     def from_yaml_with_defaults(cls, override_path: Optional[Path] = None) -> "ArxivMetadataConfig":
         """
-        Load configuration from default + optional override.
-
-        Args:
-            override_path: Optional path to override configuration
-
-        Returns:
-            ArxivMetadataConfig instance with merged configuration
+        Create an ArxivMetadataConfig by loading defaults from the package YAML and optionally merging an override YAML.
+        
+        Loads defaults from core/config/workflows/arxiv_metadata_default.yaml (located relative to this module). If override_path is provided and exists, its mappings are shallow-merged on top of the defaults (keys in the override replace defaults). Returns an instance of ArxivMetadataConfig constructed from the merged configuration.
         """
         import yaml
 

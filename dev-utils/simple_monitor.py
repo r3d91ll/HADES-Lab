@@ -22,6 +22,11 @@ from core.database.database_factory import DatabaseFactory
 
 
 def main():
+    """
+    Run a simple CLI monitor that periodically samples an ArangoDB collection document count and reports per-interval and overall processing rates.
+    
+    The command-line tool accepts options for sampling interval (--interval), collection name (--collection), database name (--database), and username (--username). It requires the ARANGO_PASSWORD environment variable to be set; if absent the program exits. The function connects to ArangoDB via DatabaseFactory.get_arango(..., use_unix=True), verifies the target collection exists, then enters a loop that sleeps for the configured interval, samples the collection count, and prints a timestamped status line showing total documents, documents added during the interval, the current interval rate (docs/sec), and the overall average rate since start. On Ctrl+C (KeyboardInterrupt) the monitor prints final statistics (total processed, total time, average rate) and, if a positive overall rate was observed, estimates remaining time using a hard-coded target of 2,828,998 documents.
+    """
     parser = argparse.ArgumentParser(description="Simple progress monitor")
 
     parser.add_argument('--interval', type=int, default=30,

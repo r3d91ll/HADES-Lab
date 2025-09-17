@@ -86,13 +86,20 @@ class EmbedderFactory:
     @classmethod
     def _determine_embedder_type(cls, model_name: str) -> str:
         """
-        Determine embedder type from model name.
-
-        Args:
-            model_name: Model name or path
-
+        Infer the embedder backend type from a model name or path.
+        
+        Examines the model identifier (case-insensitive) for library or provider hints and maps them to one of: "sentence", "jina", "openai", or "cohere".
+        - Names containing "sentence-transformers" or "st-" -> "sentence" (sentence-transformers).
+        - Names containing "transformers" or "jina" -> "jina" (transformers-backed Jina).
+        - Names containing "openai" or "text-embedding" -> "openai".
+        - Names containing "cohere" -> "cohere".
+        If no known hint is found, defaults to "sentence" (sentence-transformers) as the preferred fallback.
+        
+        Parameters:
+            model_name (str): Model name or path used to infer the preferred embedder backend.
+        
         Returns:
-            Embedder type string
+            str: One of "sentence", "jina", "openai", or "cohere" indicating the chosen embedder type.
         """
         model_lower = model_name.lower()
 
@@ -116,10 +123,16 @@ class EmbedderFactory:
     @classmethod
     def _auto_register(cls, embedder_type: str):
         """
-        Attempt to auto-register an embedder type.
-
-        Args:
-            embedder_type: Type of embedder to register
+        Attempt to import and register an embedder implementation for the given embedder type.
+        
+        If the corresponding embedder package is available, this method imports the implementation and registers it on the class registry (via cls.register). Supported types:
+        - "jina": imports and registers JinaV4Embedder from .embedders_jina
+        - "sentence": imports and registers SentenceTransformersEmbedder from .embedders_sentence
+        
+        If the embedder_type is unrecognized a warning is logged. If the import fails, the ImportError is caught and an error is logged; the registry is unchanged in that case.
+        
+        Parameters:
+            embedder_type (str): The embedder type to auto-register (e.g., "jina" or "sentence").
         """
         try:
             if embedder_type == "jina":

@@ -8,7 +8,16 @@ from core.workflows.workflow_arxiv_metadata import ArxivMetadataWorkflow, ArxivM
 
 
 def test_workflow():
-    """Test the workflow with a small subset of records."""
+    """
+    Run a short end-to-end test of the ArxivMetadataWorkflow and print a summary of results.
+    
+    This function configures the workflow for testing (small/clean run), executes it, prints run metrics
+    (including success, processed/failed counts, duration, success rate, and throughput if available),
+    and prints a per-step progress summary from the workflow's progress tracker.
+    
+    Returns:
+        bool: True if the workflow run reported overall success, otherwise False.
+    """
 
     # Configure for testing
     config = ArxivMetadataConfig(

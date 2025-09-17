@@ -28,11 +28,17 @@ class WorkflowLogMonitor:
 
     def __init__(self, log_dir: str = "/tmp", interval: int = 5):
         """
-        Initialize monitor.
-
-        Args:
-            log_dir: Directory containing log files
-            interval: Update interval in seconds
+        Initialize a WorkflowLogMonitor.
+        
+        Parameters:
+            log_dir (str): Directory to read workflow and worker log files from (default '/tmp').
+            interval (int): Polling/update interval in seconds between scans.
+        
+        Sets up counters and internal state used for monitoring and rate calculations:
+        - total_batches_queued, total_batches_processed, total_records_stored
+        - worker_stats (per-worker counters)
+        - start_time, last_update
+        - recent_batches, recent_stored (deques holding recent activity for throughput estimates)
         """
         self.log_dir = Path(log_dir)
         self.interval = interval
@@ -50,7 +56,14 @@ class WorkflowLogMonitor:
         self.recent_stored = deque(maxlen=20)   # Last 20 storage timestamps
 
     def find_latest_log(self) -> Optional[Path]:
-        """Find the most recent workflow log file."""
+        """
+        Return the most recently modified workflow-related log file in the configured log directory.
+        
+        Searches for files matching these patterns: "arxiv_parallel_workflow*.log", "arxiv_memory_workflow*.log", and "worker_*.log", and picks the file with the newest modification time.
+        
+        Returns:
+            pathlib.Path | None: Path to the most recently modified matching log file, or None if no matching files are found.
+        """
         # Look for structured log files
         log_patterns = [
             "arxiv_parallel_workflow*.log",
@@ -70,7 +83,11 @@ class WorkflowLogMonitor:
         return latest_file
 
     def parse_log_line(self, line: str) -> Optional[Dict]:
-        """Parse a JSON log line."""
+        """
+        Parse a log line and return its decoded JSON object if present.
+        
+        Only lines beginning with '{' are attempted as JSON. Returns the parsed dict on success; returns None if the line is not JSON or if JSON decoding fails.
+        """
         try:
             # Handle both JSON and text logs
             if line.startswith('{'):
@@ -80,7 +97,18 @@ class WorkflowLogMonitor:
             return None
 
     def update_metrics(self, log_entry: Dict):
-        """Update metrics from log entry."""
+        """
+        Update the monitor's internal metrics based on a parsed log entry.
+        
+        This method inspects the entry's `event` field and updates counters and recent-history deques used for rate calculations:
+        
+        - "batch_queued": increments total_batches_queued and appends (timestamp, batch_size) to recent_batches.
+        - "batch_processed": ensures per-worker stats exist, increments that worker's batch and record counts, and increments total_batches_processed. Uses `worker_id` and `results_count`.
+        - Events containing "stored" or "storage": increments total_records_stored and appends (timestamp, count) to recent_stored when a positive `count` (or `stored`) is present.
+        - "workflow_started" or "initializing_components": sets start_time if not already set.
+        
+        The method tolerates missing fields by using sensible defaults (e.g., 0 for numeric counts and empty string for timestamps) and does not raise on absent keys.
+        """
         event = log_entry.get('event', '')
 
         # Track batch queueing
@@ -119,7 +147,17 @@ class WorkflowLogMonitor:
                 self.start_time = log_entry.get('timestamp', '')
 
     def calculate_rates(self) -> Dict[str, float]:
-        """Calculate processing rates."""
+        """
+        Compute current throughput rates for queueing, processing, and storage.
+        
+        Returns a dictionary with four keys:
+        - 'queue_rate' (float): Estimated records/sec entering the queue, computed as the sum of batch sizes in recent_batches divided by (interval * number_of_recent_entries). Requires more than one recent batch to produce a non-zero rate.
+        - 'process_rate' (float): Estimated records/sec processed by workers. Calculated as total recorded worker-records divided by a fixed ~300-second window (a rough five-minute assumption) when worker activity and a start time are present.
+        - 'store_rate' (float): Estimated records/sec written to storage, computed from recent_stored entries using the same time-span method as queue_rate. Requires more than one recent stored entry to produce a non-zero rate.
+        - 'overall_rate' (float): The pipeline-wide throughput (records/sec), defined as the minimum of the positive per-stage rates (queue, process, store). If no stage reports a positive rate, this value is zero.
+        
+        Note: Rates default to 0 when insufficient recent data is available; process_rate uses a heuristic fixed elapsed window rather than exact runtime.
+        """
         rates = {
             'queue_rate': 0,
             'process_rate': 0,
@@ -156,7 +194,20 @@ class WorkflowLogMonitor:
         return rates
 
     def display_status(self):
-        """Display current status."""
+        """
+        Render the current monitoring snapshot to the terminal.
+        
+        Clears the terminal and prints a human-readable dashboard showing:
+        - current time
+        - queue metrics (total batches queued, processed, and pending)
+        - per-worker counts (batches and records) when available
+        - storage total (records stored)
+        - throughput rates (queue, process, storage, and overall) as calculated by calculate_rates()
+        
+        Side effects:
+        - Clears the terminal screen.
+        - Writes the dashboard to standard output.
+        """
         os.system('clear' if os.name == 'posix' else 'cls')
 
         print("=" * 60)
@@ -203,7 +254,11 @@ class WorkflowLogMonitor:
         print("Press Ctrl+C to stop")
 
     def monitor_logs(self):
-        """Monitor log files continuously."""
+        """
+        Continuously tail workflow and worker log files, updating internal metrics and showing live status.
+        
+        This method monitors all "*.log" files in self.log_dir whose filenames contain "workflow" or "worker". It remembers the last-read byte position per file so new lines are processed incrementally (tolerating rotation or intermittent writes). Each new JSON log line is parsed with parse_log_line and applied to the monitor state via update_metrics; the current status is rendered with display_status at each interval. File read errors are ignored per-file to allow for transient locking/rotation. Monitoring runs until interrupted by KeyboardInterrupt, at which point a summary of final statistics is printed.
+        """
         # Track file position
         file_positions = {}
 
@@ -259,7 +314,12 @@ class WorkflowLogMonitor:
 
 
 def main():
-    """Main entry point."""
+    """
+    Main entry point for the workflow log monitor.
+    
+    Parses command-line arguments (--log-dir, --interval) and starts a WorkflowLogMonitor
+    configured with the provided directory and update interval.
+    """
     parser = argparse.ArgumentParser(
         description="Monitor workflow progress from logs"
     )

@@ -26,7 +26,23 @@ logger = logging.getLogger(__name__)
 
 
 def test_unix_socket_connection():
-    """Test Unix socket connection to ArangoDB."""
+    """
+    Run a sequence of checks to validate Unix-socket connectivity to ArangoDB and (optionally) compare performance against an HTTP connection.
+    
+    Performs these checks:
+    - Initializes an optimized ArangoDB client preferring a Unix socket and reports whether a Unix socket or HTTP is used.
+    - Connects to the target database using ARXIV_DB_NAME, ARXIV_WRITER_USER, and ARXIV_WRITER_PASSWORD from the environment (ARXIV_WRITER_PASSWORD must be set).
+    - Executes a simple query ("RETURN 1") to verify query execution.
+    - Lists non-system collections visible to the connected user.
+    - If a Unix socket is in use, measures a small benchmark of 100 queries over the Unix socket and (if possible) over HTTP to report relative queries-per-second.
+    
+    Side effects:
+    - Prints status, progress, and results to stdout.
+    - Imports core.database.arango_unix_client and may import the arango client for HTTP testing.
+    
+    Returns:
+        bool: True if all required checks pass; False on any failure or error.
+    """
     print("\n" + "=" * 60)
     print("Testing Unix Socket Connection to ArangoDB")
     print("=" * 60)
@@ -132,7 +148,14 @@ def test_unix_socket_connection():
 
 
 def check_socket_file():
-    """Check if the Unix socket file exists."""
+    """
+    Check whether the configured ArangoDB Unix socket file exists and is a valid socket.
+    
+    Reads ARANGO_UNIX_SOCKET from the environment (defaults to /tmp/arangodb.sock), verifies that the path exists and is a socket, and prints status messages. If the socket exists and is valid, prints its file permissions (octal) and owner and returns True. If the path exists but is not a socket, or does not exist, prints guidance for enabling a Unix socket in ArangoDB and returns False.
+    
+    Returns:
+        bool: True if the configured path exists and is a socket, otherwise False.
+    """
     socket_path = os.environ.get('ARANGO_UNIX_SOCKET', '/tmp/arangodb.sock')
     socket_file = Path(socket_path)
 
@@ -164,7 +187,23 @@ def check_socket_file():
 
 
 def main():
-    """Main function."""
+    """
+    Run the CLI entry point for the Unix-socket ArangoDB test harness.
+    
+    Parses command-line options, optionally enables debug logging, prints key environment configuration,
+    and either verifies the ArangoDB Unix socket file (--check-socket) or runs the full connectivity
+    and performance tests.
+    
+    Command-line options:
+      --check-socket   Only run the socket existence/permission check and exit.
+      --verbose, -v    Enable DEBUG logging.
+    
+    Environment values printed (does not modify them):
+      ARXIV_DB_NAME, ARXIV_WRITER_USER, ARXIV_WRITER_PASSWORD (presence only), ARANGO_UNIX_SOCKET
+    
+    Returns:
+      int: Exit code suitable for use with sys.exit — 0 on success, 1 on failure.
+    """
     parser = argparse.ArgumentParser(description="Test Unix socket connection to ArangoDB")
     parser.add_argument('--check-socket', action='store_true',
                         help='Only check if socket file exists')

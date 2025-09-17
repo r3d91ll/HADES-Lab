@@ -620,7 +620,26 @@ class PhaseManager:
     
     @staticmethod
     def _embed_and_store(staged_path: str, gpu_id: int) -> Dict[str, Any]:
-        """Embed document and store to ArangoDB using pre-loaded embedder and DB connection."""
+        """
+        Embed a staged document and persist its metadata, chunks, and embeddings to ArangoDB.
+        
+        Loads the JSON document at `staged_path`, produces chunked embeddings using the pre-initialized worker embedder, and writes paper metadata, chunks, embeddings, and optional structures (equations, tables, images) inside a streaming ArangoDB transaction. Uses a per-paper lock (acquired with a 30s timeout) to prevent concurrent processing. On success the staged file is removed.
+        
+        Parameters:
+            staged_path (str): Path to the staged JSON file produced by the extraction phase.
+            gpu_id (int): GPU identifier assigned to the worker (used by worker initialization; not directly referenced here).
+        
+        Returns:
+            dict: Result object with:
+                - success (bool)
+                - on success: 'arxiv_id' (str) and 'num_chunks' (int)
+                - on failure: 'error' (str) describing the failure
+        
+        Side effects:
+            - Writes to ArangoDB collections: arxiv_papers, arxiv_chunks, arxiv_embeddings and optionally arxiv_equations, arxiv_tables, arxiv_images.
+            - Removes the staged JSON file on successful commit.
+            - Acquires and releases a per-paper lock via the DB manager.
+        """
         try:
             # Use the pre-loaded embedder and DB manager from worker initialization
             global WORKER_EMBEDDER, WORKER_DB_MANAGER
