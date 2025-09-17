@@ -109,7 +109,18 @@ def worker_process_with_gpu(worker_id, gpu_id, model_name, input_queue, output_q
 
 
 class ArxivSortedWorkflow:
-    """Simplified size-sorted ArXiv processing workflow."""
+    """Simplified size-sorted ArXiv processing workflow.
+    
+    HADES Framework Implementation:
+    - W (What): High-quality embeddings via jina-v3 model
+    - R (Where): Size-sorted processing for optimal GPU cache locality
+    - H (Who): Multi-worker GPU agents with configurable parallelism
+    - T (Time): Minimized via batching and sorted processing
+    - Ctx: Workflow context (GPU count, batch sizes, data characteristics)
+    - α: Default 1.7 for context amplification
+    
+    Conveyance C = (W · R · H / T) · Ctx^α measured via throughput metrics.
+    """
 
     def __init__(self,
                  database='arxiv_repository',
