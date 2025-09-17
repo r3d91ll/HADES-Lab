@@ -17,7 +17,7 @@ import os
 import json
 import logging
 import multiprocessing as mp
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 from pathlib import Path
 from queue import Empty
@@ -30,8 +30,23 @@ from core.embedders.embedders_factory import EmbedderFactory
 logger = logging.getLogger(__name__)
 
 
-def worker_process_with_gpu(worker_id, gpu_id, model_name, input_queue, output_queue, stop_event):
-    """GPU worker process - sets CUDA device before imports."""
+def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
+                           input_queue: mp.Queue, output_queue: mp.Queue, stop_event: mp.Event,
+                           embedding_batch_size: int = 48, chunk_size_tokens: int = 500,
+                           chunk_overlap_tokens: int = 200) -> None:
+    """GPU worker process - sets CUDA device before imports.
+
+    Args:
+        worker_id: Worker identifier
+        gpu_id: GPU device ID
+        model_name: Model name for embedder
+        input_queue: Queue for input batches
+        output_queue: Queue for results
+        stop_event: Event to signal shutdown
+        embedding_batch_size: Batch size for embedding
+        chunk_size_tokens: Chunk size in tokens
+        chunk_overlap_tokens: Overlap between chunks
+    """
     # Set GPU BEFORE any CUDA imports
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -41,14 +56,17 @@ def worker_process_with_gpu(worker_id, gpu_id, model_name, input_queue, output_q
     # Import after GPU is set
     from core.embedders.embedders_factory import EmbedderFactory
 
+    # Initialize batches_processed BEFORE try block to avoid UnboundLocalError
+    batches_processed = 0
+
     try:
-        # Initialize embedder
+        # Initialize embedder with passed configuration
         embedder_config = {
             'device': 'cuda:0',  # Always 0 since we isolated GPU
             'use_fp16': True,
-            'batch_size': 48,  # Embedding batch size
-            'chunk_size_tokens': 500,
-            'chunk_overlap_tokens': 200
+            'batch_size': embedding_batch_size,  # Use passed parameter
+            'chunk_size_tokens': chunk_size_tokens,  # Use passed parameter
+            'chunk_overlap_tokens': chunk_overlap_tokens  # Use passed parameter
         }
 
         embedder = EmbedderFactory.create(
@@ -56,10 +74,10 @@ def worker_process_with_gpu(worker_id, gpu_id, model_name, input_queue, output_q
             **embedder_config
         )
 
-        print(f"Worker {worker_id} ready")
+        print(f"Worker {worker_id} ready with batch_size={embedding_batch_size}, "
+              f"chunk_size={chunk_size_tokens}, overlap={chunk_overlap_tokens}")
 
         # Process batches
-        batches_processed = 0
         while not stop_event.is_set():
             try:
                 batch = input_queue.get(timeout=1.0)
@@ -123,14 +141,16 @@ class ArxivSortedWorkflow:
     """
 
     def __init__(self,
-                 database='arxiv_repository',
-                 username='root',
-                 metadata_file='/bulk-store/arxiv-data/metadata/arxiv-kaggle-latest.json',
-                 max_records=None,
-                 batch_size=100,
-                 embedding_batch_size=48,
-                 num_workers=2,
-                 drop_collections=False):
+                 database: str = 'arxiv_repository',
+                 username: str = 'root',
+                 metadata_file: str = '/bulk-store/arxiv-data/metadata/arxiv-kaggle-latest.json',
+                 max_records: Optional[int] = None,
+                 batch_size: int = 100,
+                 embedding_batch_size: int = 48,
+                 num_workers: int = 2,
+                 drop_collections: bool = False,
+                 chunk_size_tokens: int = 500,
+                 chunk_overlap_tokens: int = 200) -> None:
         """Initialize workflow with minimal config."""
 
         self.database = database
@@ -141,6 +161,8 @@ class ArxivSortedWorkflow:
         self.embedding_batch_size = embedding_batch_size
         self.num_workers = num_workers
         self.drop_collections = drop_collections
+        self.chunk_size_tokens = chunk_size_tokens
+        self.chunk_overlap_tokens = chunk_overlap_tokens
 
         # Collections
         self.metadata_collection = 'arxiv_metadata'
@@ -151,8 +173,14 @@ class ArxivSortedWorkflow:
         self.processed_count = 0
         self.failed_count = 0
 
-        # Setup database
-        password = os.environ.get(os.environ.get('ARANGO_PASSWORD_ENV', 'ARANGO_PASSWORD'), '')
+        # Setup database - improved password handling
+        password_env = os.environ.get('ARANGO_PASSWORD_ENV', 'ARANGO_PASSWORD')
+        password = os.environ.get(password_env, '')
+
+        if not password:
+            logger.warning(f"No password found in environment variable '{password_env}'. "
+                         f"Either set {password_env} or use --password-env to specify a different variable.")
+
         os.environ['ARANGO_PASSWORD'] = password
 
         self.db = DatabaseFactory.get_arango(
@@ -171,7 +199,7 @@ class ArxivSortedWorkflow:
         self.workers = []
         self.storage_thread = None
 
-    def execute(self):
+    def execute(self) -> bool:
         """Main execution flow."""
         start_time = datetime.now()
 
@@ -216,7 +244,7 @@ class ArxivSortedWorkflow:
             logger.error(f"Workflow failed: {e}")
             return False
 
-    def _init_collections(self):
+    def _init_collections(self) -> None:
         """Initialize database collections."""
         if self.drop_collections:
             logger.info("Dropping existing collections")
@@ -229,12 +257,34 @@ class ArxivSortedWorkflow:
             if not self.db.has_collection(coll):
                 self.db.create_collection(coll)
 
-    def _start_workers(self):
+    def _start_workers(self) -> None:
         """Start GPU worker processes."""
-        for i in range(self.num_workers):
-            gpu_id = i % self.num_workers  # Simple GPU assignment
+        import torch
 
-            p = mp.Process(
+        # Detect available GPUs
+        if torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            logger.info(f"Detected {num_gpus} GPU(s)")
+        else:
+            num_gpus = 0
+            logger.warning("No GPUs detected")
+
+        # Exit if workers requested but no GPUs available
+        if self.num_workers > 0 and num_gpus == 0:
+            raise RuntimeError(
+                f"Requested {self.num_workers} GPU workers but no GPUs available. "
+                "Either set --workers 0 for CPU mode or ensure CUDA is available."
+            )
+
+        # Get spawn context for proper CUDA initialization
+        ctx = mp.get_context('spawn')
+
+        for i in range(self.num_workers):
+            # CRITICAL FIX: Use actual GPU count, not worker count
+            gpu_id = i % num_gpus if num_gpus > 0 else 0
+
+            # Use spawn context for process creation
+            p = ctx.Process(
                 target=worker_process_with_gpu,
                 args=(
                     i,
@@ -242,17 +292,25 @@ class ArxivSortedWorkflow:
                     'jinaai/jina-embeddings-v4',
                     self.input_queue,
                     self.output_queue,
-                    self.stop_event
+                    self.stop_event,
+                    self.embedding_batch_size,  # Pass CLI arg
+                    self.chunk_size_tokens,      # Pass chunk config
+                    self.chunk_overlap_tokens    # Pass chunk config
                 )
             )
             p.start()
             self.workers.append(p)
             print(f"Started worker {i} on GPU {gpu_id}")
 
-    def _load_metadata(self):
+    def _load_metadata(self) -> int:
         """Load metadata from JSON file to database."""
+        # Check if file exists
+        if not self.metadata_file.exists():
+            raise FileNotFoundError(f"Metadata file not found: {self.metadata_file}")
+
         batch = []
         total_loaded = 0
+        total_errors = 0
 
         with open(self.metadata_file, 'r') as f:
             for line_num, line in enumerate(f, 1):
@@ -281,7 +339,13 @@ class ArxivSortedWorkflow:
                             on_duplicate='replace',
                             details=True
                         )
-                        logger.info(f"Loaded {total_loaded} records")
+                        # Check for errors in import
+                        if result.get('errors', 0) > 0:
+                            error_count = result['errors']
+                            total_errors += error_count
+                            logger.warning(f"Import had {error_count} errors. Details: {result.get('details', [])[:5]}")
+
+                        logger.info(f"Loaded {total_loaded} records, {total_errors} errors so far")
                         batch = []
 
                 except json.JSONDecodeError:
@@ -289,17 +353,26 @@ class ArxivSortedWorkflow:
 
             # Final batch
             if batch:
-                self.db[self.metadata_collection].import_bulk(
+                result = self.db[self.metadata_collection].import_bulk(
                     batch,
                     on_duplicate='replace',
                     details=True
                 )
+                # Check for errors in final batch
+                if result.get('errors', 0) > 0:
+                    error_count = result['errors']
+                    total_errors += error_count
+                    logger.warning(f"Final import had {error_count} errors")
 
         actual_count = self.db[self.metadata_collection].count()
-        logger.info(f"Loaded {actual_count} total metadata records")
+        logger.info(f"Loaded {actual_count} total metadata records with {total_errors} errors")
+
+        if total_errors > 0:
+            logger.warning(f"Total import errors: {total_errors}")
+
         return actual_count
 
-    def _process_unprocessed_records(self):
+    def _process_unprocessed_records(self) -> None:
         """Query and process unprocessed records sorted by size."""
         # Check if embeddings exist
         embeddings_count = self.db[self.embeddings_collection].count()
@@ -358,20 +431,24 @@ class ArxivSortedWorkflow:
 
         logger.info(f"Queued all records for processing")
 
-    def _storage_worker(self):
+    def _storage_worker(self) -> None:
         """Storage thread that saves embeddings to database."""
-        while not self.stop_event.is_set():
+        # CRITICAL FIX: Continue draining queue even after stop_event is set
+        while not self.stop_event.is_set() or not self.output_queue.empty():
             try:
                 results = self.output_queue.get(timeout=1.0)
                 if results:
                     self._store_batch(results)
             except Empty:
+                # Only continue if we're still running; exit if stopped and queue is empty
+                if self.stop_event.is_set() and self.output_queue.empty():
+                    break
                 continue
             except Exception as e:
                 logger.error(f"Storage error: {e}")
                 self.failed_count += len(results) if 'results' in locals() else 0
 
-    def _store_batch(self, batch: List[Dict]):
+    def _store_batch(self, batch: List[Dict[str, Any]]) -> None:
         """Store chunks and embeddings (NOT metadata - already loaded)."""
         if not batch:
             return
@@ -438,7 +515,7 @@ class ArxivSortedWorkflow:
             logger.error(f"Failed to store batch: {e}")
             self.failed_count += len(batch)
 
-    def _shutdown_workers(self):
+    def _shutdown_workers(self) -> None:
         """Clean shutdown of workers and storage."""
         # Wait for workers
         logger.info("Waiting for workers to finish")
@@ -464,6 +541,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch-size', type=int, default=100)
     parser.add_argument('--embedding-batch-size', type=int, default=48)
     parser.add_argument('--workers', type=int, default=2)
+    parser.add_argument('--chunk-size-tokens', type=int, default=500, help='Chunk size in tokens')
+    parser.add_argument('--chunk-overlap-tokens', type=int, default=200, help='Overlap between chunks')
     parser.add_argument('--drop-collections', action='store_true')
 
     args = parser.parse_args()
@@ -492,7 +571,9 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         embedding_batch_size=args.embedding_batch_size,
         num_workers=args.workers,
-        drop_collections=args.drop_collections
+        drop_collections=args.drop_collections,
+        chunk_size_tokens=args.chunk_size_tokens,
+        chunk_overlap_tokens=args.chunk_overlap_tokens
     )
 
     success = workflow.execute()
