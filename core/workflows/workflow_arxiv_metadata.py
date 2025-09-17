@@ -18,7 +18,7 @@ C = (W·R·H/T)·Ctx^α
 
 - W (WHAT): Abstract semantic content via Jina v4 embeddings
 - R (WHERE): ArangoDB graph relationships between metadata/chunks/embeddings
-- H (WHO): SentenceTransformersEmbedder for high-throughput processing
+- H (WHO): JinaV4Embedder for high-throughput processing
 - T (TIME): Optimized for 48+ papers/second throughput
 - Ctx: Late chunking preserves context (Ctx remains high, avoiding zero-propagation)
 """
@@ -132,7 +132,7 @@ class ArxivMetadataWorkflow(WorkflowBase):
             'chunk_overlap_tokens': self.metadata_config.chunk_overlap_tokens
         }
 
-        # Use factory to create embedder (will use SentenceTransformersEmbedder)
+        # Use factory to create embedder (will use JinaV4Embedder)
         self.embedder = EmbedderFactory.create(
             model_name=self.metadata_config.embedder_model,
             **embedder_config

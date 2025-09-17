@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Benchmark comparison script for dual embedder implementations.
+Benchmark comparison script for Jina v4 embedder implementation.
 
-Compares performance between:
-1. SentenceTransformersEmbedder (target: 48+ papers/sec)
-2. JinaV4Embedder (current: 8-15 papers/sec)
+Tests performance of JinaV4Embedder with late chunking.
+SentenceTransformersEmbedder has been deprecated and removed.
 
-Both implementations use MANDATORY late chunking.
+Target performance: 40+ papers/sec with proper batching.
 """
 
 import time
@@ -20,8 +19,8 @@ from datetime import datetime
 import psutil
 import GPUtil
 
-from core.embedders.embedders_sentence import SentenceTransformersEmbedder
 from core.embedders.embedders_jina import JinaV4Embedder
+from core.embedders.embedders_factory import EmbedderFactory
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -205,22 +204,23 @@ class EmbedderBenchmark:
         test_data = self.generate_test_data(num_papers)
 
         # Initialize embedders
-        logger.info("\nInitializing embedders...")
+        logger.info("\nInitializing embedder...")
 
-        # Sentence-transformers (high performance)
-        st_embedder = SentenceTransformersEmbedder({
+        # Jina v4 (standardized embedder)
+        jina_embedder = JinaV4Embedder({
             'model_name': 'jinaai/jina-embeddings-v4',
             'device': self.device,
             'batch_size': 128,
             'use_fp16': self.use_fp16
         })
 
-        # Transformers (sophisticated)
-        tf_embedder = JinaV4Embedder({
-            'model_name': 'jinaai/jina-embeddings-v4',
-            'device': self.device,
-            'use_fp16': self.use_fp16
-        })
+        # Alternative: Using factory
+        factory_embedder = EmbedderFactory.create(
+            model_name='jinaai/jina-embeddings-v4',
+            device=self.device,
+            batch_size=128,
+            use_fp16=self.use_fp16
+        )
 
         results = {
             "timestamp": datetime.now().isoformat(),
