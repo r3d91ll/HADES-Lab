@@ -205,7 +205,7 @@ def test_arxiv_manager():
     print("\n=== Testing ArXiv Manager ===")
     
     try:
-        from tools.arxiv.arxiv_manager import ArXivManager, ArXivValidator
+        from core.tools.arxiv.arxiv_manager import ArXivManager, ArXivValidator
         
         # Test ArXiv ID validation
         validator = ArXivValidator()

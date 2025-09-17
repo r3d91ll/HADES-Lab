@@ -44,10 +44,11 @@ from .progress_tracker import (
     ProgressState
 )
 
-from .compat_monitor import (
-    LegacyMonitorInterface,
-    create_legacy_monitor
-)
+# Backward compatibility removed - files moved to Acheron
+# from .compat_monitor import (
+#     LegacyMonitorInterface,
+#     create_legacy_monitor
+# )
 
 # Version information
 __version__ = "1.0.0"
@@ -72,9 +73,9 @@ __all__ = [
     'ProgressStep',
     'ProgressState',
 
-    # Backward compatibility
-    'LegacyMonitorInterface',
-    'create_legacy_monitor',
+    # Backward compatibility - removed (files in Acheron)
+    # 'LegacyMonitorInterface',
+    # 'create_legacy_monitor',
 
     # Factory functions
     'create_performance_monitor',

@@ -96,17 +96,22 @@ class EmbedderFactory:
         """
         model_lower = model_name.lower()
 
-        if "jina" in model_lower:
-            return "jina"
-        elif "sentence-transformers" in model_lower or "st-" in model_lower:
+        # Check for explicit library preference
+        if "sentence-transformers" in model_lower or "st-" in model_lower:
             return "sentence"
+        elif "transformers" in model_lower:
+            return "jina"  # Uses transformers library
+        elif "jina" in model_lower:
+            # Jina v4 requires transformers backend due to custom modules
+            # sentence-transformers can't load it properly
+            return "jina"
         elif "openai" in model_lower or "text-embedding" in model_lower:
             return "openai"
         elif "cohere" in model_lower:
             return "cohere"
         else:
-            # Default to Jina for unknown models (transformers-based)
-            return "jina"
+            # Default to sentence-transformers for best performance
+            return "sentence"
 
     @classmethod
     def _auto_register(cls, embedder_type: str):
@@ -121,8 +126,9 @@ class EmbedderFactory:
                 from .embedders_jina import JinaV4Embedder
                 cls.register("jina", JinaV4Embedder)
             elif embedder_type == "sentence":
-                # Will be implemented when we migrate sentence_embedder.py
-                logger.warning(f"Sentence-transformers embedder not yet migrated")
+                from .embedders_sentence import SentenceTransformersEmbedder
+                cls.register("sentence", SentenceTransformersEmbedder)
+                logger.info("Registered high-performance sentence-transformers embedder")
             else:
                 logger.warning(f"Unknown embedder type: {embedder_type}")
         except ImportError as e:

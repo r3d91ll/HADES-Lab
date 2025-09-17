@@ -58,15 +58,15 @@ class DatabaseFactory:
         # Try Unix socket first if requested
         if use_unix:
             try:
-                from .arango.arango_unix_client import ArangoUnixClient
-                client = ArangoUnixClient(
-                    database=database,
+                from .arango_unix_client import get_database_for_workflow
+                db = get_database_for_workflow(
+                    db_name=database,
                     username=username,
-                    password=password
+                    password=password,
+                    prefer_unix=True
                 )
-                if client.use_unix:
-                    logger.info("✓ Using Unix socket for ArangoDB connection")
-                    return client
+                logger.info("✓ Using Unix socket for ArangoDB connection")
+                return db
             except ImportError:
                 logger.warning("Unix socket client not available, falling back to HTTP")
             except Exception as e:
