@@ -16,7 +16,7 @@ import tarfile
 import tempfile
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Union
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class LaTeXExtractor:
         }
         logger.info(f"Initialized LaTeX extractor (pandoc: {use_pandoc})")
     
-    def extract(self, latex_path: str) -> Dict[str, Any]:
+    def extract(self, latex_path: Union[str, Path]) -> Dict[str, Any]:
         """
         Extract content from LaTeX source archive.
         

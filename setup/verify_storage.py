@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Add project root to path
-project_root = Path(__file__).parent
+# Add project root to path (parent of setup/)
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.database.database_factory import DatabaseFactory

@@ -62,6 +62,11 @@ else
     print_success "Poetry installed"
 fi
 
+# Get project root directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
 # Install dependencies
 print_info "Installing Python dependencies with Poetry..."
 poetry install

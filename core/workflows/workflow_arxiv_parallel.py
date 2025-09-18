@@ -212,7 +212,7 @@ class EmbeddingWorker(mp.Process):
                  config: WorkerConfig,
                  input_queue: mp.Queue,
                  output_queue: mp.Queue,
-                 stop_event: mp.Event):
+                 stop_event: Any):
         """
         Initialize embedding worker.
 
@@ -420,20 +420,20 @@ class ArxivParallelWorkflow(WorkflowBase):
         )
 
         # Processing state
-        self.workers = []
-        self.input_queue = None
-        self.output_queue = None
-        self.stop_event = None
-        self.storage_thread = None
+        self.workers: List[mp.Process] = []
+        self.input_queue: Optional[mp.Queue] = None
+        self.output_queue: Optional[mp.Queue] = None
+        self.stop_event: Optional[Any] = None
+        self.storage_thread: Optional[Thread] = None
 
         # Counters
         self.processed_count = 0
         self.failed_count = 0
         self.skipped_count = 0  # Track skipped records when resuming
-        self.start_time = None
+        self.start_time: Optional[datetime] = None
 
         # Database connection
-        self.db = None
+        self.db: Optional[Any] = None
 
     def _initialize_components(self):
         """Initialize workflow components."""

@@ -46,27 +46,27 @@ except ImportError:
 try:
     from .extractors_docling import DoclingExtractor
 except ImportError:
-    DoclingExtractor = None
+    DoclingExtractor = None  # type: ignore[misc]
 
 try:
     from .extractors_latex import LaTeXExtractor
 except ImportError:
-    LaTeXExtractor = None
+    LaTeXExtractor = None  # type: ignore[misc]
 
 try:
     from .extractors_code import CodeExtractor
 except ImportError:
-    CodeExtractor = None
+    CodeExtractor = None  # type: ignore[misc]
 
 try:
     from .extractors_treesitter import TreeSitterExtractor
 except ImportError:
-    TreeSitterExtractor = None
+    TreeSitterExtractor = None  # type: ignore[misc]
 
 try:
     from .extractors_robust import RobustExtractor
 except ImportError:
-    RobustExtractor = None
+    RobustExtractor = None  # type: ignore[misc]
 
 # Backward compatibility exports
 __all__ = [

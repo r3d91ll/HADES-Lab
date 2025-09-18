@@ -59,7 +59,10 @@ fi
 
 # Configure Poetry for this project
 echo -e "\n4. Configuring Poetry for HADES-Lab..."
-cd /home/todd/olympus/HADES-Lab
+# Get the directory where this script is located, then go to parent (project root)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
 
 # Set Poetry to create virtual environments in project directory
 poetry config virtualenvs.in-project true

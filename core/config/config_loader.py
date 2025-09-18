@@ -14,7 +14,7 @@ mechanism in Actor-Network Theory, converting external representations
 into internal semantic structures.
 """
 
-from typing import Dict, Any, Optional, Union, List, Type, TypeVar
+from typing import Dict, Any, Optional, Union, List, Type, TypeVar, Tuple
 from pathlib import Path
 import yaml
 import json
@@ -121,7 +121,7 @@ class ConfigSchema:
         Returns:
             True if type matches
         """
-        type_map = {
+        type_map: Dict[str, Union[type, Tuple[type, ...]]] = {
             'string': str,
             'integer': int,
             'number': (int, float),
@@ -278,7 +278,7 @@ class ConfigLoader:
         Returns:
             Configuration data from environment
         """
-        config = {}
+        config: Dict[str, Any] = {}
         prefix_lower = prefix.lower()
 
         for key, value in os.environ.items():
@@ -360,7 +360,7 @@ class ConfigLoader:
         logger.info(f"Loading hierarchical configuration: {config_name}")
 
         # Start with empty base configuration
-        merged_config = {}
+        merged_config: Dict[str, Any] = {}
 
         # 1. Load from files (lowest to highest priority)
         sources = self.discover_sources(config_name)

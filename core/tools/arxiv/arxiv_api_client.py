@@ -20,7 +20,7 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 from urllib.parse import quote
 import hashlib
@@ -116,7 +116,7 @@ class ArXivAPIClient:
         
         self.last_request_time = time.time()
     
-    def _make_request(self, url: str, params: Dict = None) -> requests.Response:
+    def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
         """Make HTTP request with retries and error handling"""
         self._enforce_rate_limit()
         
@@ -419,7 +419,7 @@ class ArXivAPIClient:
         Returns:
             Dictionary mapping ArXiv ID to metadata (None if failed)
         """
-        results = {}
+        results: Dict[str, Optional[ArXivMetadata]] = {}
         
         # Process in batches to respect API limits
         batch_size = 10

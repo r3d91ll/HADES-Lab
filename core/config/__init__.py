@@ -22,6 +22,8 @@ Key Components:
 - Built-in configs: ProcessingConfig, StorageConfig for common patterns
 """
 
+from typing import Optional
+
 from .config_base import (
     BaseConfig,
     ProcessingConfig,
@@ -74,7 +76,7 @@ __all__ = [
 ]
 
 
-def get_config(name: str, instance_id: str = None, **overrides):
+def get_config(name: str, instance_id: Optional[str] = None, **overrides):
     """
     Convenience function to get configuration from global manager.
 

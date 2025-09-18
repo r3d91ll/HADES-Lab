@@ -47,7 +47,7 @@ class ArangoUnixClient:
         self.http_host = http_host or os.environ.get('ARXIV_DB_HOST', self.DEFAULT_HTTP_HOST)
         self.prefer_unix = prefer_unix
         self.connection_url = None
-        self.client = None
+        self.client: Optional[ArangoClient] = None
         self.using_unix = False
 
         self._setup_connection()
@@ -97,9 +97,11 @@ class ArangoUnixClient:
         Returns:
             StandardDatabase instance
         """
+        if self.client is None:
+            raise RuntimeError("Arango client is not initialized")
         return self.client.db(name, username=username, password=password)
 
-    def get_system_db(self, username: str = 'root', password: str = None) -> StandardDatabase:
+    def get_system_db(self, username: str = 'root', password: Optional[str] = None) -> StandardDatabase:
         """
         Get system database connection for administrative tasks.
 
@@ -115,6 +117,8 @@ class ArangoUnixClient:
             if not password:
                 raise ValueError("No password provided and ARANGO_PASSWORD not set")
 
+        if self.client is None:
+            raise RuntimeError("Arango client is not initialized")
         return self.client.db('_system', username=username, password=password)
 
     def test_connection(self, db: StandardDatabase) -> bool:
@@ -183,9 +187,9 @@ def get_optimized_client(prefer_unix: bool = True) -> ArangoUnixClient:
     return ArangoUnixClient(prefer_unix=prefer_unix)
 
 
-def get_database_for_workflow(db_name: str = None,
-                              username: str = None,
-                              password: str = None,
+def get_database_for_workflow(db_name: Optional[str] = None,
+                              username: Optional[str] = None,
+                              password: Optional[str] = None,
                               prefer_unix: bool = True) -> StandardDatabase:
     """
     Get a database connection optimized for workflow processing.
@@ -200,22 +204,27 @@ def get_database_for_workflow(db_name: str = None,
         Database connection ready for use
     """
     # Get defaults from environment
-    db_name = db_name or os.environ.get('ARXIV_DB_NAME', 'arxiv_repository')
-    username = username or os.environ.get('ARXIV_WRITER_USER', 'arxiv_writer')
-    password = password or os.environ.get('ARXIV_WRITER_PASSWORD')
+    env_db = os.environ.get('ARXIV_DB_NAME')
+    env_user = os.environ.get('ARXIV_WRITER_USER')
+    env_password = os.environ.get('ARXIV_WRITER_PASSWORD')
 
-    if not password:
+    db_name_value: str = db_name or env_db or 'arxiv_repository'
+    username_value: str = username or env_user or 'arxiv_writer'
+    password_value = password or env_password
+
+    if not password_value:
         raise ValueError("No password provided and ARXIV_WRITER_PASSWORD not set")
+    password_value_str: str = password_value
 
     # Get optimized client
     client = get_optimized_client(prefer_unix=prefer_unix)
 
     # Log connection info
     info = client.get_connection_info()
-    logger.info(f"Connecting to database '{db_name}' as '{username}' "
+    logger.info(f"Connecting to database '{db_name_value}' as '{username_value}' "
                 f"(using {'Unix socket' if info['using_unix'] else 'HTTP'})")
 
-    return client.get_database(db_name, username, password)
+    return client.get_database(db_name_value, username_value, password_value_str)
 
 
 # Example usage in workflows:

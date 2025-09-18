@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 """
-Embedder Factory
+Embedder Factory - HADES Standardized on Jina v4
 
 Factory pattern for creating embedder instances based on configuration.
-Supports automatic model selection and fallback strategies.
+HADES Lab has standardized on Jina v4 embeddings for consistency and performance.
+
+Architecture Decision:
+- Production: JinaV4Embedder (transformers-based, 32k context, late chunking)
+- Deprecated: SentenceTransformersEmbedder (moved to Acheron/)
+
+Extension Guide for Future Models:
+1. Create new class inheriting from EmbedderBase
+2. Implement required methods (embed_texts, embed_with_late_chunking, etc.)
+3. Register in factory's _auto_register method
+4. Update _determine_embedder_type for model name detection
 
 Theory Connection:
 The factory pattern enables flexible switching between embedding models
@@ -110,8 +120,8 @@ class EmbedderFactory:
         elif "cohere" in model_lower:
             return "cohere"
         else:
-            # Default to sentence-transformers for best performance
-            return "sentence"
+            # Default to Jina v4 as standardized embedder
+            return "jina"
 
     @classmethod
     def _auto_register(cls, embedder_type: str):
@@ -126,9 +136,11 @@ class EmbedderFactory:
                 from .embedders_jina import JinaV4Embedder
                 cls.register("jina", JinaV4Embedder)
             elif embedder_type == "sentence":
-                from .embedders_sentence import SentenceTransformersEmbedder
-                cls.register("sentence", SentenceTransformersEmbedder)
-                logger.info("Registered high-performance sentence-transformers embedder")
+                # SentenceTransformersEmbedder deprecated - redirect to Jina
+                logger.warning("SentenceTransformersEmbedder is deprecated. Using JinaV4Embedder instead.")
+                from .embedders_jina import JinaV4Embedder
+                cls.register("sentence", JinaV4Embedder)
+                logger.info("Redirected sentence-transformers request to JinaV4Embedder")
             else:
                 logger.warning(f"Unknown embedder type: {embedder_type}")
         except ImportError as e:

@@ -294,7 +294,7 @@ class PerformanceMonitor(MetricsCollector):
 
     def _collect_gpu_resources(self) -> List[GPUResources]:
         """Collect GPU resource usage using nvidia-smi."""
-        gpu_resources = []
+        gpu_resources: List[GPUResources] = []
 
         try:
             # Query GPU information
@@ -541,7 +541,7 @@ class PerformanceMonitor(MetricsCollector):
         Returns:
             System status dictionary
         """
-        status = {
+        status: Dict[str, Any] = {
             'system': None,
             'gpus': [],
             'monitoring_active': self._monitoring_active
@@ -562,19 +562,24 @@ class PerformanceMonitor(MetricsCollector):
             }
 
         # Latest GPU resources
+        gpu_status: List[Dict[str, Any]] = []
+
         for gpu_id, history in self._gpu_history.items():
             if history:
                 latest = history[-1]
-                status['gpus'].append({
+                memory_total = latest.memory_total_gb or 1.0
+                gpu_status.append({
                     'gpu_id': latest.gpu_id,
                     'utilization_percent': latest.utilization_percent,
                     'memory_used_gb': latest.memory_used_gb,
                     'memory_total_gb': latest.memory_total_gb,
-                    'memory_percent': (latest.memory_used_gb / latest.memory_total_gb) * 100,
+                    'memory_percent': (latest.memory_used_gb / memory_total) * 100,
                     'temperature_c': latest.temperature_c,
                     'power_draw_w': latest.power_draw_w,
                     'timestamp': latest.timestamp.isoformat()
                 })
+
+        status['gpus'] = gpu_status
 
         return status
 
@@ -627,9 +632,6 @@ class PerformanceMonitor(MetricsCollector):
 
         except Exception as e:
             logger.error(f"Failed to write performance summary: {e}")
-
-        # Call parent flush
-        super().flush()
 
     def cleanup(self) -> None:
         """Cleanup monitoring resources."""

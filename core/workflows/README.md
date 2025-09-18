@@ -92,7 +92,7 @@ workflow = PDFWorkflow(
             "chunk_size": 1000
         },
         "embedding": {
-            "model": "jinaai/jina-embeddings-v3",
+            "model": "jinaai/jina-embeddings-v4",
             "device": "cuda",
             "batch_size": 32
         },
@@ -425,7 +425,7 @@ workflow:
     chunk_overlap: 200
 
   embedding:
-    model: jinaai/jina-embeddings-v3
+    model: jinaai/jina-embeddings-v4
     device: cuda
     batch_size: 32
     use_fp16: true

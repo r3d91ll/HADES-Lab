@@ -148,7 +148,7 @@ class ProgressStep:
         self.state = ProgressState.COMPLETED
         logger.debug(f"Completed progress step: {self.id}")
 
-    def fail(self, error_message: str = None) -> None:
+    def fail(self, error_message: Optional[str] = None) -> None:
         """Mark the progress step as failed."""
         self.end_time = datetime.utcnow()
         self.state = ProgressState.FAILED
@@ -411,7 +411,7 @@ class ProgressTracker:
 
             return True
 
-    def fail_step(self, step_id: str, error_message: str = None) -> bool:
+    def fail_step(self, step_id: str, error_message: Optional[str] = None) -> bool:
         """
         Mark step as failed.
 

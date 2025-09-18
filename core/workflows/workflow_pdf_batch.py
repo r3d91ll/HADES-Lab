@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
@@ -31,7 +31,7 @@ class DocumentTask:
     document_id: str  # Unique identifier (could be arxiv_id, DOI, filename, etc)
     pdf_path: str
     latex_path: Optional[str] = None
-    metadata: Dict[str, Any] = None  # Optional metadata from source
+    metadata: Dict[str, Any] = field(default_factory=dict)  # Optional metadata from source
     
     def __post_init__(self):
         """
@@ -158,7 +158,7 @@ class GenericDocumentProcessor:
         
         logger.info(f"Starting {num_workers} extraction workers on GPU devices {gpu_devices}")
         
-        results = {
+        results: Dict[str, List[str]] = {
             'success': [],
             'failed': [],
             'staged_files': []
@@ -222,9 +222,11 @@ class GenericDocumentProcessor:
         
         logger.info(f"Starting {num_workers} embedding workers on GPU devices {gpu_devices}")
         
-        results = {
-            'success': [],
-            'failed': [],
+        success: List[str] = []
+        failed: List[str] = []
+        results: Dict[str, Any] = {
+            'success': success,
+            'failed': failed,
             'chunks_created': 0
         }
         
@@ -246,13 +248,13 @@ class GenericDocumentProcessor:
                     try:
                         result = future.result(timeout=300)
                         if result['success']:
-                            results['success'].append(result['document_id'])
+                            success.append(result['document_id'])
                             results['chunks_created'] += result['num_chunks']
                         else:
-                            results['failed'].append(staged_path)
+                            failed.append(staged_path)
                             logger.warning(f"Embedding failed: {result.get('error')}")
                     except Exception as e:
-                        results['failed'].append(staged_path)
+                        failed.append(staged_path)
                         logger.error(f"Embedding error: {e}")
                     finally:
                         pbar.update(1)

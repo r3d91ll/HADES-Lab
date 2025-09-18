@@ -14,7 +14,7 @@ enhance embedding quality.
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Union
 import hashlib
 
 try:
@@ -88,7 +88,7 @@ class TreeSitterExtractor:
     
     def __init__(self):
         """Initialize the Tree-sitter extractor."""
-        self.parsers = {}
+        self.parsers: Dict[str, Any] = {}
         
         if not TREE_SITTER_AVAILABLE:
             logger.warning("Tree-sitter not available - symbol extraction will be skipped")
@@ -105,7 +105,7 @@ class TreeSitterExtractor:
                 # Not all languages may be available
                 logger.debug(f"Language {lang} not available: {e}")
     
-    def extract_symbols(self, file_path: str, content: Optional[str] = None) -> Dict[str, Any]:
+    def extract_symbols(self, file_path: Union[str, Path], content: Optional[str] = None) -> Dict[str, Any]:
         """
         Extract symbol table and structural information from a code file.
         
@@ -200,7 +200,7 @@ class TreeSitterExtractor:
         - variables: Global/constant variables
         - exports: Exported symbols (for JS/TS)
         """
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'functions': [],
             'classes': [],
             'imports': [],
@@ -236,7 +236,7 @@ class TreeSitterExtractor:
     
     def _extract_python_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """Extract symbols from Python code."""
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'functions': [],
             'classes': [],
             'imports': [],
@@ -306,7 +306,7 @@ class TreeSitterExtractor:
     
     def _extract_javascript_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """Extract symbols from JavaScript/TypeScript code."""
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'functions': [],
             'classes': [],
             'imports': [],
@@ -376,7 +376,7 @@ class TreeSitterExtractor:
     
     def _extract_java_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """Extract symbols from Java code."""
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'functions': [],
             'classes': [],
             'imports': [],
@@ -434,7 +434,7 @@ class TreeSitterExtractor:
     
     def _extract_go_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """Extract symbols from Go code."""
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'functions': [],
             'types': [],
             'imports': [],
@@ -487,7 +487,7 @@ class TreeSitterExtractor:
     
     def _extract_rust_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """Extract symbols from Rust code."""
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'functions': [],
             'structs': [],
             'enums': [],
@@ -545,7 +545,7 @@ class TreeSitterExtractor:
     
     def _extract_c_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """Extract symbols from C/C++ code."""
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'functions': [],
             'structs': [],
             'classes': [],
@@ -609,9 +609,10 @@ class TreeSitterExtractor:
         We don't interpret semantic meaning - that's Jina v4's job.
         We just provide basic structural information for context.
         """
-        symbols = {
+        structure_info: List[Dict[str, Any]] = []
+        symbols: Dict[str, Any] = {
             'config_type': language,
-            'structure_info': []
+            'structure_info': structure_info
         }
         
         # Count basic structural elements without interpreting them
@@ -642,19 +643,19 @@ class TreeSitterExtractor:
         traverse(node)
         
         # Provide minimal metadata
-        symbols['structure_info'] = [{
+        structure_info.append({
             'type': 'config_metadata',
             'format': language,
             'key_count': key_count,
             'max_nesting_depth': max_depth,
             'is_valid_syntax': True  # If we got here, it parsed successfully
-        }]
-        
+        })
+
         return symbols
     
     def _extract_generic_symbols(self, node, content: str) -> Dict[str, List[Dict[str, Any]]]:
         """Generic symbol extraction for unsupported languages."""
-        symbols = {
+        symbols: Dict[str, List[Dict[str, Any]]] = {
             'identifiers': [],
             'literals': []
         }
@@ -674,8 +675,8 @@ class TreeSitterExtractor:
         traverse(node)
         
         # Deduplicate identifiers
-        seen = set()
-        unique_identifiers = []
+        seen: Set[str] = set()
+        unique_identifiers: List[Dict[str, Any]] = []
         for ident in symbols['identifiers']:
             if ident['name'] not in seen:
                 seen.add(ident['name'])
@@ -762,22 +763,23 @@ class TreeSitterExtractor:
         
         Returns nested structure showing code organization.
         """
-        structure = {
+        children: List[Dict[str, Any]] = []
+        structure: Dict[str, Any] = {
             'type': 'module',
             'language': language,
-            'children': []
+            'children': children
         }
         
         # Extract top-level structure
         for child in tree.root_node.children:
             if child.type in ['function_definition', 'function_declaration', 'function_item']:
-                structure['children'].append({
+                children.append({
                     'type': 'function',
                     'line': child.start_point[0] + 1,
                     'end_line': child.end_point[0] + 1
                 })
             elif child.type in ['class_definition', 'class_declaration', 'class_specifier']:
-                structure['children'].append({
+                children.append({
                     'type': 'class',
                     'line': child.start_point[0] + 1,
                     'end_line': child.end_point[0] + 1

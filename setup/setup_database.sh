@@ -225,8 +225,12 @@ if [ "$QUIET_MODE" = true ]; then
     PYTHON_ARGS="$PYTHON_ARGS --quiet"
 fi
 
-# Run the simplified Python setup script
-if python3 dev-utils/setup_arxiv_database_simple.py $PYTHON_ARGS; then
+# Get project root directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Run the simplified Python setup script from project root
+if python3 "$PROJECT_ROOT/dev-utils/setup_arxiv_database_simple.py" $PYTHON_ARGS; then
     print_success "Database setup completed successfully"
 else
     print_error "Database setup failed"

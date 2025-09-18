@@ -83,7 +83,10 @@ __all__ = [
 ]
 
 
-def create_performance_monitor(component_name: str, log_dir: str = None,
+from typing import Optional
+
+
+def create_performance_monitor(component_name: str, log_dir: Optional[str] = None,
                              monitor_interval: float = 5.0,
                              enable_gpu_monitoring: bool = True) -> PerformanceMonitor:
     """
@@ -128,7 +131,7 @@ def create_performance_monitor(component_name: str, log_dir: str = None,
 
 def create_progress_tracker(name: str, description: str = "",
                           auto_save: bool = False,
-                          save_path: str = None) -> ProgressTracker:
+                          save_path: Optional[str] = None) -> ProgressTracker:
     """
     Factory function to create a progress tracker with optional auto-save.
 
