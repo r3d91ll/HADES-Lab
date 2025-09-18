@@ -21,11 +21,12 @@ use ArangoDBClient\UpdatePolicy;
 // Get operation from command line
 $operation = $argv[1] ?? 'test';
 
-// Configuration - try TCP first, then we'll fix Unix socket permissions
+// Define connection endpoint as constant for consistency
+define('ARANGO_ENDPOINT', 'tcp://localhost:8529'); // TODO: Switch to unix:///tmp/arangodb.sock
+
+// Configuration
 $connectionOptions = [
-    // TODO: Fix Unix socket permissions, for now use TCP
-    // ConnectionOptions::OPTION_ENDPOINT => 'unix:///tmp/arangodb.sock',
-    ConnectionOptions::OPTION_ENDPOINT => 'tcp://localhost:8529',
+    ConnectionOptions::OPTION_ENDPOINT => ARANGO_ENDPOINT,
     ConnectionOptions::OPTION_DATABASE => 'arxiv_repository',
     ConnectionOptions::OPTION_AUTH_TYPE => 'Basic',
     ConnectionOptions::OPTION_AUTH_USER => 'root',
@@ -50,7 +51,7 @@ try {
                 'status' => 'success',
                 'message' => 'Connected successfully!',
                 'collections_found' => count($collections),
-                'endpoint' => 'tcp://localhost:8529'  // TODO: Switch to Unix socket
+                'endpoint' => ARANGO_ENDPOINT
             ], JSON_PRETTY_PRINT) . "\n";
             break;
 
@@ -143,6 +144,11 @@ try {
             $collectionName = $data['collection'] ?? 'arxiv_metadata';
             $documents = $data['documents'] ?? [];
 
+            // Validate collection name to prevent injection
+            if (!preg_match('/^[a-zA-Z0-9_]+$/', $collectionName)) {
+                throw new \Exception("Invalid collection name: must contain only alphanumeric characters and underscores");
+            }
+
             $documentHandler = new DocumentHandler($connection);
             $inserted = 0;
 
@@ -157,30 +163,35 @@ try {
                     $batchDocs[] = $document;
                 }
 
-                // ACID compliant atomic bulk insert using transaction
-                $trx = new \ArangoDBClient\Transaction($connection);
-                $trx->addWrite($collectionName);
+                // Use safe bulk import instead of JavaScript transaction
+                $collectionHandler = new CollectionHandler($connection);
 
-                // Build batch insert action
-                $docsJson = json_encode(array_map(function($doc) {
+                // Convert documents to arrays for import
+                $docsArray = array_map(function($doc) {
                     return $doc->getAll();
-                }, $batchDocs));
-
-                $action = "function () {
-                    var db = require('@arangodb').db;
-                    var docs = $docsJson;
-                    return db.$collectionName.save(docs);
-                }";
-
-                $trx->setAction($action);
+                }, $batchDocs);
 
                 try {
-                    // Execute atomic transaction - all or nothing
-                    $result = $trx->execute();
-                    $inserted += count($batch);
+                    // Use the safe import method - atomic and injection-proof
+                    $result = $collectionHandler->import(
+                        $collectionName,
+                        $docsArray,
+                        [
+                            'complete' => true,  // Atomic - all or nothing
+                            'details' => false,  // Don't need detailed results
+                            'onDuplicate' => 'error'  // Fail on duplicates
+                        ]
+                    );
+
+                    // Check if import was successful
+                    if (isset($result['created'])) {
+                        $inserted += $result['created'];
+                    } else {
+                        $inserted += count($batch);
+                    }
                 } catch (\Exception $e) {
-                    // Transaction failed - nothing was inserted
-                    throw new \Exception("ACID transaction failed: " . $e->getMessage());
+                    // Import failed - nothing was inserted (ACID guarantee)
+                    throw new \Exception("Batch import failed: " . $e->getMessage());
                 }
             }
 
@@ -196,7 +207,7 @@ try {
             $collectionHandler = new CollectionHandler($connection);
             $collections = ['arxiv_metadata', 'arxiv_abstract_embeddings', 'arxiv_abstract_chunks'];
             $stats = [
-                'connection' => 'unix:///tmp/arangodb.sock',
+                'connection' => ARANGO_ENDPOINT,
                 'database' => 'arxiv_repository',
                 'collections' => []
             ];
