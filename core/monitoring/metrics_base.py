@@ -292,7 +292,7 @@ class MetricsCollector(ABC):
                 self.register_metric(name, MetricType.COUNTER)
 
             series = self._series[name]
-            current_value = 0
+            current_value: Union[int, float] = 0
             if series.values:
                 latest = series.values[-1]
                 if isinstance(latest.value, (int, float)):
@@ -472,24 +472,27 @@ class MetricsCollector(ABC):
             Metrics summary dictionary
         """
         with self._lock:
-            summary = {
-                'component': self.component_name,
-                'uptime_seconds': (datetime.utcnow() - self.start_time).total_seconds(),
-                'metrics_count': len(self._series),
-                'active_timers': len(self._active_timers),
-                'metrics': {}
-            }
+            metrics_summary: Dict[str, Dict[str, Any]] = {}
 
             for name, series in self._series.items():
-                summary['metrics'][name] = {
+                latest_entry = series.get_latest()
+                metrics_summary[name] = {
                     'type': series.metric_type.value,
                     'description': series.description,
                     'unit': series.unit,
                     'dimensions': series.dimensions,
                     'values_count': len(series.values),
-                    'latest': series.get_latest().value if series.get_latest() else None,
+                    'latest': latest_entry.value if latest_entry else None,
                     'statistics': series.get_statistics(timedelta(minutes=5))
                 }
+
+            summary: Dict[str, Any] = {
+                'component': self.component_name,
+                'uptime_seconds': (datetime.utcnow() - self.start_time).total_seconds(),
+                'metrics_count': len(self._series),
+                'active_timers': len(self._active_timers),
+                'metrics': metrics_summary
+            }
 
             return summary
 

@@ -15,7 +15,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class StateManager:
         """
         self.state_file = Path(state_file)
         self.process_name = process_name
-        self.state = {
+        self.state: Dict[str, Any] = {
             'process_name': process_name,
             'created': datetime.now().isoformat(),
             'last_save': None,
@@ -60,7 +60,12 @@ class StateManager:
             try:
                 with open(self.state_file, 'r') as f:
                     saved_state = json.load(f)
-                    
+                    if not isinstance(saved_state, dict):
+                        logger.warning(
+                            f"State file {self.state_file} did not contain a valid object; starting fresh"
+                        )
+                        return False
+
                 # Validate it's for the same process
                 if saved_state.get('process_name') == self.process_name:
                     self.state.update(saved_state)
@@ -109,35 +114,49 @@ class StateManager:
             if temp_file.exists():
                 temp_file.unlink()
             return False
+
+    def _ensure_section(self, key: str) -> Dict[str, Any]:
+        """Ensure a nested section exists as a dictionary."""
+        section = self.state.get(key)
+        if not isinstance(section, dict):
+            section = {}
+            self.state[key] = section
+        return section
     
     def set_checkpoint(self, name: str, value: Any):
         """Set a named checkpoint."""
-        self.state['checkpoints'][name] = {
+        checkpoints = self._ensure_section('checkpoints')
+        checkpoints[name] = {
             'value': value,
             'timestamp': datetime.now().isoformat()
         }
-    
+
     def get_checkpoint(self, name: str, default: Any = None) -> Any:
         """Get a named checkpoint value."""
-        checkpoint = self.state['checkpoints'].get(name, {})
+        checkpoint_section = self._ensure_section('checkpoints')
+        checkpoint = checkpoint_section.get(name, {})
         return checkpoint.get('value', default)
-    
+
     def update_stats(self, **kwargs):
         """Update statistics."""
-        self.state['stats'].update(kwargs)
-    
+        stats = self._ensure_section('stats')
+        stats.update(kwargs)
+
     def increment_stat(self, name: str, amount: int = 1):
         """Increment a statistic counter."""
-        current = self.state['stats'].get(name, 0)
-        self.state['stats'][name] = current + amount
-    
+        stats = self._ensure_section('stats')
+        current = stats.get(name, 0)
+        stats[name] = current + amount
+
     def set_metadata(self, key: str, value: Any):
         """Set metadata value."""
-        self.state['metadata'][key] = value
-    
+        metadata = self._ensure_section('metadata')
+        metadata[key] = value
+
     def get_metadata(self, key: str, default: Any = None) -> Any:
         """Get metadata value."""
-        return self.state['metadata'].get(key, default)
+        metadata = self._ensure_section('metadata')
+        return metadata.get(key, default)
     
     def clear(self):
         """Clear state file."""
@@ -165,8 +184,8 @@ class StateManager:
             'process': self.process_name,
             'created': self.state.get('created'),
             'last_save': self.state.get('last_save'),
-            'checkpoints': len(self.state.get('checkpoints', {})),
-            'stats': self.state.get('stats', {})
+            'checkpoints': len(self._ensure_section('checkpoints')),
+            'stats': self._ensure_section('stats')
         }
 
 
@@ -186,7 +205,7 @@ class CheckpointManager:
             checkpoint_file: Path to checkpoint file
         """
         self.checkpoint_file = Path(checkpoint_file)
-        self.processed = set()
+        self.processed: Set[str] = set()
         self.load()
     
     def load(self) -> bool:
@@ -196,9 +215,14 @@ class CheckpointManager:
                 with open(self.checkpoint_file, 'r') as f:
                     data = json.load(f)
                     if isinstance(data, list):
-                        self.processed = set(data)
+                        self.processed = {str(item) for item in data}
+                    elif isinstance(data, dict):
+                        self.processed = {str(item) for item in data.get('processed', [])}
                     else:
-                        self.processed = set(data.get('processed', []))
+                        logger.warning(
+                            f"Unexpected checkpoint format in {self.checkpoint_file}; resetting"
+                        )
+                        self.processed.clear()
                     
                 logger.info(f"Loaded {len(self.processed)} checkpoints")
                 return True

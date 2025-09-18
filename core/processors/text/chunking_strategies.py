@@ -170,7 +170,7 @@ class TokenBasedChunking(ChunkingStrategy):
             # Simple word tokenization
             tokens = text.split()
         
-        chunks = []
+        chunks: List[TextChunk] = []
         stride = self.chunk_size - self.chunk_overlap
         
         for i in range(0, len(tokens), stride):
@@ -274,7 +274,7 @@ class SemanticChunking(ChunkingStrategy):
         # Split into paragraphs
         paragraphs = self._split_paragraphs(text)
         
-        chunks = []
+        chunks: List[TextChunk] = []
         current_chunk_text = ""
         current_chunk_start = 0
         
@@ -380,7 +380,7 @@ class SemanticChunking(ChunkingStrategy):
             List[TextChunk]: A list of TextChunk objects with metadata containing `strategy='semantic_forced_split'` and `token_count`. Chunk indices are zero-based and reflect the order of the produced chunks.
         """
         words = text.split()
-        chunks = []
+        chunks: List[TextChunk] = []
         
         for i in range(0, len(words), self.max_chunk_size):
             chunk_words = words[i:i + self.max_chunk_size]
@@ -478,7 +478,7 @@ class SlidingWindowChunking(ChunkingStrategy):
         text = self._clean_text(text)
         tokens = text.split()  # Simple tokenization
         
-        chunks = []
+        chunks: List[TextChunk] = []
         for i in range(0, len(tokens) - self.window_size + 1, self.step_size):
             window_tokens = tokens[i:i + self.window_size]
             chunk_text = ' '.join(window_tokens)

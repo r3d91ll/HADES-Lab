@@ -248,8 +248,8 @@ class DocumentProcessor:
             - Unsupported chunking strategies raise a ValueError internally and result in a failed ProcessingResult.
         """
         start_time = time.time()
-        errors = []
-        warnings = []
+        errors: List[str] = []
+        warnings: List[str] = []
         
         # Convert paths to Path objects
         pdf_path = Path(pdf_path)
@@ -459,7 +459,7 @@ class DocumentProcessor:
             )
         
         # Simple token-based chunking
-        chunks = []
+        chunks: List[Dict[str, Any]] = []
         tokens = text.split()  # Simplified - real implementation would use tokenizer
         
         if not tokens:

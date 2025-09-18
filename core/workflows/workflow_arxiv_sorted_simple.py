@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
-                           input_queue: mp.Queue, output_queue: mp.Queue, stop_event: mp.Event,
+                           input_queue: mp.Queue, output_queue: mp.Queue, stop_event: Any,
                            embedding_batch_size: int = 48, chunk_size_tokens: int = 500,
                            chunk_overlap_tokens: int = 200) -> None:
     """GPU worker process - sets CUDA device before imports.
@@ -191,13 +191,13 @@ class ArxivSortedWorkflow:
 
         # Setup multiprocessing
         ctx = mp.get_context('spawn')
-        self.input_queue = ctx.Queue(maxsize=50)
-        self.output_queue = ctx.Queue(maxsize=50)
-        self.stop_event = ctx.Event()
+        self.input_queue: mp.Queue = ctx.Queue(maxsize=50)
+        self.output_queue: mp.Queue = ctx.Queue(maxsize=50)
+        self.stop_event: Any = ctx.Event()
 
         # Workers and storage thread
-        self.workers = []
-        self.storage_thread = None
+        self.workers: List[Any] = []
+        self.storage_thread: Optional[threading.Thread] = None
 
     def execute(self) -> bool:
         """Main execution flow."""

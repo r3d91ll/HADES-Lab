@@ -80,7 +80,7 @@ class WorkflowBase(ABC):
             config: Workflow configuration
         """
         self.config = config or WorkflowConfig(name="unnamed_workflow")
-        self.checkpoint_data = {}
+        self.checkpoint_data: Dict[str, Any] = {}
         self._ensure_staging_directory()
 
     def _ensure_staging_directory(self):

@@ -6,9 +6,9 @@ local filesystem, S3, and RamFS for high-speed staging.
 """
 
 try:
-    from .storage_local import LocalStorage
+    from .storage_local import StorageManager as LocalStorage
 except ImportError:
-    LocalStorage = None
+    LocalStorage = None  # type: ignore[misc]
 
 try:
     from .storage_s3 import S3Storage

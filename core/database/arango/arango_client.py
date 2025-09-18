@@ -11,12 +11,13 @@ import os
 import time
 import random
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 from functools import wraps
 from queue import Queue, Empty
 from datetime import datetime, timedelta
 
 from arango import ArangoClient
+from arango.database import StandardDatabase
 from arango.exceptions import DocumentInsertError, ArangoServerError
 
 logger = logging.getLogger(__name__)
@@ -84,10 +85,10 @@ class ArangoDBManager:
         """
         self.config = config
         self.pool_size = pool_size
-        
+
         # Create connection pool
-        self.connections = []
-        self.available_connections = Queue(maxsize=pool_size)
+        self.connections: List[Tuple[ArangoClient, StandardDatabase]] = []
+        self.available_connections: Queue[StandardDatabase] = Queue(maxsize=pool_size)
         
         # Initialize connections
         for _ in range(pool_size):

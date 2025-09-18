@@ -147,8 +147,8 @@ class ExtractorFactory:
                 from .extractors_docling import DoclingExtractor
                 cls.register('docling', DoclingExtractor)
             elif extractor_type == 'latex':
-                from .extractors_latex import LatexExtractor
-                cls.register('latex', LatexExtractor)
+                from .extractors_latex import LaTeXExtractor
+                cls.register('latex', LaTeXExtractor)
             elif extractor_type == 'code':
                 from .extractors_code import CodeExtractor
                 cls.register('code', CodeExtractor)

@@ -9,7 +9,7 @@ transforming information from PDF format to structured text and metadata.
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 
 try:
@@ -83,7 +83,7 @@ class DoclingExtractor:
             self.converter = None
             logger.warning("Docling not available - using fallback text extraction")
     
-    def extract(self, pdf_path: str) -> Dict[str, Any]:
+    def extract(self, pdf_path: Union[str, Path]) -> Dict[str, Any]:
         """
         Extract text and optional structured content from a file path (PDF or plain text).
         
@@ -229,7 +229,7 @@ class DoclingExtractor:
             
             # Extract from result.output (Docling v2 structure)
             full_text = ""
-            structures = {}
+            structures: Dict[str, Any] = {}
             num_pages = None
             
             if hasattr(result, 'output'):

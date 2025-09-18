@@ -257,7 +257,7 @@ class ArXivManager:
         self.validator = ArXivValidator()
         
         # Load metadata if available
-        self.metadata_cache = {}
+        self.metadata_cache: Dict[str, Any] = {}
         self._load_metadata_cache()
         
         logger.info("Initialized ArXivManager")
