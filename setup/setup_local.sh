@@ -43,11 +43,39 @@ print_info "Checking Python version..."
 python_version=$(python3 --version 2>&1 | grep -Po '(?<=Python )\d+\.\d+')
 required_version="3.11"
 
-if [ "$(printf '%s\n' "$required_version" "$python_version" | sort -V | head -n1)" = "$required_version" ]; then 
+if [ "$(printf '%s\n' "$required_version" "$python_version" | sort -V | head -n1)" = "$required_version" ]; then
     print_success "Python $python_version found (>= $required_version required)"
 else
     print_error "Python $python_version found (>= $required_version required)"
     exit 1
+fi
+
+# Check PHP version (required for ArangoDB bridge)
+print_info "Checking PHP version..."
+if command -v php &> /dev/null; then
+    php_version=$(php --version 2>&1 | grep -Po '(?<=PHP )\d+\.\d+' | head -1)
+    print_success "PHP $php_version found"
+
+    # Check if Composer is installed
+    if command -v composer &> /dev/null; then
+        print_success "Composer is installed"
+
+        # Check if ArangoDB PHP driver is installed
+        if [ -f "composer.json" ] && grep -q "triagens/arangodb" composer.json; then
+            print_success "ArangoDB PHP driver is installed"
+        else
+            print_warning "ArangoDB PHP driver not installed"
+            echo "  Run: composer require triagens/arangodb"
+        fi
+    else
+        print_warning "Composer not installed"
+        echo "  Install with: apt install composer or see setup/php_arango_setup.md"
+    fi
+else
+    print_warning "PHP not installed"
+    echo "  PHP is required for ArangoDB Unix socket connections"
+    echo "  Install with: apt install php8.3-cli php8.3-curl php8.3-mbstring php8.3-zip"
+    echo "  See setup/php_arango_setup.md for full instructions"
 fi
 
 # Check for Poetry
