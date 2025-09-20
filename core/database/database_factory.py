@@ -77,10 +77,10 @@ class DatabaseFactory:
                 raise RuntimeError(f"Unix socket connection failed. Network fallback not allowed for HADES: {e}") from e
 
         # Network connection - ONLY for human debugging, never for HADES
-        if host != "localhost":
+        if host not in {"localhost", "127.0.0.1", "::1"}:
             if os.environ.get("HADES_ALLOW_NETWORK_DEBUG") != "true":
-                raise RuntimeError("Network connections are disabled in HADES (set HADES_ALLOW_NETWORK_DEBUG=true to override for debugging)")
-            logger.warning("Network connection requested - this should only be used for debugging")
+                raise RuntimeError("Network connections are disabled (set HADES_ALLOW_NETWORK_DEBUG=true to override).")
+            logger.warning("Network connection requested - debugging only")
         try:
             from arango import ArangoClient
             client = ArangoClient(hosts=f'http://{host}:{port}')

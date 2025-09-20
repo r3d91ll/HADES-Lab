@@ -27,14 +27,16 @@ const (
 
 var cursorPathRegexp = regexp.MustCompile(`^(/_db/[^/]+)?/_api/cursor(?:/[0-9]+)?$`)
 
+type BodyPeeker func(limit int64) ([]byte, error)
+
 // UnixReverseProxy forwards HTTP requests to an upstream exposed via Unix socket.
 type UnixReverseProxy struct {
 	upstreamSocket string
-	allowFunc      func(*http.Request, []byte) error
+	allowFunc      func(*http.Request, BodyPeeker) error
 	client         *http.Client
 }
 
-func newUnixReverseProxy(upstreamSocket string, allowFunc func(*http.Request, []byte) error) *UnixReverseProxy {
+func newUnixReverseProxy(upstreamSocket string, allowFunc func(*http.Request, BodyPeeker) error) *UnixReverseProxy {
 	transport := newUnixTransport(upstreamSocket)
 	return &UnixReverseProxy{
 		upstreamSocket: upstreamSocket,
@@ -61,25 +63,57 @@ func newUnixTransport(socketPath string) *http.Transport {
 }
 
 func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	bodyBytes, err := readBody(r.Body)
-	if err != nil {
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
-		return
+	var cachedBody []byte
+	bodyConsumed := false
+
+	bodyReader := func(limit int64) ([]byte, error) {
+		if bodyConsumed {
+			return cachedBody, nil
+		}
+		if r.Body == nil {
+			bodyConsumed = true
+			return nil, nil
+		}
+		defer func() {
+			bodyConsumed = true
+		}()
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if limit > 0 && int64(len(data)) > limit {
+			return nil, fmt.Errorf("request body exceeds inspection limit (%d bytes)", limit)
+		}
+		cachedBody = data
+		if err := r.Body.Close(); err != nil {
+			log.Printf("warning: failed to close request body: %v", err)
+		}
+		return cachedBody, nil
 	}
 
-	if err := p.allowFunc(r, bodyBytes); err != nil {
+	if err := p.allowFunc(r, bodyReader); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
+	var upstreamBody io.ReadCloser
+	if bodyConsumed {
+		upstreamBody = io.NopCloser(bytes.NewReader(cachedBody))
+	} else {
+		upstreamBody = r.Body
+	}
+
 	upstreamURL := buildUpstreamURL(r)
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(bodyBytes))
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, upstreamBody)
 	if err != nil {
 		http.Error(w, "failed to build upstream request", http.StatusInternalServerError)
 		return
 	}
 
 	copyHeaders(upstreamReq.Header, r.Header)
+	if bodyConsumed {
+		upstreamReq.ContentLength = int64(len(cachedBody))
+	}
 
 	resp, err := p.client.Do(upstreamReq)
 	if err != nil {
@@ -93,14 +127,6 @@ func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, resp.Body); err != nil {
 		log.Printf("warning: failed to copy upstream response: %v", err)
 	}
-}
-
-func readBody(body io.ReadCloser) ([]byte, error) {
-	if body == nil {
-		return nil, nil
-	}
-	defer body.Close()
-	return io.ReadAll(body)
 }
 
 func copyHeaders(dst, src http.Header) {

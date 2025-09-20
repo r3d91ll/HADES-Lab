@@ -460,42 +460,100 @@ class ArXivManager:
                 'status': 'PROCESSED'
             }
             
-            # Store main paper document
-            self.db_client.bulk_insert('arxiv_papers', [arxiv_doc])
+            now_iso = datetime.now(timezone.utc).isoformat()
 
-            # Store chunks with embeddings
             chunk_docs: List[dict[str, Any]] = []
+            embedding_docs: List[dict[str, Any]] = []
             for chunk in result.chunks:
-                chunk_doc = {
-                    '_key': f"{paper_info.sanitized_id}_chunk_{chunk.chunk_index}",
-                    'paper_id': paper_info.sanitized_id,
+                chunk_id = f"{paper_info.sanitized_id}_chunk_{chunk.chunk_index}"
+                chunk_docs.append({
+                    '_key': chunk_id,
                     'arxiv_id': paper_info.arxiv_id,
                     'document_id': paper_info.arxiv_id,
+                    'paper_key': paper_info.sanitized_id,
                     'chunk_index': chunk.chunk_index,
+                    'total_chunks': chunk.total_chunks,
                     'text': chunk.text,
-                    'embedding': chunk.embedding.tolist(),
                     'start_char': chunk.start_char,
                     'end_char': chunk.end_char,
-                    'context_window_used': chunk.context_window_used
-                }
-                chunk_docs.append(chunk_doc)
+                    'context_window_used': chunk.context_window_used,
+                    'created_at': now_iso,
+                })
 
-            if chunk_docs:
-                self.db_client.bulk_insert('arxiv_embeddings', chunk_docs)
+                embedding_docs.append({
+                    '_key': f"{chunk_id}_emb",
+                    'chunk_id': chunk_id,
+                    'arxiv_id': paper_info.arxiv_id,
+                    'document_id': paper_info.arxiv_id,
+                    'paper_key': paper_info.sanitized_id,
+                    'embedding': chunk.embedding.tolist(),
+                    'embedding_dim': int(chunk.embedding.shape[0]) if hasattr(chunk.embedding, 'shape') else len(chunk.embedding),
+                    'model': getattr(self.processor, 'embedding_model', 'jinaai/jina-embeddings-v4'),
+                    'created_at': now_iso,
+                })
 
-            # Store structures if present
+            structures_docs: List[dict[str, Any]] = []
             if result.extraction.tables or result.extraction.equations or result.extraction.images:
-                structures_doc = {
+                structures_docs.append({
                     '_key': paper_info.sanitized_id,
                     'arxiv_id': paper_info.arxiv_id,
+                    'document_id': paper_info.arxiv_id,
                     'tables': result.extraction.tables,
                     'equations': result.extraction.equations,
                     'images': result.extraction.images,
-                    'figures': result.extraction.figures
-                }
-                self.db_client.bulk_insert('arxiv_structures', [structures_doc])
-            
-            logger.info(f"Stored ArXiv paper {paper_info.arxiv_id} in database")
+                    'figures': result.extraction.figures,
+                    'updated_at': now_iso,
+                })
+
+            transaction_action = """
+function (params) {
+  const db = require('@arangodb').db;
+  const papers = params.papers || [];
+  const chunks = params.chunks || [];
+  const embeddings = params.embeddings || [];
+  const structures = params.structures || [];
+
+  if (papers.length) {
+    db.arxiv_papers.insert(papers, { overwriteMode: 'replace' });
+  }
+  if (chunks.length) {
+    db.arxiv_chunks.insert(chunks, { overwriteMode: 'replace' });
+  }
+  if (embeddings.length) {
+    db.arxiv_embeddings.insert(embeddings, { overwriteMode: 'replace' });
+  }
+  if (structures.length) {
+    db.arxiv_structures.insert(structures, { overwriteMode: 'replace' });
+  }
+
+  return {
+    papers: papers.length,
+    chunks: chunks.length,
+    embeddings: embeddings.length,
+    structures: structures.length
+  };
+}
+"""
+
+            transaction_params = {
+                'papers': [arxiv_doc],
+                'chunks': chunk_docs,
+                'embeddings': embedding_docs,
+                'structures': structures_docs,
+            }
+
+            result_summary = self.db_client.execute_transaction(
+                write=['arxiv_papers', 'arxiv_chunks', 'arxiv_embeddings', 'arxiv_structures'],
+                action=transaction_action,
+                params=transaction_params,
+            )
+
+            logger.info(
+                "Stored ArXiv paper %s (chunks=%s, embeddings=%s)",
+                paper_info.arxiv_id,
+                result_summary.get('chunks'),
+                result_summary.get('embeddings'),
+            )
             
         except Exception:
             logger.exception("Failed to store ArXiv paper %s", paper_info.arxiv_id)

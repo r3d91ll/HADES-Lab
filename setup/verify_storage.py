@@ -45,13 +45,35 @@ def verify_recent_records():
     print(f"\nSample Recent Record:")
     try:
         # Get most recent from metadata
-        recent_docs = db.execute_query('''
+        rows = db.execute_query('''
             FOR doc IN arxiv_papers
-                SORT doc.processing_timestamp DESC
+                SORT doc.processing_timestamp DESC NULLS LAST
                 LIMIT 1
-                RETURN doc
+                LET emb = FIRST(
+                    FOR e IN arxiv_embeddings
+                        FILTER e.arxiv_id == doc.arxiv_id
+                        LIMIT 1
+                        RETURN e
+                )
+                LET chunk_total = LENGTH(
+                    FOR c IN arxiv_chunks
+                        FILTER c.arxiv_id == doc.arxiv_id
+                        RETURN 1
+                )
+                LET dim = (
+                    !IS_NULL(emb) && !IS_NULL(emb.embedding) && IS_LIST(emb.embedding)
+                        ? LENGTH(emb.embedding)
+                        : emb.embedding_dim
+                )
+                RETURN {
+                    arxiv_id: doc.arxiv_id,
+                    title: doc.title,
+                    processed_at: doc.processing_timestamp,
+                    embedding_dim: dim,
+                    chunk_total: chunk_total
+                }
         ''')
-        recent_meta = recent_docs[0] if recent_docs else None
+        recent_meta = rows[0] if rows else None
 
         if recent_meta:
             arxiv_id = recent_meta.get('arxiv_id')
@@ -59,31 +81,14 @@ def verify_recent_records():
             print(f"  Title: {recent_meta.get('title', 'N/A')[:80]}...")
             print(f"  Processed: {recent_meta.get('processed_at', 'N/A')}")
 
-            # Check for corresponding embedding
-            embedding_result = db.execute_query('''
-                FOR doc IN arxiv_embeddings
-                    FILTER doc.arxiv_id == @id
-                    LIMIT 1
-                    RETURN doc
-            ''', bind_vars={'id': arxiv_id})
-
-            embedding = embedding_result[0] if embedding_result else None
-            if embedding:
-                vector = embedding.get('vector', [])
-                dim = len(vector) if isinstance(vector, list) else embedding.get('embedding_dim', 'N/A')
+            dim = recent_meta.get('embedding_dim')
+            if dim:
                 print(f"  ✅ Has embedding (dim: {dim})")
             else:
-                print(f"  ❌ No embedding found")
+                print("  ❌ No embedding found")
 
-            # Check for chunks
-            chunk_count = db.execute_query('''
-                RETURN LENGTH(
-                    FOR doc IN arxiv_embeddings
-                        FILTER doc.arxiv_id == @id
-                        RETURN 1
-                )
-            ''', bind_vars={'id': arxiv_id})[0]
-            print(f"  ✅ Has {chunk_count} embeddings")
+            chunk_total = recent_meta.get('chunk_total', 0)
+            print(f"  ✅ Has {chunk_total} chunks")
 
     except Exception as e:
         print(f"  Error checking recent record: {e}")

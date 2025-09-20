@@ -35,10 +35,11 @@ JSON Metadata File (2.8M records on NVME)
         ↓
 [Storage Thread: Database Writer]
         ↓
-    ArangoDB (via PHP bridge)
-    ├── arxiv_metadata (papers)
-    ├── arxiv_abstract_chunks (text segments)
-    └── arxiv_abstract_embeddings (vectors)
+    ArangoDB (via HTTP/2 memory client)
+    ├── arxiv_papers (papers)
+    ├── arxiv_chunks (text segments)
+    ├── arxiv_embeddings (vectors)
+    └── arxiv_structures (document structure)
 ```
 
 ### Key Components
@@ -110,9 +111,10 @@ python core/workflows/workflow_arxiv_initial_ingest_balanced.py \
 ### Database
 - **Database**: `arxiv_repository`
 - **Collections**:
-  - `arxiv_metadata` - Paper metadata
-  - `arxiv_abstract_embeddings` - Vector embeddings
-  - `arxiv_abstract_chunks` - Text chunks
+  - `arxiv_papers` - Paper metadata
+  - `arxiv_chunks` - Text chunks
+  - `arxiv_embeddings` - Vector embeddings
+  - `arxiv_structures` - Document structure metadata
 
 ### Embedder
 - **Model**: Jina v4 (jinaai/jina-embeddings-v4)
@@ -151,11 +153,8 @@ watch -n 1 nvidia-smi
 ### Database Verification
 
 ```bash
-# Check collection counts via PHP
-php core/database/arango/php_unix_bridge.php check_collections
-
-# Get database statistics
-php core/database/arango/php_unix_bridge.php stats
+# Check collection counts via memory client helper
+poetry run python core/database/utils/check_resume_state.py
 ```
 
 ## PHP Bridge
@@ -216,14 +215,15 @@ Currently using TCP (`tcp://localhost:8529`) until Unix socket permissions are r
 ## File Organization
 
 ### Active Files
-- `core/workflows/workflow_arxiv_initial_ingest.py` - Main workflow
-- `core/database/arango/php_unix_bridge.php` - PHP database bridge
+- `core/workflows/workflow_arxiv_initial_ingest.py` - Main ingest workflow (HTTP/2 client)
+- `core/database/arango/memory_client.py` - Optimized HTTP/2 memory client
 - `core/embedders/embedders_jina.py` - Embedder with late chunking
 
 ### Archived to Acheron
 - `workflow_arxiv_sorted.py` - Deprecated complex version
 - `workflow_arxiv_parallel.py` - Older parallel implementation
-- `workflow_arxiv_metadata.py` - Metadata-only workflow
+- `workflow_arxiv_metadata.py` - Metadata-only workflow (archive)
+- `core/database/arango/php_unix_bridge.php` - Legacy PHP bridge
 - `core/database/arango/unix_client.py` - Failed Python Unix socket attempt
 - `core/database/arango/arango_client.py` - HTTP connection pooling
 
@@ -231,10 +231,11 @@ Currently using TCP (`tcp://localhost:8529`) until Unix socket permissions are r
 
 For issues:
 1. Check GPU status: `nvidia-smi`
-2. Verify PHP bridge: `php core/database/arango/php_unix_bridge.php test`
-3. For interrupted runs: Restart with `--drop-collections`
+2. Confirm proxies: `systemctl status hades-arango-ro.socket`
+3. Inspect database state: `poetry run python core/database/utils/check_resume_state.py`
+4. For interrupted runs: Restart with `--drop-collections`
 
 ---
 
-*Last updated: 2025-01-21*
-*Version: 2.0.0 - Simplified one-time ingest with PHP bridge*
+*Last updated: 2025-09-20*
+*Version: 2.1.0 - Simplified one-time ingest with HTTP/2 memory client*

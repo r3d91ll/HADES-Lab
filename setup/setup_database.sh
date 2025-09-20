@@ -37,9 +37,10 @@ ROOT_PASSWORD="${ARANGO_PASSWORD:-}"
 
 # Collections to create
 COLLECTIONS=(
-    "arxiv_metadata"  # Changed from arxiv_papers to match workflow default
-    "arxiv_abstract_chunks"  # Changed to match workflow default
-    "arxiv_abstract_embeddings"
+    "arxiv_papers"
+    "arxiv_chunks"
+    "arxiv_embeddings"
+    "arxiv_structures"
     "arxiv_processing_order"
     "arxiv_processing_stats"
 )
@@ -93,7 +94,10 @@ if [ -z "$ROOT_PASSWORD" ]; then
     # Try to load from .env file
     if [ -f ".env" ]; then
         print_info "Loading credentials from .env file..."
-        export $(grep -v '^#' .env | xargs)
+        set -a
+        # shellcheck disable=SC1091
+        . ./.env
+        set +a
         ROOT_PASSWORD="${ARANGO_PASSWORD:-}"
     fi
 

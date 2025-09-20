@@ -24,8 +24,7 @@ from dataclasses import dataclass, asdict, field
 import numpy as np
 
 from core.extractors import DoclingExtractor, LaTeXExtractor
-from core.embedders import JinaV4Embedder, ChunkWithEmbedding
-from core.embedders.embedders_base import EmbeddingConfig
+from core.embedders import EmbedderFactory, EmbeddingConfig, ChunkWithEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +47,7 @@ class ProcessingConfig:
     
     # Embedding settings
     embedding_model: str = 'jina-v4'
+    embedder_type: str = 'jina'
     embedding_dim: int = 2048
     use_fp16: bool = True
     device: Optional[str] = None  # Auto-detect if None
@@ -210,10 +210,17 @@ class DocumentProcessor:
         )
         self.latex_extractor = LaTeXExtractor() if self.config.extract_equations else None
         
-        # Initialize embedder with late chunking support
+        embedder_type = (self.config.embedder_type or 'jina').lower()
         model_name = self.config.embedding_model or 'jinaai/jina-embeddings-v4'
         if model_name.lower() in {'jina-v4', 'jinaai/jina-v4'}:
             model_name = 'jinaai/jina-embeddings-v4'
+
+        if embedder_type in {'sentence', 'sentence-transformers'} and 'sentence-transformers' not in model_name:
+            logger.warning(
+                "SentenceTransformers embedder requested without an explicit model name; "
+                "defaulting to sentence-transformers/all-mpnet-base-v2."
+            )
+            model_name = 'sentence-transformers/all-mpnet-base-v2'
 
         embed_config = EmbeddingConfig(
             model_name=model_name,
@@ -224,7 +231,17 @@ class DocumentProcessor:
             chunk_overlap_tokens=self.config.chunk_overlap_tokens,
         )
 
-        self.embedder = JinaV4Embedder(embed_config)
+        if embedder_type in {'sentence', 'sentence-transformers'}:
+            logger.warning(
+                "SentenceTransformersEmbedder is deprecated and will be removed after migration; "
+                "routing to JinaV4Embedder fallback."
+            )
+        elif embedder_type not in {'jina', 'transformer'}:
+            logger.warning("Unknown embedder_type '%s'; defaulting to JinaV4Embedder", embedder_type)
+
+        self.embedder = EmbedderFactory.create(model_name=model_name, config=embed_config)
+        self.embedding_model = model_name
+        logger.info("Initialized embedder '%s' with model '%s'", embedder_type, model_name)
         
         # Setup staging directory if using RamFS
         if self.config.use_ramfs_staging:
@@ -274,25 +291,40 @@ class DocumentProcessor:
             extraction_result = self._extract_content(pdf_path, latex_path)
             extraction_time = time.time() - extraction_start
             
-            # Phase 2: Create chunks (respecting context windows)
-            chunking_start = time.time()
             if self.config.chunking_strategy == 'late':
-                # Late chunking: embed full document then chunk
+                # Late chunking: embeddings generated inside embedder
+                embedding_start = time.time()
                 chunks = self._create_late_chunks(extraction_result.full_text)
-            elif self.config.chunking_strategy in ['traditional', 'token', 'semantic', 'fixed']:
-                # Traditional chunking: chunk then embed
-                chunks = self._create_traditional_chunks(extraction_result.full_text)
+                embedding_time = time.time() - embedding_start
+                chunking_time = 0.0
             else:
-                raise ValueError(
-                    f"Unknown chunking strategy: '{self.config.chunking_strategy}'. "
-                    f"Allowed values are: 'late', 'traditional', 'token', 'semantic', 'fixed'"
-                )
-            chunking_time = time.time() - chunking_start
-            
-            # Check if chunking produced no results
+                # Traditional chunking: chunk then embed
+                chunking_start = time.time()
+                chunks = self._create_traditional_chunks(extraction_result.full_text)
+                chunking_time = time.time() - chunking_start
+
+                if not chunks:
+                    logger.warning(f"No chunks produced for document {doc_id}. Document may be empty.")
+                    return ProcessingResult(
+                        extraction=extraction_result,
+                        chunks=[],
+                        processing_metadata={'error': 'No chunks produced'},
+                        total_processing_time=time.time() - start_time,
+                        extraction_time=extraction_time,
+                        chunking_time=chunking_time,
+                        embedding_time=0,
+                        success=False,
+                        errors=['Document produced no chunks'],
+                        warnings=['Empty or unprocessable document']
+                    )
+
+                embedding_start = time.time()
+                if chunks and not isinstance(chunks[0], ChunkWithEmbedding):
+                    chunks = self._embed_chunks(chunks)
+                embedding_time = time.time() - embedding_start
+
             if not chunks:
                 logger.warning(f"No chunks produced for document {doc_id}. Document may be empty.")
-                # Return early with empty result
                 return ProcessingResult(
                     extraction=extraction_result,
                     chunks=[],
@@ -300,17 +332,11 @@ class DocumentProcessor:
                     total_processing_time=time.time() - start_time,
                     extraction_time=extraction_time,
                     chunking_time=chunking_time,
-                    embedding_time=0,
+                    embedding_time=embedding_time,
                     success=False,
                     errors=['Document produced no chunks'],
                     warnings=['Empty or unprocessable document']
                 )
-            
-            # Phase 3: Generate embeddings (if not already done by late chunking)
-            embedding_start = time.time()
-            if chunks and not isinstance(chunks[0], ChunkWithEmbedding):
-                chunks = self._embed_chunks(chunks)
-            embedding_time = time.time() - embedding_start
             
             # Calculate total time
             total_time = time.time() - start_time
@@ -319,7 +345,7 @@ class DocumentProcessor:
             processing_metadata = {
                 'processor_version': '2.0.0',
                 'extraction_method': 'docling',
-                'embedding_model': self.config.embedding_model,
+                'embedding_model': self.embedding_model,
                 'chunking_strategy': self.config.chunking_strategy,
                 'chunk_count': len(chunks),
                 'has_latex': extraction_result.has_latex,

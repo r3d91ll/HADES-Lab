@@ -17,12 +17,12 @@ from core.database.arango.optimized_client import ArangoHttp2Client, ArangoHttp2
 
 config = ArangoHttp2Config(
     database="arxiv_repository",
-    socket_path="/tmp/arango_ro_proxy.sock",
-    username="root",
+    socket_path="/run/hades/readonly/arangod.sock",
+    username="arxiv_reader",
     password="...",
 )
 with ArangoHttp2Client(config) as client:
-    doc = client.get_document("arxiv_metadata", "0704_0003")
+    doc = client.get_document("arxiv_papers", "0704_0003")
     print(doc)
 ```
 
@@ -34,7 +34,7 @@ memory_client = DatabaseFactory.get_arango_memory_service()
 try:
     documents = memory_client.execute_query(
         "FOR doc IN @@collection LIMIT 5 RETURN doc",
-        {"@collection": "arxiv_metadata"},
+        {"@collection": "arxiv_papers"},
     )
 finally:
     memory_client.close()
@@ -45,7 +45,7 @@ finally:
 2. Run RO proxy: `go run ./cmd/roproxy`
 3. Run RW proxy: `go run ./cmd/rwproxy`
 
-Sockets default to `/tmp/arango_ro_proxy.sock` and `/tmp/arango_rw_proxy.sock`. Ensure permissions (0660) and adjust via env vars `LISTEN_SOCKET`, `UPSTREAM_SOCKET`.
+Sockets default to `/run/hades/readonly/arangod.sock` and `/run/hades/readwrite/arangod.sock` (systemd-managed). Ensure permissions (0640/0600) and adjust via env vars `LISTEN_SOCKET`, `UPSTREAM_SOCKET`.
 
 ### Benchmark CLI (Phase 4)
 
@@ -60,9 +60,9 @@ Example:
 
 ```
 poetry run python tests/benchmarks/arango_connection_test.py \
-    --socket /tmp/arango_ro_proxy.sock \
+    --socket /run/hades/readonly/arangod.sock \
     --database arxiv_repository \
-    --collection arxiv_metadata \
+    --collection arxiv_papers \
     --key 0704_0001 --key 0704_0002 \
     --iterations 20 --concurrency 4 \
     --report-json reports/get_hot.json

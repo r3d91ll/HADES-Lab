@@ -86,15 +86,15 @@ class ArxivMetadataConfig(BaseConfig):
 
     # Collection names
     metadata_collection: str = Field(
-        default="arxiv_metadata",
+        default="arxiv_papers",
         description="Collection for metadata documents"
     )
     chunks_collection: str = Field(
-        default="arxiv_abstract_chunks",
+        default="arxiv_chunks",
         description="Collection for abstract chunks"
     )
     embeddings_collection: str = Field(
-        default="arxiv_abstract_embeddings",
+        default="arxiv_embeddings",
         description="Collection for embeddings"
     )
 
@@ -141,11 +141,11 @@ class ArxivMetadataConfig(BaseConfig):
         description="Resume from last checkpoint if available"
     )
     checkpoint_file: Path = Field(
-        default=Path("/tmp/arxiv_metadata_checkpoint.json"),
+        default=Path("/tmp/arxiv_papers_checkpoint.json"),
         description="Path to checkpoint file"
     )
     state_file: Path = Field(
-        default=Path("/tmp/arxiv_metadata_state.json"),
+        default=Path("/tmp/arxiv_papers_state.json"),
         description="Path to state file"
     )
 
@@ -236,13 +236,13 @@ class ArxivMetadataConfig(BaseConfig):
             Configuration dictionary
         """
         return {
-            "name": "arxiv_metadata_workflow",
+            "name": "arxiv_papers_workflow",
             "batch_size": self.batch_size,
             "num_workers": 1,  # Single-threaded for streaming
             "use_gpu": self.use_gpu,
             "checkpoint_enabled": self.resume_from_checkpoint,
             "checkpoint_interval": self.checkpoint_interval,
-            "staging_path": Path("/tmp/arxiv_metadata_staging"),
+            "staging_path": Path("/tmp/arxiv_papers_staging"),
             "timeout_seconds": 3600  # 1 hour timeout
         }
 

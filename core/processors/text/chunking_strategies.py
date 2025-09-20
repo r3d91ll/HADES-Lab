@@ -185,6 +185,10 @@ class TokenBasedChunking(ChunkingStrategy):
             # Simple word tokenization
             tokens = text.split()
         
+        if not tokens:
+            logger.info("Created 0 token-based chunks from 0 tokens")
+            return []
+
         chunks: List[TextChunk] = []
         stride = self.chunk_size - self.chunk_overlap
         prefix_chars = _prefix_char_offsets(tokens)
@@ -211,7 +215,7 @@ class TokenBasedChunking(ChunkingStrategy):
                 chunk_text = ' '.join(chunk_tokens)
             
             # Calculate character positions (approximate)
-            start_char = prefix_chars[i] if i < len(prefix_chars) else prefix_chars[-1]
+            start_char = prefix_chars[i]
             end_char = start_char + len(chunk_text)
             
             chunk = TextChunk(
@@ -495,6 +499,7 @@ class SlidingWindowChunking(ChunkingStrategy):
         tokens = text.split()  # Simple tokenization
 
         if not tokens:
+            logger.info("Created 0 sliding-window chunks from 0 tokens")
             return []
 
         prefix_chars = _prefix_char_offsets(tokens)
@@ -610,5 +615,10 @@ class ChunkingStrategyFactory:
         if not strategy_class:
             raise ValueError(f"Unknown chunking strategy: {strategy_type}")
 
-        logger.debug("Creating chunking strategy '%s' with kwargs=%s", strategy_type, kwargs)
+        safe_kwargs = {
+            key: ('<callable>' if callable(value) else type(value).__name__ if not isinstance(value, (str, int, float, bool)) else value)
+            for key, value in kwargs.items()
+            if key not in {'tokenizer', 'text'}
+        }
+        logger.debug("Creating chunking strategy '%s' with kwargs=%s", strategy_type, safe_kwargs)
         return strategy_class(**kwargs)

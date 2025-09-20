@@ -234,7 +234,7 @@ class GenericDocumentProcessor:
             max_workers=num_workers,
             mp_context=mp.get_context('spawn'),
             initializer=_init_embedding_worker,
-            initargs=(gpu_devices, self.config.get('arango', {}), self.collections)
+            initargs=(gpu_devices, self.config.get('arango', {}), self.collections, embedding_config)
         ) as executor:
             
             futures = {
@@ -386,7 +386,7 @@ def _extract_document(task: DocumentTask, staging_dir: str) -> Dict[str, Any]:
         }
 
 
-def _init_embedding_worker(gpu_devices, arango_config, collections):
+def _init_embedding_worker(gpu_devices, arango_config, collections, embedding_config):
     """
     Initialize per-process embedding resources.
     
@@ -400,6 +400,7 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
         gpu_devices (Sequence[int] | None): Sequence of GPU device ids available to workers; if provided, one is chosen based on the worker index.
         arango_config (Mapping): Configuration used to construct the Arango memory client.
         collections (Mapping[str, str]): Mapping of logical collection names to concrete ArangoDB collection names.
+        embedding_config (Mapping[str, Any]): Embedding-specific overrides (model, type, batch size).
     
     Side effects:
         - Mutates module-level globals WORKER_EMBEDDER and WORKER_DB_CLIENT.
@@ -407,8 +408,7 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
     """
     global WORKER_EMBEDDER, WORKER_DB_CLIENT, WORKER_COLLECTIONS
     import os
-    from core.embedders import JinaV4Embedder
-    from core.embedders.embedders_base import EmbeddingConfig
+    from core.embedders import EmbedderFactory, EmbeddingConfig
     from core.database.arango import ArangoMemoryClient, resolve_memory_config
     
     # Assign GPU
@@ -419,15 +419,38 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
     
     # Initialize embedder
+    embed_settings = embedding_config or {}
+    embedder_type = str(embed_settings.get('embedder', 'jina')).lower()
+    model_name = embed_settings.get('model_name', 'jinaai/jina-embeddings-v4')
+    if model_name.lower() in {'jina-v4', 'jinaai/jina-v4'}:
+        model_name = 'jinaai/jina-embeddings-v4'
+
+    if embedder_type in {'sentence', 'sentence-transformers'} and 'sentence-transformers' not in model_name:
+        logger.warning(
+            "SentenceTransformers embedder requested without explicit model; "
+            "using sentence-transformers/all-mpnet-base-v2."
+        )
+        model_name = 'sentence-transformers/all-mpnet-base-v2'
+
     embed_config = EmbeddingConfig(
-        model_name='jinaai/jina-embeddings-v4',
-        device='cuda',
-        batch_size=128,
-        use_fp16=True,
-        chunk_size_tokens=1000,
-        chunk_overlap_tokens=200,
+        model_name=model_name,
+        device=embed_settings.get('device', 'cuda'),
+        batch_size=embed_settings.get('batch_size', 128),
+        use_fp16=embed_settings.get('use_fp16', True),
+        chunk_size_tokens=embed_settings.get('chunk_size_tokens', 1000),
+        chunk_overlap_tokens=embed_settings.get('chunk_overlap_tokens', 200),
     )
-    WORKER_EMBEDDER = JinaV4Embedder(embed_config)
+
+    if embedder_type in {'sentence', 'sentence-transformers'}:
+        logger.warning(
+            "SentenceTransformersEmbedder is deprecated and will be removed after migration; "
+            "routing to JinaV4Embedder fallback."
+        )
+    elif embedder_type not in {'jina', 'transformer'}:
+        logger.warning("Unknown embedder_type '%s'; defaulting to JinaV4Embedder", embedder_type)
+
+    WORKER_EMBEDDER = EmbedderFactory.create(model_name=model_name, config=embed_config)
+    logger.info("Worker %s using embedder '%s' (%s)", worker_id, embedder_type, model_name)
 
     memory_config = resolve_memory_config(**arango_config)
     WORKER_DB_CLIENT = ArangoMemoryClient(memory_config)
@@ -460,8 +483,6 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
     
     try:
         # Clear GPU cache before processing
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
         # Load staged document
         with open(staged_path, 'r') as f:
             doc = json.load(f)
@@ -606,8 +627,6 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
         Path(staged_path).unlink()
         
         # Clear GPU memory after processing
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
         
         return {
             'success': True,

@@ -52,7 +52,7 @@ reviews:
     - "!**/*.pyo"
     - "!**/*.egg-info/**"
     - "!**/Acheron/**"         # Our deprecated code archive
-    - "!**/tests/**"             # Exclude test files from automated review
+    - "!**/tests/**"             # Exclude tests from review scope
 
   # Path-specific instructions - apply to all paths
   path_instructions:

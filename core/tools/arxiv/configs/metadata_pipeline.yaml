@@ -20,9 +20,9 @@ arango_username: "root"
 # Password from ARANGO_PASSWORD environment variable
 
 # Collection Names
-metadata_collection: "arxiv_metadata"
-chunks_collection: "arxiv_abstract_chunks"
-embeddings_collection: "arxiv_abstract_embeddings"
+metadata_collection: "arxiv_papers"
+chunks_collection: "arxiv_chunks"
+embeddings_collection: "arxiv_embeddings"
 
 # Embedder Configuration
 embedder_model: "jinaai/jina-embeddings-v4"
@@ -37,8 +37,8 @@ gpu_device: "cuda:0"  # Or cuda:1 for second GPU
 # Checkpoint Configuration
 checkpoint_interval: 10000  # Save every 10k records
 resume_from_checkpoint: true
-checkpoint_file: "/tmp/arxiv_metadata_checkpoint.json"
-state_file: "/tmp/arxiv_metadata_state.json"
+checkpoint_file: "/tmp/arxiv_papers_checkpoint.json"
+state_file: "/tmp/arxiv_papers_state.json"
 
 # Performance Monitoring
 monitor_interval: 100  # Report every 100 batches

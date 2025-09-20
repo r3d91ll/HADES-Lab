@@ -17,6 +17,7 @@ import json
 import logging
 import multiprocessing as mp
 import os
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -46,7 +47,8 @@ logger = logging.getLogger(__name__)
 def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
                            input_queue: mp.Queue, output_queue: mp.Queue, stop_event: Any,
                            embedding_batch_size: int = 48, chunk_size_tokens: int = 500,
-                           chunk_overlap_tokens: int = 200) -> None:
+                           chunk_overlap_tokens: int = 200,
+                           embedder_type: str = 'jina') -> None:
     """GPU worker process - sets CUDA device before imports.
 
     Args:
@@ -59,6 +61,7 @@ def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
         embedding_batch_size: Batch size for embedding
         chunk_size_tokens: Chunk size in tokens
         chunk_overlap_tokens: Overlap between chunks
+        embedder_type: Identifier for embedder selection ('jina' or 'sentence-transformers')
     """
     # Set GPU BEFORE any CUDA imports
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
@@ -73,17 +76,35 @@ def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
 
     try:
         # Initialize embedder with passed configuration
+        resolved_model = model_name
+        embedder_kind = embedder_type.lower()
+        if embedder_kind in {'sentence', 'sentence-transformers'} and 'sentence-transformers' not in resolved_model.lower():
+            logger.warning(
+                "Worker %s: SentenceTransformers requested without explicit model; using sentence-transformers/all-mpnet-base-v2.",
+                worker_id,
+            )
+            resolved_model = 'sentence-transformers/all-mpnet-base-v2'
+        elif embedder_kind not in {'jina', 'transformer', 'sentence', 'sentence-transformers'}:
+            logger.warning("Worker %s: Unknown embedder_type '%s'; defaulting to JinaV4Embedder", worker_id, embedder_type)
+            embedder_kind = 'jina'
+
+        if embedder_kind in {'sentence', 'sentence-transformers'}:
+            logger.warning(
+                "Worker %s: SentenceTransformersEmbedder is deprecated and will be removed after migration; routing to Jina fallback.",
+                worker_id,
+            )
+
         embedder = EmbedderFactory.create(
-            model_name=model_name,
+            model_name=resolved_model,
             device='cuda:0',  # Always 0 since we isolated GPU
             use_fp16=True,
-            batch_size=embedding_batch_size,  # Use passed parameter
-            chunk_size_tokens=chunk_size_tokens,  # Use passed parameter
-            chunk_overlap_tokens=chunk_overlap_tokens  # Use passed parameter
+            batch_size=embedding_batch_size,
+            chunk_size_tokens=chunk_size_tokens,
+            chunk_overlap_tokens=chunk_overlap_tokens,
         )
 
         print(f"Worker {worker_id} ready with batch_size={embedding_batch_size}, "
-              f"chunk_size={chunk_size_tokens}, overlap={chunk_overlap_tokens}")
+              f"chunk_size={chunk_size_tokens}, overlap={chunk_overlap_tokens}, embedder={embedder_kind}")
 
         # Process batches
         while not stop_event.is_set():
@@ -158,7 +179,9 @@ class ArxivInitialIngestWorkflow:
                  num_workers: int = 2,
                  drop_collections: bool = False,
                  chunk_size_tokens: int = 500,
-                 chunk_overlap_tokens: int = 200) -> None:
+                 chunk_overlap_tokens: int = 200,
+                 embedding_model: str | None = None,
+                 embedder_type: str | None = None) -> None:
         """Initialize workflow with minimal config."""
 
         self.database = database
@@ -171,11 +194,14 @@ class ArxivInitialIngestWorkflow:
         self.drop_collections = drop_collections
         self.chunk_size_tokens = chunk_size_tokens
         self.chunk_overlap_tokens = chunk_overlap_tokens
+        self.embedding_model = embedding_model or os.environ.get('HADES_EMBEDDER_MODEL', 'jinaai/jina-embeddings-v4')
+        self.embedder_type = (embedder_type or os.environ.get('HADES_EMBEDDER', 'jina')).lower()
 
         # Collections
-        self.metadata_collection = 'arxiv_metadata'
-        self.chunks_collection = 'arxiv_abstract_chunks'
-        self.embeddings_collection = 'arxiv_abstract_embeddings'
+        self.metadata_collection = 'arxiv_papers'
+        self.chunks_collection = 'arxiv_chunks'
+        self.embeddings_collection = 'arxiv_embeddings'
+        self.structures_collection = 'arxiv_structures'
 
         # Counters
         self.processed_count = 0
@@ -262,8 +288,13 @@ class ArxivInitialIngestWorkflow:
         if self.drop_collections:
             logger.info("Dropping existing collections via HTTP/2 client")
             self.memory_client.drop_collections(
-                [self.metadata_collection, self.chunks_collection, self.embeddings_collection],
-                ignore_missing=True
+                [
+                    self.metadata_collection,
+                    self.chunks_collection,
+                    self.embeddings_collection,
+                    self.structures_collection,
+                ],
+                ignore_missing=True,
             )
 
         # Define collections with proper types and indexes
@@ -281,7 +312,9 @@ class ArxivInitialIngestWorkflow:
                 type="document",
                 indexes=[
                     {"type": "hash", "fields": ["arxiv_id"], "unique": False},
-                    {"type": "hash", "fields": ["paper_key"], "unique": False}
+                    {"type": "hash", "fields": ["paper_key"], "unique": False},
+                    {"type": "hash", "fields": ["document_id"], "unique": False},
+                    {"type": "hash", "fields": ["chunk_id"], "unique": False},
                 ]
             ),
             CollectionDefinition(
@@ -289,7 +322,17 @@ class ArxivInitialIngestWorkflow:
                 type="document",
                 indexes=[
                     {"type": "hash", "fields": ["arxiv_id"], "unique": False},
-                    {"type": "hash", "fields": ["chunk_id"], "unique": False}
+                    {"type": "hash", "fields": ["chunk_id"], "unique": False},
+                    {"type": "hash", "fields": ["document_id"], "unique": False},
+                ]
+            ),
+            CollectionDefinition(
+                name=self.structures_collection,
+                type="document",
+                indexes=[
+                    {"type": "hash", "fields": ["arxiv_id"], "unique": False},
+                    {"type": "hash", "fields": ["paper_key"], "unique": False},
+                    {"type": "hash", "fields": ["document_id"], "unique": False}
                 ]
             )
         ]
@@ -330,13 +373,14 @@ class ArxivInitialIngestWorkflow:
                 args=(
                     i,
                     gpu_id,
-                    'jinaai/jina-embeddings-v4',
+                    self.embedding_model,
                     self.input_queue,
                     self.output_queue,
                     self.stop_event,
                     self.embedding_batch_size,  # Pass CLI arg
                     self.chunk_size_tokens,      # Pass chunk config
-                    self.chunk_overlap_tokens    # Pass chunk config
+                    self.chunk_overlap_tokens,   # Pass chunk config
+                    self.embedder_type,
                 )
             )
             p.start()
@@ -361,13 +405,29 @@ class ArxivInitialIngestWorkflow:
                     if not record.get('abstract'):
                         continue
 
+                    raw_authors = record.get('authors', [])
+                    if isinstance(raw_authors, list):
+                        authors = raw_authors
+                    elif isinstance(raw_authors, str):
+                        authors = [a.strip() for a in re.split(r'[;,]\s*', raw_authors) if a.strip()]
+                    else:
+                        authors = []
+
+                    raw_categories = record.get('categories', [])
+                    if isinstance(raw_categories, list):
+                        categories = raw_categories
+                    elif isinstance(raw_categories, str):
+                        categories = raw_categories.split()
+                    else:
+                        categories = []
+
                     doc = {
                         '_key': record.get('id', '').replace('.', '_').replace('/', '_'),
                         'arxiv_id': record.get('id'),
                         'title': record.get('title'),
                         'abstract': record.get('abstract'),
-                        'authors': record.get('authors'),
-                        'categories': record.get('categories'),
+                        'authors': authors,
+                        'categories': categories,
                         'update_date': record.get('update_date'),
                         'abstract_length': len(record.get('abstract', ''))
                     }

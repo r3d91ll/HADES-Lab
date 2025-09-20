@@ -270,7 +270,7 @@ class JinaV4Embedder(EmbedderBase):
                         logger.error(f"Cannot convert embeddings of type {type(embeddings)} to numpy: {e}")
                         raise
                     
-                all_embeddings.append(embeddings)
+                all_embeddings.append(embeddings.astype(np.float32, copy=False))
 
                 # DO NOT clear GPU cache after each batch - this kills performance!
                 # PyTorch's allocator efficiently reuses memory.
@@ -279,8 +279,11 @@ class JinaV4Embedder(EmbedderBase):
                 #     torch.cuda.empty_cache()
         
         # Concatenate all batches
-        result = np.vstack(all_embeddings) if all_embeddings else np.empty((0, self.EMBEDDING_DIM))
-        
+        if all_embeddings:
+            result = np.vstack(all_embeddings).astype(np.float32, copy=False)
+        else:
+            result = np.empty((0, self.EMBEDDING_DIM), dtype=np.float32)
+
         return result
     
     def embed_single(self, text: str, task: str = "retrieval.passage") -> np.ndarray:
@@ -295,7 +298,7 @@ class JinaV4Embedder(EmbedderBase):
             1D embedding array
         """
         embeddings = self.embed_texts([text], task=task, batch_size=1)
-        return embeddings[0] if embeddings.size > 0 else np.zeros(self.EMBEDDING_DIM)
+        return embeddings[0] if embeddings.size > 0 else np.zeros(self.EMBEDDING_DIM, dtype=np.float32)
 
     @property
     def embedding_dimension(self) -> int:
@@ -703,13 +706,15 @@ class JinaV4Embedder(EmbedderBase):
             truncation=True,  # Truncate to MAX_TOKENS if needed
             max_length=self.MAX_TOKENS,
             return_offsets_mapping=True,
-            return_attention_mask=True
+            return_attention_mask=True,
+            return_special_tokens_mask=True,
         )
-        
+
         # Move to device
         input_ids = tokens['input_ids'].to(self.model.device)
         attention_mask = tokens['attention_mask'].to(self.model.device)
         offset_mapping = tokens['offset_mapping'][0].cpu().numpy()
+        special_tokens_mask = tokens['special_tokens_mask'][0].cpu().numpy()
         
         with torch.no_grad():
             # Map task to Jina v4 task labels
@@ -792,7 +797,8 @@ class JinaV4Embedder(EmbedderBase):
             'offset_mapping': offset_mapping,
             'num_tokens': len(input_ids[0]),
             'text_length': len(text),
-            'task': task
+            'task': task,
+            'special_tokens_mask': special_tokens_mask,
         }
         
         return token_embeddings, metadata
@@ -827,6 +833,7 @@ class JinaV4Embedder(EmbedderBase):
         
         offset_mapping = metadata['offset_mapping']
         num_tokens = metadata['num_tokens']
+        special_mask = metadata.get('special_tokens_mask')
         
         chunks = []
         chunk_index = 0
@@ -835,26 +842,46 @@ class JinaV4Embedder(EmbedderBase):
         while start_token < num_tokens:
             # Define chunk token boundaries
             end_token = min(start_token + chunk_size, num_tokens)
-            
+
             # Get character boundaries from offset mapping
-            start_offset = offset_mapping[start_token]
-            end_offset = offset_mapping[end_token - 1]
-            
+            valid_start = start_token
+            if special_mask is not None:
+                while valid_start < end_token and special_mask[valid_start] == 1:
+                    valid_start += 1
+            if valid_start >= end_token:
+                if end_token >= num_tokens:
+                    break
+                start_token = end_token
+                continue
+
+            valid_end = end_token - 1
+            if special_mask is not None:
+                while valid_end > valid_start and special_mask[valid_end] == 1:
+                    valid_end -= 1
+
+            start_offset = offset_mapping[valid_start]
+            end_offset = offset_mapping[valid_end]
+
             # Handle if these are still tensors
             if hasattr(start_offset, 'cpu'):
                 start_offset = start_offset.cpu().numpy()
             if hasattr(end_offset, 'cpu'):
                 end_offset = end_offset.cpu().numpy()
-                
+
             start_char = int(start_offset[0])
             end_char = int(end_offset[1])
-            
+
             # Extract chunk text
             chunk_text = text[start_char:end_char]
-            
+
             # Get chunk embedding by pooling token embeddings
-            chunk_token_embeddings = token_embeddings[start_token:end_token]
-            
+            chunk_token_embeddings = token_embeddings[valid_start:valid_end + 1]
+            if chunk_token_embeddings.shape[0] == 0:
+                if end_token >= num_tokens:
+                    break
+                start_token = end_token
+                continue
+
             # Mean pooling over tokens in the chunk
             chunk_embedding = chunk_token_embeddings.mean(dim=0)
             
@@ -874,17 +901,17 @@ class JinaV4Embedder(EmbedderBase):
                 embedding=chunk_embedding_np,
                 start_char=start_char,
                 end_char=end_char,
-                start_token=start_token,
-                end_token=end_token,
+                start_token=valid_start,
+                end_token=valid_end + 1,
                 chunk_index=chunk_index,
                 total_chunks=0,  # Will update after loop
                 context_window_used=num_tokens  # Full document context
             ))
-            
+
             # Move to next chunk with overlap
             if end_token >= num_tokens:
                 break
-            start_token = end_token - overlap
+            start_token = max(end_token - overlap, 0)
             chunk_index += 1
         
         # Update total chunks count
