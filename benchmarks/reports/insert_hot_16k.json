@@ -1,0 +1,31 @@
+{
+  "database": "arxiv_repository",
+  "collection": "arxiv_metadata",
+  "socket": "/tmp/arango_rw_proxy.sock",
+  "base_url": "http://localhost",
+  "iterations": 5,
+  "concurrency": 1,
+  "insert": {
+    "docs_per_batch": 1000,
+    "doc_bytes": 16384,
+    "wait_for_sync": false,
+    "stats": {
+      "ttfb": {
+        "min": 94.35547300381586,
+        "max": 114.58140899776481,
+        "avg": 105.02127280924469,
+        "p50": 106.41631402540952,
+        "p95": 114.31090200203471,
+        "p99": 114.52730759861879
+      },
+      "e2e": {
+        "min": 94.59127701120451,
+        "max": 114.69475599005818,
+        "avg": 105.15148040722124,
+        "p50": 106.54486101702787,
+        "p95": 114.41876919125207,
+        "p99": 114.63955863029696
+      }
+    }
+  }
+}

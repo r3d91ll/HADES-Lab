@@ -1,0 +1,31 @@
+{
+  "database": "arxiv_repository",
+  "collection": "arxiv_metadata",
+  "socket": "/tmp/arangodb.sock",
+  "base_url": "http://localhost",
+  "iterations": 5,
+  "concurrency": 1,
+  "insert": {
+    "docs_per_batch": 1000,
+    "doc_bytes": 4096,
+    "wait_for_sync": false,
+    "stats": {
+      "ttfb": {
+        "min": 12.070322001818568,
+        "max": 19.78595301625319,
+        "avg": 13.941078202333301,
+        "p50": 12.461731006624177,
+        "p95": 18.45188161241822,
+        "p99": 19.519138735486194
+      },
+      "e2e": {
+        "min": 12.138766993302852,
+        "max": 19.880677020410076,
+        "avg": 14.033626404125243,
+        "p50": 12.545022007543594,
+        "p95": 18.5457450163085,
+        "p99": 19.61369061958976
+      }
+    }
+  }
+}

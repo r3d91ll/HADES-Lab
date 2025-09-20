@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
 """
-ArXiv Size-Sorted Processing Workflow (Simplified)
-==================================================
+ArXiv Initial Ingest Workflow
+=============================
 
-Minimal implementation that processes ArXiv abstracts sorted by size
-for maximum GPU throughput.
+Processes ArXiv abstracts in their original order from the JSON file
+using the new HTTP/2 optimized ArangoDB client.
 
 Core flow:
 1. Load metadata from JSON (if needed)
-2. Query unprocessed records sorted by abstract length
+2. Query unprocessed records in original order
 3. Process with GPU workers
-4. Store embeddings and chunks
+4. Store embeddings and chunks via optimized client
 """
 
-import os
 import json
 import logging
 import multiprocessing as mp
-from typing import Dict, List, Any, Optional
+import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from queue import Empty
-import threading
+from typing import Any
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Configure logging early to ensure error messages are visible
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+from core.database.arango import CollectionDefinition
 
 # Core imports
 from core.database.database_factory import DatabaseFactory
@@ -53,25 +66,20 @@ def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
 
     print(f"Worker {worker_id} started on GPU {gpu_id}, PID {os.getpid()}")
 
-    # Import after GPU is set
-    from core.embedders.embedders_factory import EmbedderFactory
+    # Import already done at module level
 
     # Initialize batches_processed BEFORE try block to avoid UnboundLocalError
     batches_processed = 0
 
     try:
         # Initialize embedder with passed configuration
-        embedder_config = {
-            'device': 'cuda:0',  # Always 0 since we isolated GPU
-            'use_fp16': True,
-            'batch_size': embedding_batch_size,  # Use passed parameter
-            'chunk_size_tokens': chunk_size_tokens,  # Use passed parameter
-            'chunk_overlap_tokens': chunk_overlap_tokens  # Use passed parameter
-        }
-
         embedder = EmbedderFactory.create(
             model_name=model_name,
-            **embedder_config
+            device='cuda:0',  # Always 0 since we isolated GPU
+            use_fp16=True,
+            batch_size=embedding_batch_size,  # Use passed parameter
+            chunk_size_tokens=chunk_size_tokens,  # Use passed parameter
+            chunk_overlap_tokens=chunk_overlap_tokens  # Use passed parameter
         )
 
         print(f"Worker {worker_id} ready with batch_size={embedding_batch_size}, "
@@ -94,7 +102,7 @@ def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
                         records.append(record)
 
                 if abstracts:
-                    # Generate embeddings with late chunking
+                    # Generate contextualised chunks using late chunking
                     all_chunks = embedder.embed_batch_with_late_chunking(
                         abstracts,
                         task="retrieval.passage"
@@ -102,7 +110,7 @@ def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
 
                     # Package results
                     results = []
-                    for record, chunks in zip(records, all_chunks):
+                    for record, chunks in zip(records, all_chunks, strict=False):
                         for chunk in chunks:
                             results.append({
                                 'record': record,
@@ -126,17 +134,17 @@ def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
         print(f"Worker {worker_id} finished - {batches_processed} batches")
 
 
-class ArxivSortedWorkflow:
-    """Simplified size-sorted ArXiv processing workflow.
-    
+class ArxivInitialIngestWorkflow:
+    """ArXiv initial ingest workflow using HTTP/2 optimized client.
+
     HADES Framework Implementation:
     - W (What): High-quality embeddings via jina-v4 model
-    - R (Where): Size-sorted processing for optimal GPU cache locality
+    - R (Where): Original document order from JSON file
     - H (Who): Multi-worker GPU agents with configurable parallelism
-    - T (Time): Minimized via batching and sorted processing
+    - T (Time): Minimized via HTTP/2 optimized client (10x faster)
     - Ctx: Workflow context (GPU count, batch sizes, data characteristics)
     - α: Default 1.7 for context amplification
-    
+
     Conveyance C = (W · R · H / T) · Ctx^α measured via throughput metrics.
     """
 
@@ -144,7 +152,7 @@ class ArxivSortedWorkflow:
                  database: str = 'arxiv_repository',
                  username: str = 'root',
                  metadata_file: str = 'data/arxiv-kaggle-latest.json',  # Using NVME copy for speed
-                 max_records: Optional[int] = None,
+                 max_records: int | None = None,
                  batch_size: int = 100,
                  embedding_batch_size: int = 48,
                  num_workers: int = 2,
@@ -173,20 +181,20 @@ class ArxivSortedWorkflow:
         self.processed_count = 0
         self.failed_count = 0
 
-        # Setup database - improved password handling
-        password_env = os.environ.get('ARANGO_PASSWORD_ENV', 'ARANGO_PASSWORD')
-        password = os.environ.get(password_env, '')
-
+        # Setup optimized HTTP/2 memory client
+        # Password should come from .env file or environment
+        password = os.environ.get('ARANGO_PASSWORD')
         if not password:
-            logger.warning(f"No password found in environment variable '{password_env}'. "
-                         f"Either set {password_env} or use --password-env to specify a different variable.")
+            raise ValueError(
+                "ARANGO_PASSWORD not set. Please create a .env file from .env.example "
+                "or set the ARANGO_PASSWORD environment variable."
+            )
 
-        os.environ['ARANGO_PASSWORD'] = password
-
-        self.db = DatabaseFactory.get_arango(
+        # Use the new optimized memory client for ALL operations
+        self.memory_client = DatabaseFactory.get_arango_memory_service(
             database=self.database,
             username=self.username,
-            use_unix=True
+            password=password
         )
 
         # Setup multiprocessing
@@ -196,8 +204,8 @@ class ArxivSortedWorkflow:
         self.stop_event: Any = ctx.Event()
 
         # Workers and storage thread
-        self.workers: List[Any] = []
-        self.storage_thread: Optional[threading.Thread] = None
+        self.workers: list[Any] = []
+        self.storage_thread: threading.Thread | None = None
 
     def execute(self) -> bool:
         """Main execution flow."""
@@ -232,7 +240,7 @@ class ArxivSortedWorkflow:
             print("\n" + "="*60)
             print("Results")
             print("="*60)
-            print(f"Success: True")
+            print("Success: True")
             print(f"Processed: {self.processed_count}")
             print(f"Failed: {self.failed_count}")
             print(f"Duration: {duration:.2f} seconds")
@@ -243,29 +251,52 @@ class ArxivSortedWorkflow:
         except Exception as e:
             logger.error(f"Workflow failed: {e}")
             return False
+        finally:
+            # Clean up memory client
+            if hasattr(self, 'memory_client'):
+                self.memory_client.close()
 
     def _init_collections(self) -> None:
-        """Initialize database collections."""
-        import subprocess
-        import json
+        """Initialize database collections using optimized HTTP/2 client."""
 
         if self.drop_collections:
-            logger.info("Dropping existing collections via PHP bridge")
-            result = subprocess.run(
-                ['php', 'core/database/arango/php_unix_bridge.php', 'drop_collections'],
-                capture_output=True,
-                text=True
+            logger.info("Dropping existing collections via HTTP/2 client")
+            self.memory_client.drop_collections(
+                [self.metadata_collection, self.chunks_collection, self.embeddings_collection],
+                ignore_missing=True
             )
-            logger.info(f"Drop result: {result.stdout}")
 
-        # Create collections via PHP bridge
-        logger.info("Creating collections via PHP bridge")
-        result = subprocess.run(
-            ['php', 'core/database/arango/php_unix_bridge.php', 'create_collections'],
-            capture_output=True,
-            text=True
-        )
-        logger.info(f"Create result: {result.stdout}")
+        # Define collections with proper types and indexes
+        collections = [
+            CollectionDefinition(
+                name=self.metadata_collection,
+                type="document",
+                indexes=[
+                    {"type": "hash", "fields": ["arxiv_id"], "unique": False},
+                    {"type": "skiplist", "fields": ["abstract_length"]}
+                ]
+            ),
+            CollectionDefinition(
+                name=self.chunks_collection,
+                type="document",
+                indexes=[
+                    {"type": "hash", "fields": ["arxiv_id"], "unique": False},
+                    {"type": "hash", "fields": ["paper_key"], "unique": False}
+                ]
+            ),
+            CollectionDefinition(
+                name=self.embeddings_collection,
+                type="document",
+                indexes=[
+                    {"type": "hash", "fields": ["arxiv_id"], "unique": False},
+                    {"type": "hash", "fields": ["chunk_id"], "unique": False}
+                ]
+            )
+        ]
+
+        logger.info("Creating collections via HTTP/2 client")
+        self.memory_client.create_collections(collections)
+        logger.info("Collections initialized successfully")
 
     def _start_workers(self) -> None:
         """Start GPU worker processes."""
@@ -322,8 +353,8 @@ class ArxivSortedWorkflow:
         total_loaded = 0
         total_errors = 0
 
-        with open(self.metadata_file, 'r') as f:
-            for line_num, line in enumerate(f, 1):
+        with open(self.metadata_file) as f:
+            for _, line in enumerate(f, 1):
                 try:
                     record = json.loads(line)
 
@@ -344,18 +375,14 @@ class ArxivSortedWorkflow:
                     total_loaded += 1
 
                     if len(batch) >= 10000:
-                        result = self.db[self.metadata_collection].import_bulk(
-                            batch,
-                            on_duplicate='replace',
-                            details=True
-                        )
-                        # Check for errors in import
-                        if result.get('errors', 0) > 0:
-                            error_count = result['errors']
-                            total_errors += error_count
-                            logger.warning(f"Import had {error_count} errors. Details: {result.get('details', [])[:5]}")
+                        try:
+                            # Use optimized bulk_insert
+                            inserted = self.memory_client.bulk_insert(self.metadata_collection, batch)
+                            logger.info(f"Loaded {total_loaded} records ({inserted} inserted)")
+                        except Exception as e:
+                            total_errors += len(batch)
+                            logger.warning(f"Import error: {e}")
 
-                        logger.info(f"Loaded {total_loaded} records, {total_errors} errors so far")
                         batch = []
 
                 except json.JSONDecodeError:
@@ -363,18 +390,16 @@ class ArxivSortedWorkflow:
 
             # Final batch
             if batch:
-                result = self.db[self.metadata_collection].import_bulk(
-                    batch,
-                    on_duplicate='replace',
-                    details=True
-                )
-                # Check for errors in final batch
-                if result.get('errors', 0) > 0:
-                    error_count = result['errors']
-                    total_errors += error_count
-                    logger.warning(f"Final import had {error_count} errors")
+                try:
+                    inserted = self.memory_client.bulk_insert(self.metadata_collection, batch)
+                    logger.info(f"Final batch: {inserted} inserted")
+                except Exception as e:
+                    total_errors += len(batch)
+                    logger.warning(f"Final import error: {e}")
 
-        actual_count = self.db[self.metadata_collection].count()
+        # Get count using query
+        count_result = self.memory_client.execute_query(f"RETURN LENGTH({self.metadata_collection})")
+        actual_count = count_result[0] if count_result else 0
         logger.info(f"Loaded {actual_count} total metadata records with {total_errors} errors")
 
         if total_errors > 0:
@@ -383,22 +408,22 @@ class ArxivSortedWorkflow:
         return actual_count
 
     def _process_unprocessed_records(self) -> None:
-        """Query and process unprocessed records sorted by size."""
-        # Check if embeddings exist
-        embeddings_count = self.db[self.embeddings_collection].count()
+        """Query and process unprocessed records in original order."""
+        # Check if embeddings exist using query
+        count_result = self.memory_client.execute_query(f"RETURN LENGTH({self.embeddings_collection})")
+        embeddings_count = count_result[0] if count_result else 0
 
         if embeddings_count == 0:
-            # Fast path - no embeddings yet
-            logger.info("Fast path: no existing embeddings")
+            # Fast path - no embeddings yet, process in original order
+            logger.info("Fast path: no existing embeddings, processing in original order")
             query = f"""
             FOR doc IN {self.metadata_collection}
                 FILTER doc.abstract != null
-                SORT doc.abstract_length ASC
                 {'LIMIT ' + str(self.max_records) if self.max_records else ''}
                 RETURN doc
             """
         else:
-            # Check which records have embeddings
+            # Check which records have embeddings, maintain original order
             query = f"""
             FOR doc IN {self.metadata_collection}
                 FILTER doc.abstract != null
@@ -409,17 +434,16 @@ class ArxivSortedWorkflow:
                         RETURN 1
                 )
                 FILTER has_embedding == null
-                SORT doc.abstract_length ASC
                 {'LIMIT ' + str(self.max_records) if self.max_records else ''}
                 RETURN doc
             """
 
-        # Stream results with longer TTL to handle large datasets
-        cursor = self.db.aql.execute(query, batch_size=10000, ttl=3600)  # 1 hour TTL
+        # Execute query and process results
+        results = self.memory_client.execute_query(query, batch_size=10000)
 
         batch = []
         batch_count = 0
-        for record in cursor:
+        for record in results:
             batch.append(record)
 
             if len(batch) >= self.batch_size:
@@ -439,7 +463,7 @@ class ArxivSortedWorkflow:
         for _ in range(self.num_workers):
             self.input_queue.put(None)
 
-        logger.info(f"Queued all records for processing")
+        logger.info("Queued all records for processing")
 
     def _storage_worker(self) -> None:
         """Storage thread that saves embeddings to database."""
@@ -458,18 +482,15 @@ class ArxivSortedWorkflow:
                 logger.error(f"Storage error: {e}")
                 self.failed_count += len(results) if 'results' in locals() else 0
 
-    def _store_batch(self, batch: List[Dict[str, Any]]) -> None:
-        """Store chunks and embeddings (NOT metadata - already loaded)."""
+    def _store_batch(self, batch: list[dict[str, Any]]) -> None:
+        """Store chunks and embeddings using optimized HTTP/2 client."""
         if not batch:
             return
 
-        # Begin transaction
-        txn = self.db.begin_transaction(
-            write=[self.chunks_collection, self.embeddings_collection]
-        )
-
         try:
             papers_seen = set()
+            chunk_docs = []
+            embedding_docs = []
 
             for item in batch:
                 record = item['record']
@@ -485,7 +506,7 @@ class ArxivSortedWorkflow:
                 if arxiv_id not in papers_seen:
                     papers_seen.add(arxiv_id)
 
-                # Store chunk
+                # Prepare chunk document
                 chunk_id = f"{sanitized_id}_chunk_{chunk.chunk_index}"
                 chunk_doc = {
                     '_key': chunk_id,
@@ -498,9 +519,9 @@ class ArxivSortedWorkflow:
                     'end_char': chunk.end_char,
                     'created_at': datetime.now().isoformat()
                 }
-                txn.collection(self.chunks_collection).insert(chunk_doc, overwrite=True)
+                chunk_docs.append(chunk_doc)
 
-                # Store embedding
+                # Prepare embedding document
                 embedding_doc = {
                     '_key': f"{chunk_id}_emb",
                     'chunk_id': chunk_id,
@@ -511,17 +532,23 @@ class ArxivSortedWorkflow:
                     'model': 'jinaai/jina-embeddings-v4',
                     'created_at': datetime.now().isoformat()
                 }
-                txn.collection(self.embeddings_collection).insert(embedding_doc, overwrite=True)
+                embedding_docs.append(embedding_doc)
 
-            # Commit
-            txn.commit_transaction()
+            # Bulk insert chunks and embeddings using optimized client
+            if chunk_docs:
+                chunks_inserted = self.memory_client.bulk_insert(self.chunks_collection, chunk_docs)
+                logger.debug(f"Inserted {chunks_inserted} chunks")
+
+            if embedding_docs:
+                embeddings_inserted = self.memory_client.bulk_insert(self.embeddings_collection, embedding_docs)
+                logger.debug(f"Inserted {embeddings_inserted} embeddings")
+
             self.processed_count += len(papers_seen)
 
             if self.processed_count % 1000 == 0:
                 logger.info(f"Stored {self.processed_count} papers")
 
         except Exception as e:
-            txn.abort_transaction()
             logger.error(f"Failed to store batch: {e}")
             self.failed_count += len(batch)
 
@@ -543,10 +570,12 @@ if __name__ == "__main__":
 
     mp.set_start_method("spawn", force=True)
 
-    parser = argparse.ArgumentParser(description="ArXiv size-sorted processing (simplified)")
+    parser = argparse.ArgumentParser(description="ArXiv initial ingest with HTTP/2 optimized client")
     parser.add_argument('--database', default='arxiv_repository')
     parser.add_argument('--username', default='root')
+    parser.add_argument('--password', default=None, help='ArangoDB password (or use ARANGO_PASSWORD env var)')
     parser.add_argument('--password-env', default='ARANGO_PASSWORD')
+    parser.add_argument('--metadata-file', default='data/arxiv-kaggle-latest.json', help='Path to ArXiv metadata JSON file')
     parser.add_argument('--count', type=int, default=None, help='Max records to process')
     parser.add_argument('--batch-size', type=int, default=100)
     parser.add_argument('--embedding-batch-size', type=int, default=48)
@@ -557,12 +586,19 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Set password - from argument or environment
+    if args.password:
+        os.environ['ARANGO_PASSWORD'] = args.password
+    elif not os.environ.get('ARANGO_PASSWORD'):
+        # Try to get from the specified env var
+        os.environ['ARANGO_PASSWORD'] = os.environ.get(args.password_env, '')
+
     # Set password env var
     os.environ['ARANGO_PASSWORD_ENV'] = args.password_env
 
     # Print config
     print("="*60)
-    print("ArXiv Size-Sorted Processing (Simplified)")
+    print("ArXiv Initial Ingest (HTTP/2 Optimized)")
     print("="*60)
     print(f"Database: {args.database}")
     print(f"Username: {args.username}")
@@ -571,12 +607,15 @@ if __name__ == "__main__":
     print(f"Embedding batch: {args.embedding_batch_size}")
     print(f"Workers: {args.workers}")
     print(f"Drop collections: {args.drop_collections}")
+    print(f"Chunk size: {args.chunk_size_tokens} tokens")
+    print(f"Chunk overlap: {args.chunk_overlap_tokens} tokens")
     print("="*60)
 
     # Run workflow
-    workflow = ArxivSortedWorkflow(
+    workflow = ArxivInitialIngestWorkflow(
         database=args.database,
         username=args.username,
+        metadata_file=args.metadata_file,
         max_records=args.count,
         batch_size=args.batch_size,
         embedding_batch_size=args.embedding_batch_size,

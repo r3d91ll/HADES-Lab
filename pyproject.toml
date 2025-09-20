@@ -8,7 +8,6 @@ license = "Apache-2.0"
 # Installable packages from this repo
 packages = [
     { include = "core" },
-    { include = "tools" },
 ]
 
 [tool.poetry.dependencies]
@@ -42,6 +41,7 @@ pymupdf = "^1.26.4"
 psycopg = {version = "^3.1.18", extras = ["binary"]}
 sqlalchemy = "^2.0.31"
 alembic = "^1.13.2"
+h2 = "^4.3.0"
 
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.5.0"
@@ -54,6 +54,8 @@ types-pillow = "*"
 
 # [tool.poetry.extras]
 # mcp = ["mcp"]
+grpcio = "^1.75.0"
+grpcio-tools = "^1.75.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -151,6 +153,9 @@ select = [
 ignore = [
     "E501", # line too long (handled by formatter)
     "B008", # do not perform function calls in argument defaults
+]
+extend-exclude = [
+    "core/database/arango/go_service/python/proto",
 ]
 
 [tool.ruff.per-file-ignores]

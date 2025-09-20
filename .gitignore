@@ -410,3 +410,5 @@ tools/arxiv/utils/SCRIPT_ANALYSIS.md
 scratch/*
 dev-utils/*
 tests/
+core/database/arango/proxies/.gocache/
+*.gocache/*

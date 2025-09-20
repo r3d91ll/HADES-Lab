@@ -43,9 +43,10 @@ JSON Metadata File (2.8M records on NVME)
 
 ### Key Components
 
-1. **`workflow_arxiv_initial_ingest.py`** - Main workflow (formerly workflow_arxiv_sorted_simple.py)
-2. **`core/database/arango/php_unix_bridge.php`** - PHP bridge for database operations
-3. **`core/embedders/embedders_jina.py`** - Jina v4 embedder with proper late chunking
+1. **`workflow_arxiv_initial_ingest_balanced.py`** – Primary size-sorted workflow with adaptive bucketing
+2. **`core/database/arango/memory_client.py`** – HTTP/2 memory client used for all ArangoDB calls
+3. **`core/database/arango/proxies`** – Read-only/read-write Unix socket proxies
+4. **`core/embedders/embedders_jina.py`** – Jina v4 embedder with proper late chunking
 
 ## Quick Start
 
@@ -58,15 +59,16 @@ export ARANGO_PASSWORD="your-password"
 # Verify GPUs available
 nvidia-smi
 
-# Check PHP bridge works
-php core/database/arango/php_unix_bridge.php test
+# Ensure proxies are running (use separate shells)
+go run core/database/arango/proxies/cmd/roproxy
+go run core/database/arango/proxies/cmd/rwproxy
 ```
 
 ### Production Run (Fresh Start)
 
 ```bash
 # Full production run with clean start
-python core/workflows/workflow_arxiv_initial_ingest.py \
+python core/workflows/workflow_arxiv_initial_ingest_balanced.py \
     --drop-collections \
     --workers 2 \
     --embedding-batch-size 50 \
@@ -79,7 +81,7 @@ python core/workflows/workflow_arxiv_initial_ingest.py \
 
 ```bash
 # Quick test with 1000 records
-python core/workflows/workflow_arxiv_initial_ingest.py \
+python core/workflows/workflow_arxiv_initial_ingest_balanced.py \
     --drop-collections \
     --count 1000 \
     --workers 2 \
@@ -95,7 +97,7 @@ python core/workflows/workflow_arxiv_initial_ingest.py \
 | `--batch-size` | 100 | Records per I/O batch |
 | `--embedding-batch-size` | 48 | Embeddings per GPU batch |
 | `--workers` | 2 | Number of GPU workers |
-| `--drop-collections` | False | Drop and recreate collections (uses PHP bridge) |
+| `--drop-collections` | False | Drop and recreate collections via HTTP/2 client |
 | `--chunk-size-tokens` | 500 | Tokens per chunk |
 | `--chunk-overlap-tokens` | 200 | Overlap between chunks |
 

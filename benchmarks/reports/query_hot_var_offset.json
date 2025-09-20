@@ -1,0 +1,34 @@
+{
+  "database": "arxiv_repository",
+  "collection": "arxiv_metadata",
+  "socket": "/tmp/arango_ro_proxy.sock",
+  "base_url": "http://localhost",
+  "iterations": 20,
+  "concurrency": 1,
+  "query": {
+    "query": "FOR doc IN arxiv_metadata LIMIT @offset, 1000 RETURN doc._key",
+    "batch_size": 1000,
+    "bind_vars": {
+      "offset": 0
+    },
+    "vary_bind_key": "offset",
+    "stats": {
+      "ttfb": {
+        "min": 0.5232889961916953,
+        "max": 2.2358119895216078,
+        "avg": 0.7067640981404111,
+        "p50": 0.5994294915581122,
+        "p95": 1.1752072969102307,
+        "p99": 2.023691050999331
+      },
+      "e2e": {
+        "min": 0.5742610082961619,
+        "max": 2.361743012443185,
+        "avg": 0.7601625475217588,
+        "p50": 0.6500230083474889,
+        "p95": 1.2386292539304131,
+        "p99": 2.1371202607406286
+      }
+    }
+  }
+}

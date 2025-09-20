@@ -10,9 +10,11 @@ The factory enables flexible WHERE dimension management by abstracting
 the specific database implementation from the workflow logic.
 """
 
-from typing import Optional, Dict, Any
 import logging
 import os
+from typing import Any, Dict, Optional
+
+from core.database.arango import ArangoMemoryClient, resolve_memory_config
 
 logger = logging.getLogger(__name__)
 
@@ -67,17 +69,21 @@ class DatabaseFactory:
                 )
                 logger.info("✓ Using Unix socket for ArangoDB connection")
                 return db
-            except ImportError:
-                logger.warning("Unix socket client not available, falling back to HTTP")
+            except ImportError as e:
+                logger.error("Unix socket client not available - this is required for HADES")
+                raise RuntimeError("Unix socket connection is mandatory for HADES. Network access not allowed.") from e
             except Exception as e:
-                logger.warning(f"Unix socket connection failed: {e}, falling back to HTTP")
+                logger.error(f"Unix socket connection failed: {e}")
+                raise RuntimeError(f"Unix socket connection failed. Network fallback not allowed for HADES: {e}") from e
 
-        # Fall back to standard HTTP connection
+        # Network connection - ONLY for human debugging, never for HADES
+        if host != "localhost":
+            logger.warning("Network connection requested - this should only be used for debugging")
         try:
             from arango import ArangoClient
             client = ArangoClient(hosts=f'http://{host}:{port}')
             db = client.db(database, username=username, password=password)
-            logger.info(f"✓ Connected to ArangoDB via HTTP at {host}:{port}")
+            logger.info(f"✓ Connected to ArangoDB via HTTP at {host}:{port} (debugging only)")
             return db
         except ImportError:
             raise ImportError("python-arango not installed. Run: pip install python-arango")
@@ -138,6 +144,62 @@ class DatabaseFactory:
         except Exception as e:
             logger.error(f"Failed to connect to PostgreSQL: {e}")
             raise
+
+    @classmethod
+    def get_arango_memory_service(
+        cls,
+        *,
+        database: str = "arxiv_repository",
+        username: str = "root",
+        password: Optional[str] = None,
+        socket_path: Optional[str] = None,
+        read_socket: Optional[str] = None,
+        write_socket: Optional[str] = None,
+        use_proxies: Optional[bool] = None,
+        base_url: Optional[str] = None,
+        connect_timeout: Optional[float] = None,
+        read_timeout: Optional[float] = None,
+        write_timeout: Optional[float] = None,
+    ) -> ArangoMemoryClient:
+        """Return the optimized ArangoDB memory client.
+
+        Args:
+            database: Target database name.
+            username: Authentication user (default "root").
+            password: Password (falls back to ``ARANGO_PASSWORD``).
+            socket_path: Explicit Unix socket used for both reads and writes.
+            read_socket: Optional read-only proxy socket.
+            write_socket: Optional read-write proxy socket.
+            use_proxies: Force proxy usage (defaults to environment autodetect).
+            base_url: Base URL for HTTP/2 client (defaults to http://localhost).
+            connect_timeout: Override connection timeout.
+            read_timeout: Override read timeout.
+            write_timeout: Override write timeout.
+
+        Returns:
+            Configured :class:`ArangoMemoryClient` instance.
+        """
+
+        config = resolve_memory_config(
+            database=database,
+            username=username,
+            password=password,
+            socket_path=socket_path,
+            read_socket=read_socket,
+            write_socket=write_socket,
+            use_proxies=use_proxies,
+            base_url=base_url,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            write_timeout=write_timeout,
+        )
+
+        logger.info(
+            "✓ Using Arango memory client (read_socket=%s, write_socket=%s)",
+            config.read_socket,
+            config.write_socket,
+        )
+        return ArangoMemoryClient(config)
 
     @classmethod
     def get_redis(cls,
