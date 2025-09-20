@@ -412,3 +412,4 @@ dev-utils/*
 tests/
 core/database/arango/proxies/.gocache/
 *.gocache/*
+benchmarks/*
