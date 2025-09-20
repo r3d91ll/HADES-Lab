@@ -15,7 +15,7 @@ DB_NAME="${ARXIV_DB_NAME:-arxiv_repository}"
 
 # Connection Configuration
 # Prioritize Unix socket for local connections (much faster, more secure)
-UNIX_SOCKET="${ARANGO_UNIX_SOCKET:-/tmp/arangodb.sock}"
+UNIX_SOCKET="${ARANGO_UNIX_SOCKET:-/run/arangodb3/arangodb.sock}"
 USE_UNIX_SOCKET="${USE_UNIX_SOCKET:-true}"
 
 # Fallback to HTTP if Unix socket not available
@@ -214,15 +214,15 @@ COLLECTIONS_JSON=$(printf '%s\n' "${COLLECTIONS[@]}" | jq -R . | jq -s .)
 export COLLECTIONS_JSON
 
 # Prepare Python command arguments
-PYTHON_ARGS=""
+PYTHON_ARGS=()
 if [ "$DROP_EXISTING" = true ]; then
-    PYTHON_ARGS="$PYTHON_ARGS --drop-existing"
+    PYTHON_ARGS+=("--drop-existing")
 fi
 if [ "$AUTO_MODE" = true ]; then
-    PYTHON_ARGS="$PYTHON_ARGS --auto"
+    PYTHON_ARGS+=("--auto")
 fi
 if [ "$QUIET_MODE" = true ]; then
-    PYTHON_ARGS="$PYTHON_ARGS --quiet"
+    PYTHON_ARGS+=("--quiet")
 fi
 
 # Get project root directory
@@ -230,7 +230,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Run the simplified Python setup script from project root
-if python3 "$PROJECT_ROOT/dev-utils/setup_arxiv_database_simple.py" $PYTHON_ARGS; then
+if python3 "$PROJECT_ROOT/dev-utils/setup_arxiv_database_simple.py" "${PYTHON_ARGS[@]}"; then
     print_success "Database setup completed successfully"
 else
     print_error "Database setup failed"

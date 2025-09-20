@@ -12,6 +12,7 @@ later phases.
 
 from __future__ import annotations
 
+import io
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -94,17 +95,33 @@ class ArangoHttp2Client:
     def insert_documents(self, collection: str, documents: Iterable[dict[str, Any]]) -> dict[str, Any]:
         """Bulk insert documents using NDJSON import."""
 
-        ndjson_payload = "\n".join(json.dumps(doc) for doc in documents)
-        ndjson_bytes = ndjson_payload.encode("utf-8")
+        document_iter = iter(documents)
+        try:
+            first_doc = next(document_iter)
+        except StopIteration:
+            return {}
+
+        buffer = io.BytesIO()
+        first_line = json.dumps(first_doc).encode("utf-8")
+        buffer.write(first_line)
+        total_bytes = len(first_line)
+
+        for doc in document_iter:
+            line = json.dumps(doc).encode("utf-8")
+            buffer.write(b"\n")
+            buffer.write(line)
+            total_bytes += 1 + len(line)
+
+        payload = buffer.getvalue()
         path = (
             f"/_db/{self._config.database}/_api/import"
             f"?collection={collection}&type=documents&complete=true&overwrite=false"
         )
         headers = {
             "Content-Type": "application/x-ndjson",
-            "Content-Length": str(len(ndjson_bytes)),
+            "Content-Length": str(total_bytes),
         }
-        response = self._client.post(path, content=ndjson_bytes, headers=headers)
+        response = self._client.post(path, content=payload, headers=headers)
         return self._handle_response(response)
 
     def query(

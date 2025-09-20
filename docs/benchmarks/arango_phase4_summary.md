@@ -1,5 +1,16 @@
 # Arango Phase 4 Benchmark Summary
 
+## Conveyance Scorecard
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| **W** | 0.95 | Full payload validation during benchmark ingestion. |
+| **R** | 0.92 | RO/RW proxies on `/run/hades/...` enforce isolation. |
+| **H** | 0.93 | Optimised HTTP/2 memory client with bounded pools. |
+| **T** | 0.97 | Hot-cache GET p95 ≤ 1.0 ms (`get_hot.json`). |
+| **Ctx** | 0.90 | L=I=A=G=0.90 via observability + isolation controls. |
+| **Conveyance** | **0.70** | α = 1.7 ⇒ (W·R·H/T)·Ctx^α. |
+
 ## GET Latency (ms)
 | Scenario | Concurrency | TTFB p95 | TTFB p99 | E2E p95 | E2E p99 |
 |----------|-------------|----------|----------|---------|---------|

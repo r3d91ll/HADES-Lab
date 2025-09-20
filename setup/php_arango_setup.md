@@ -25,10 +25,10 @@ composer --version
 ### 3. Install ArangoDB PHP Driver
 ```bash
 cd ~/olympus/HADES-Lab
-composer require triagens/arangodb
+composer install
 ```
 
-This creates:
+This installs the dependencies listed in `composer.json`, including `triagens/arangodb`:
 - `composer.json` - PHP dependencies
 - `composer.lock` - Locked versions
 - `vendor/` - PHP libraries

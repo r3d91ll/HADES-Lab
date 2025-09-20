@@ -143,7 +143,7 @@ class JinaV4Embedder(EmbedderBase):
         # Log actual model configuration
         logger.info("Jina v4 model loaded with late chunking support")
         logger.info(f"Model dtype: {next(self.model.parameters()).dtype}")
-        logger.info(f"Embedding dimension: 2048")
+        logger.info("Embedding dimension: %s", self.EMBEDDING_DIM)
         logger.info(f"Model has encode method: {hasattr(self.model, 'encode')}")
 
         # Check if Flash Attention is available and being used
@@ -279,7 +279,7 @@ class JinaV4Embedder(EmbedderBase):
                 #     torch.cuda.empty_cache()
         
         # Concatenate all batches
-        result = np.vstack(all_embeddings) if all_embeddings else np.empty((0, 2048))
+        result = np.vstack(all_embeddings) if all_embeddings else np.empty((0, self.EMBEDDING_DIM))
         
         return result
     
@@ -412,8 +412,8 @@ class JinaV4Embedder(EmbedderBase):
                     images = [images_raw]
             
             if not text and not images:
-                # Empty pair, return zero vector
-                embeddings_list.append(np.zeros(2048))
+                # Empty pair, return zero vector with correct dimensionality
+                embeddings_list.append(np.zeros(self.EMBEDDING_DIM, dtype=np.float32))
                 continue
             
             # Use late fusion as Jina v4 doesn't have true multimodal yet
@@ -471,73 +471,40 @@ class JinaV4Embedder(EmbedderBase):
         if not text:
             return []
 
-        # For short texts, process as single chunk
-        if len(text) <= self.chunk_size_tokens * 4:  # Rough estimate
+        # Encode the full document once to obtain contextual token embeddings
+        token_embeddings, metadata = self.encode_full_document(text, task)
+
+        if token_embeddings.numel() == 0:
+            # Fallback: model returned no embeddings (extremely short text)
             jina_task = 'retrieval' if 'retrieval' in task else task
             embedding = self.embed_texts([text], task=jina_task)[0]
+            embedding = embedding if isinstance(embedding, np.ndarray) else np.asarray(embedding)
+            if embedding.size == 0:
+                embedding = np.zeros(self.EMBEDDING_DIM, dtype=np.float32)
             return [ChunkWithEmbedding(
                 text=text,
                 embedding=embedding,
                 start_char=0,
                 end_char=len(text),
                 start_token=0,
-                end_token=len(text) // 4,  # Rough estimate
+                end_token=metadata.get('num_tokens', len(text) // 4),
                 chunk_index=0,
                 total_chunks=1,
-                context_window_used=len(text) // 4
+                context_window_used=metadata.get('num_tokens', len(text) // 4)
             )]
 
-        # For longer texts, create overlapping context windows
-        chunks = []
-        chars_per_token = 4  # Rough estimate
-        chunk_size_chars = self.chunk_size_tokens * chars_per_token
-        overlap_chars = self.chunk_overlap_tokens * chars_per_token
+        # Ensure embeddings are on CPU for downstream numpy ops
+        if hasattr(token_embeddings, 'is_cuda') and token_embeddings.is_cuda:
+            token_embeddings = token_embeddings.cpu()
 
-        # We'll use larger context windows for encoding
-        context_size_chars = min(chunk_size_chars * 3, self.MAX_TOKENS * chars_per_token)
-
-        chunk_index = 0
-        chunk_start = 0
-
-        while chunk_start < len(text):
-            chunk_end = min(chunk_start + chunk_size_chars, len(text))
-
-            # Get context window (larger than chunk for surrounding context)
-            context_start = max(0, chunk_start - chunk_size_chars)
-            context_end = min(len(text), chunk_end + chunk_size_chars)
-
-            # Extract context window
-            context_text = text[context_start:context_end]
-
-            # Encode the FULL context window
-            jina_task = 'retrieval' if 'retrieval' in task else task
-            context_embedding = self.embed_texts([context_text], task=jina_task)[0]
-
-            # Store chunk with its context-aware embedding
-            chunk_text = text[chunk_start:chunk_end]
-            chunks.append(ChunkWithEmbedding(
-                text=chunk_text,
-                embedding=context_embedding,  # This embedding has context!
-                start_char=chunk_start,
-                end_char=chunk_end,
-                start_token=chunk_start // chars_per_token,
-                end_token=chunk_end // chars_per_token,
-                chunk_index=chunk_index,
-                total_chunks=0,  # Will be updated
-                context_window_used=len(context_text) // chars_per_token
-            ))
-
-            # Move to next chunk with overlap
-            if chunk_end >= len(text):
-                break
-
-            chunk_start = chunk_end - overlap_chars
-            chunk_index += 1
-
-        # Update total chunks
-        total = len(chunks)
-        for chunk in chunks:
-            chunk.total_chunks = total
+        # Run the second stage of late chunking directly on the cached embeddings
+        chunks = self.embed_chunks_from_tokens(
+            token_embeddings=token_embeddings,
+            metadata=metadata,
+            text=text,
+            chunk_size_tokens=self.chunk_size_tokens,
+            chunk_overlap_tokens=self.chunk_overlap_tokens
+        )
 
         return chunks
     
@@ -896,7 +863,7 @@ class JinaV4Embedder(EmbedderBase):
                 chunk_embedding = chunk_embedding.cpu()
             
             # Convert to numpy and normalize
-            chunk_embedding_np = chunk_embedding.numpy()
+            chunk_embedding_np = chunk_embedding.numpy().astype(np.float32, copy=False)
             norm = np.linalg.norm(chunk_embedding_np)
             if norm > 0:
                 chunk_embedding_np = chunk_embedding_np / norm

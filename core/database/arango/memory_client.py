@@ -154,22 +154,20 @@ def resolve_memory_config(
     env_rw = env.get("ARANGO_RW_SOCKET")
     env_direct = env.get("ARANGO_SOCKET")
 
-    if read_socket is None and env_ro:
-        read_socket = env_ro
-    if write_socket is None and env_rw:
-        write_socket = env_rw
+    proxies_requested = True if use_proxies is None else use_proxies
 
-    if socket_path and not (read_socket or write_socket):
-        read_socket = socket_path
-        write_socket = socket_path
-
-    if read_socket is None and write_socket is None:
-        read_socket = "/run/hades/readonly/arangod.sock"
-        write_socket = "/run/hades/readwrite/arangod.sock"
-
-    if env_direct and (read_socket is None or write_socket is None):
-        read_socket = read_socket or env_direct
-        write_socket = write_socket or env_direct
+    if proxies_requested:
+        if read_socket is None and env_ro:
+            read_socket = env_ro
+        if write_socket is None and env_rw:
+            write_socket = env_rw
+        if read_socket is None and write_socket is None:
+            read_socket = "/run/hades/readonly/arangod.sock"
+            write_socket = "/run/hades/readwrite/arangod.sock"
+    else:
+        direct_socket = env_direct or DEFAULT_ARANGO_SOCKET
+        read_socket = read_socket or direct_socket
+        write_socket = write_socket or direct_socket
 
     connect_timeout = connect_timeout if connect_timeout is not None else _parse_timeout(env.get("ARANGO_CONNECT_TIMEOUT"), 5.0)
     read_timeout = read_timeout if read_timeout is not None else _parse_timeout(env.get("ARANGO_READ_TIMEOUT"), 30.0)

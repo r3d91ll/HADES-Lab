@@ -8,7 +8,7 @@ Embedders bridge human-readable text and machine-processable vectors, preserving
 
 ## Architecture
 
-```
+```text
 embedders/
 ├── embedders_base.py     # Abstract base class and interfaces
 ├── embedders_jina.py     # Jina V3/V4 implementation with late chunking
@@ -91,49 +91,61 @@ Factory pattern for flexible embedder instantiation:
 
 ```python
 from core.embedders import EmbedderFactory
+from core.embedders.embedders_base import EmbeddingConfig
 
-# From configuration dict
-config = {
-    "type": "jina_v4",
-    "model_name": "jinaai/jina-embeddings-v4",
-    "device": "cuda",
-    "batch_size": 32
-}
-embedder = EmbedderFactory.create(config)
-
-# From configuration file
-embedder = EmbedderFactory.from_config("embedding_config.yaml")
+config = EmbeddingConfig(
+    model_name="jinaai/jina-embeddings-v4",
+    device="cuda",
+    batch_size=32,
+    use_fp16=True,
+    chunk_size_tokens=512,
+    chunk_overlap_tokens=128,
+)
+embedder = EmbedderFactory.create(model_name=config.model_name, config=config)
 ```
 
 ## Embedding Models
 
-### Jina V3 (1024 dimensions)
+### Jina V4 (1024-dimension mode)
 
 ```python
-embedder = JinaV4Embedder(
+from core.embedders.embedders_base import EmbeddingConfig
+from core.embedders import JinaV4Embedder
+
+config = EmbeddingConfig(
     model_name="jinaai/jina-embeddings-v4",
-    max_seq_length=8192,
-    dimensions=1024
+    device="cuda",
+    batch_size=32,
+    use_fp16=True,
+    chunk_size_tokens=512,
+    chunk_overlap_tokens=128,
 )
+embedder = JinaV4Embedder(config)
 ```
 
-- **Dimensions**: 1024
-- **Max Sequence**: 8192 tokens
-- **Use Cases**: General semantic search, moderate precision
+- **Dimensions**: 1024 (Jina model exposes both 1024- and 2048-dimension adapters)
+- **Max Sequence**: 8192 tokens (configurable via `EmbeddersConfig`)
 
-### Jina V4 (2048 dimensions)
+### Jina V4 (2048-dimension mode)
 
 ```python
-embedder = JinaV4Embedder(
-    model_name="jinaai/jina-embeddings-v4",  # When available
-    max_seq_length=32768,
-    dimensions=2048
+from core.embedders.embedders_base import EmbeddingConfig
+from core.embedders import JinaV4Embedder
+
+config = EmbeddingConfig(
+    model_name="jinaai/jina-embeddings-v4",
+    device="cuda",
+    batch_size=16,
+    use_fp16=True,
+    chunk_size_tokens=1000,
+    chunk_overlap_tokens=200,
 )
+embedder = JinaV4Embedder(config)
 ```
 
 - **Dimensions**: 2048
 - **Max Sequence**: 32768 tokens
-- **Use Cases**: High-precision retrieval, long documents
+- **Use Cases**: High-precision retrieval and long-document embeddings
 
 ## Late Chunking
 
@@ -142,22 +154,22 @@ Late chunking processes full documents before segmentation, preserving context:
 ```python
 from core.embedders import JinaV4Embedder
 
-embedder = JinaV4Embedder(
-    late_chunking=True,
-    chunk_size_tokens=512,
-    chunk_overlap_tokens=128
-)
+from core.embedders.embedders_base import EmbeddingConfig
+from core.embedders import JinaV4Embedder
 
-# Process long document
+config = EmbeddingConfig(
+    model_name="jinaai/jina-embeddings-v4",
+    device="cuda",
+    chunk_size_tokens=512,
+    chunk_overlap_tokens=128,
+)
+embedder = JinaV4Embedder(config)
+
 long_text = "..." * 10000  # Very long document
 
-# Traditional approach (loses context)
-chunks = chunk_text(long_text)
-vectors_traditional = embedder.embed(chunks)
-
-# Late chunking (preserves context)
-vectors_late = embedder.embed_with_late_chunking(long_text)
-# Better semantic coherence across chunks
+# Proper late chunking: encode once, then slice contextual embeddings
+chunks: List[ChunkWithEmbedding] = embedder.embed_with_late_chunking(long_text)
+vectors = [chunk.embedding for chunk in chunks]
 ```
 
 ### Benefits

@@ -23,7 +23,7 @@ func RunReadWriteProxy() error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", listenSocket, err)
 	}
-	ensureSocketMode(listenSocket, socketPermissions)
+	ensureSocketMode(listenSocket, rwSocketPermissions)
 
 	server := &http.Server{Handler: logRequests(proxy)}
 

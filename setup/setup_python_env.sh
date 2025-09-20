@@ -23,7 +23,10 @@ if command -v uv &> /dev/null; then
     echo "✓ uv is already installed: $(uv --version)"
 else
     echo "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    install_script="$(mktemp)"
+    curl -LsSf https://astral.sh/uv/install.sh -o "$install_script"
+    sh "$install_script"
+    rm -f "$install_script"
     
     # Add to PATH for current session
     export PATH="$HOME/.cargo/bin:$PATH"
@@ -60,9 +63,19 @@ fi
 # Configure Poetry for this project
 echo -e "\n4. Configuring Poetry for HADES-Lab..."
 # Get the directory where this script is located, then go to parent (project root)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_src="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+    resolved="$(readlink -f "${_src}" 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+        _src="$resolved"
+    fi
+fi
+SCRIPT_DIR="$(cd "$(dirname "${_src}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
+if ! cd "$PROJECT_ROOT"; then
+    echo "✗ Failed to enter project root: $PROJECT_ROOT" >&2
+    exit 1
+fi
 
 # Set Poetry to create virtual environments in project directory
 poetry config virtualenvs.in-project true

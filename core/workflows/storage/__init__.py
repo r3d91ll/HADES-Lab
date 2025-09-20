@@ -23,9 +23,20 @@ except ImportError:
 # Import base class
 from .storage_base import StorageBase
 
+def __getattr__(name: str):
+    if name == "LocalStorage" and LocalStorage is None:
+        raise ImportError(
+            "LocalStorage backend is unavailable. Install optional dependencies or select a supported backend."
+        )
+    if name == "S3Storage" and S3Storage is None:
+        raise ImportError("S3Storage backend is unavailable. Install boto3 to enable it.")
+    if name == "RamFSStorage" and RamFSStorage is None:
+        raise ImportError("RamFSStorage backend is unavailable. POSIX shared memory support missing.")
+    raise AttributeError(name)
+
 __all__ = [
-    'StorageBase',
     'LocalStorage',
-    'S3Storage',
     'RamFSStorage',
+    'S3Storage',
+    'StorageBase',
 ]

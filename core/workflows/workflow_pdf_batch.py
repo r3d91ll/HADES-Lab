@@ -267,7 +267,8 @@ class GenericDocumentProcessor:
 
 WORKER_DOCLING = None
 WORKER_EMBEDDER = None
-WORKER_DB_MANAGER = None
+WORKER_DB_CLIENT = None
+WORKER_COLLECTIONS: Dict[str, str] | None = None
 
 
 def _init_extraction_worker(gpu_devices, extraction_config):
@@ -389,7 +390,7 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
     """
     Initialize per-process embedding resources.
     
-    Sets up global WORKER_EMBEDDER and WORKER_DB_MANAGER for the current worker process. This includes:
+    Sets up global WORKER_EMBEDDER and WORKER_DB_CLIENT for the current worker process. This includes:
     - Selecting and exporting a CUDA_VISIBLE_DEVICES value derived from gpu_devices and the worker's multiprocessing index.
     - Inserting the repository root into sys.path so local modules can be imported.
     - Creating a JinaV4Embedder configured for CUDA with FP16 and predetermined chunking parameters.
@@ -397,21 +398,18 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
     
     Parameters:
         gpu_devices (Sequence[int] | None): Sequence of GPU device ids available to workers; if provided, one is chosen based on the worker index.
-        arango_config (Mapping): Configuration used to construct the ArangoDBManager.
-        collections (Mapping[str, str]): Mapping of logical collection names to concrete ArangoDB collection names; used to override the manager's collections.
+        arango_config (Mapping): Configuration used to construct the Arango memory client.
+        collections (Mapping[str, str]): Mapping of logical collection names to concrete ArangoDB collection names.
     
     Side effects:
-        - Mutates module-level globals WORKER_EMBEDDER and WORKER_DB_MANAGER.
+        - Mutates module-level globals WORKER_EMBEDDER and WORKER_DB_CLIENT.
         - Mutates the process environment variable CUDA_VISIBLE_DEVICES.
-        - Modifies sys.path for imports.
     """
-    global WORKER_EMBEDDER, WORKER_DB_MANAGER
+    global WORKER_EMBEDDER, WORKER_DB_CLIENT, WORKER_COLLECTIONS
     import os
     from core.embedders import JinaV4Embedder
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from core.database.arango_db_manager import ArangoDBManager
+    from core.embedders.embedders_base import EmbeddingConfig
+    from core.database.arango import ArangoMemoryClient, resolve_memory_config
     
     # Assign GPU
     worker_info = mp.current_process()
@@ -421,16 +419,19 @@ def _init_embedding_worker(gpu_devices, arango_config, collections):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
     
     # Initialize embedder
-    WORKER_EMBEDDER = JinaV4Embedder(
+    embed_config = EmbeddingConfig(
+        model_name='jinaai/jina-embeddings-v4',
         device='cuda',
+        batch_size=128,
         use_fp16=True,
         chunk_size_tokens=1000,
-        chunk_overlap_tokens=200
+        chunk_overlap_tokens=200,
     )
-    
-    # Initialize DB manager with collections
-    WORKER_DB_MANAGER = ArangoDBManager(arango_config)
-    WORKER_DB_MANAGER.collections = collections  # Override with source-specific collections
+    WORKER_EMBEDDER = JinaV4Embedder(embed_config)
+
+    memory_config = resolve_memory_config(**arango_config)
+    WORKER_DB_CLIENT = ArangoMemoryClient(memory_config)
+    WORKER_COLLECTIONS = dict(collections)
 
 
 def _embed_and_store(staged_path: str) -> Dict[str, Any]:
@@ -451,10 +452,10 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
     Raises:
         RuntimeError: If the module-level embedder or DB manager workers are not initialized.
     """
-    global WORKER_EMBEDDER, WORKER_DB_MANAGER
+    global WORKER_EMBEDDER, WORKER_DB_CLIENT, WORKER_COLLECTIONS
     import torch
     
-    if WORKER_EMBEDDER is None or WORKER_DB_MANAGER is None:
+    if WORKER_EMBEDDER is None or WORKER_DB_CLIENT is None or WORKER_COLLECTIONS is None:
         raise RuntimeError("Worker not initialized")
     
     try:
@@ -484,108 +485,123 @@ def _embed_and_store(staged_path: str) -> Dict[str, Any]:
         # Generate embeddings
         chunks = WORKER_EMBEDDER.embed_with_late_chunking(full_text)
         
-        # Store to ArangoDB
         sanitized_id = document_id.replace('.', '_').replace('/', '_')
-        
-        # Acquire lock with timeout (1 minute should be sufficient for lock acquisition)
-        if not WORKER_DB_MANAGER.acquire_lock(document_id, timeout_minutes=1):
-            logger.warning(f"Could not acquire lock for {document_id} within 60 seconds")
-            return {
-                'success': False,
-                'error': 'Lock acquisition timeout - document may be processing elsewhere'
+
+        paper_doc = {
+            '_key': sanitized_id,
+            'document_id': document_id,
+            'paper_key': sanitized_id,
+            'metadata': doc.get('metadata', {}),
+            'status': 'PROCESSED',
+            'processing_date': datetime.now().isoformat(),
+            'num_chunks': len(chunks),
+            'has_latex': extracted.get('has_latex', False)
+        }
+
+        if doc.get('metadata', {}).get('repo'):
+            paper_doc['repository'] = doc['metadata']['repo']
+
+        if extracted.get('symbols'):
+            paper_doc['symbols'] = extracted['symbols']
+            paper_doc['symbol_hash'] = extracted.get('symbol_hash', '')
+            paper_doc['code_metrics'] = extracted.get('code_metrics', {})
+            paper_doc['code_structure'] = extracted.get('code_structure', {})
+            paper_doc['language'] = extracted.get('language')
+            paper_doc['has_tree_sitter'] = True
+        else:
+            paper_doc['has_tree_sitter'] = False
+
+        chunk_docs = []
+        embedding_docs = []
+        for i, chunk in enumerate(chunks):
+            chunk_key = f"{sanitized_id}_chunk_{i}"
+            chunk_docs.append({
+                '_key': chunk_key,
+                'document_id': document_id,
+                'paper_key': sanitized_id,
+                'text': chunk.text,
+                'chunk_index': i,
+                'start_char': chunk.start_char,
+                'end_char': chunk.end_char
+            })
+
+            embedding_record = {
+                '_key': f"{chunk_key}_emb",
+                'document_id': document_id,
+                'paper_key': sanitized_id,
+                'chunk_id': chunk_key,
+                'vector': chunk.embedding.tolist(),
+                'model': 'jinaai/jina-embeddings-v4'
             }
-        
-        try:
-            # Begin transaction
-            collections = WORKER_DB_MANAGER.collections
-            write_collections = [
-                collections['papers'],
-                collections['chunks'],
-                collections['embeddings']
-            ]
-            
-            txn_db = WORKER_DB_MANAGER.begin_transaction(
-                write_collections=write_collections,
-                lock_timeout=5
-            )
-            
-            try:
-                # Store paper metadata with Tree-sitter symbols if available
-                paper_doc = {
-                    '_key': sanitized_id,
-                    'document_id': document_id,
-                    'metadata': doc.get('metadata', {}),
-                    'status': 'PROCESSED',
-                    'processing_date': datetime.now().isoformat(),
-                    'num_chunks': len(chunks),
-                    'has_latex': extracted.get('has_latex', False)
+
+            if extracted.get('symbols'):
+                embedding_record['has_symbols'] = True
+                embedding_record['language'] = extracted.get('language')
+                embedding_record['symbol_context'] = {
+                    'total_functions': len(extracted['symbols'].get('functions', [])),
+                    'total_classes': len(extracted['symbols'].get('classes', [])),
+                    'total_imports': len(extracted['symbols'].get('imports', [])),
+                    'complexity': extracted.get('code_metrics', {}).get('complexity', 0)
                 }
-                
-                # Add repository field if this is GitHub data
-                if doc.get('metadata', {}).get('repo'):
-                    paper_doc['repository'] = doc['metadata']['repo']
-                
-                # Add Tree-sitter symbol data if available
-                if extracted.get('symbols'):
-                    paper_doc['symbols'] = extracted['symbols']
-                    paper_doc['symbol_hash'] = extracted.get('symbol_hash', '')
-                    paper_doc['code_metrics'] = extracted.get('code_metrics', {})
-                    paper_doc['code_structure'] = extracted.get('code_structure', {})
-                    paper_doc['language'] = extracted.get('language')
-                    paper_doc['has_tree_sitter'] = True
-                else:
-                    paper_doc['has_tree_sitter'] = False
-                
-                txn_db.collection(collections['papers']).insert(paper_doc, overwrite=True)
-                
-                # Store chunks and embeddings
-                for i, chunk in enumerate(chunks):
-                    chunk_key = f"{sanitized_id}_chunk_{i}"
-                    
-                    # Store chunk
-                    txn_db.collection(collections['chunks']).insert({
-                        '_key': chunk_key,
-                        'document_id': sanitized_id,
-                        'text': chunk.text,
-                        'chunk_index': i,
-                        'start_char': chunk.start_char,
-                        'end_char': chunk.end_char
-                    }, overwrite=True)
-                    
-                    # Store embedding with symbol metadata for code files
-                    embedding_doc = {
-                        '_key': f"{chunk_key}_emb",
-                        'document_id': sanitized_id,
-                        'chunk_id': chunk_key,
-                        'vector': chunk.embedding.tolist(),
-                        'model': 'jina-v4'
-                    }
-                    
-                    # Add symbol metadata if this is code with Tree-sitter data
-                    if extracted.get('symbols'):
-                        embedding_doc['has_symbols'] = True
-                        embedding_doc['language'] = extracted.get('language')
-                        # Store a summary of symbols for this chunk's context
-                        # This helps the Jina v4 coding LoRA understand the code context
-                        embedding_doc['symbol_context'] = {
-                            'total_functions': len(extracted['symbols'].get('functions', [])),
-                            'total_classes': len(extracted['symbols'].get('classes', [])),
-                            'total_imports': len(extracted['symbols'].get('imports', [])),
-                            'complexity': extracted.get('code_metrics', {}).get('complexity', 0)
-                        }
-                    
-                    txn_db.collection(collections['embeddings']).insert(embedding_doc, overwrite=True)
-                
-                # Commit
-                txn_db.commit_transaction()
-                
-            except Exception as e:
-                txn_db.abort_transaction()
-                raise
-                
-        finally:
-            WORKER_DB_MANAGER.release_lock(document_id)
-        
+
+            embedding_docs.append(embedding_record)
+
+        structures_doc = None
+        if extracted.get('tables') or extracted.get('equations') or extracted.get('images'):
+            structures_doc = {
+                '_key': sanitized_id,
+                'document_id': document_id,
+                'paper_key': sanitized_id,
+                'tables': extracted.get('tables', []),
+                'equations': extracted.get('equations', []),
+                'images': extracted.get('images', []),
+                'figures': extracted.get('figures', [])
+            }
+
+        action = """
+        function (params) {
+          const db = require('internal').db;
+          const opts = { overwriteMode: "replace" };
+          const cols = params.collections;
+          db._collection(cols.papers).insert(params.paper, opts);
+          params.chunks.forEach(function (chunk) {
+            db._collection(cols.chunks).insert(chunk, opts);
+          });
+          params.embeddings.forEach(function (emb) {
+            db._collection(cols.embeddings).insert(emb, opts);
+          });
+          if (params.structures) {
+            db._collection(cols.structures).insert(params.structures, opts);
+          }
+        }
+        """
+
+        write_collections = [
+            WORKER_COLLECTIONS['papers'],
+            WORKER_COLLECTIONS['chunks'],
+            WORKER_COLLECTIONS['embeddings'],
+        ]
+        if structures_doc:
+            write_collections.append(WORKER_COLLECTIONS['structures'])
+
+        transaction_request = {
+            'collections': {'write': write_collections},
+            'params': {
+                'paper': paper_doc,
+                'chunks': chunk_docs,
+                'embeddings': embedding_docs,
+                'structures': structures_doc,
+                'collections': WORKER_COLLECTIONS,
+            },
+            'action': action,
+        }
+
+        WORKER_DB_CLIENT._write_client.request(
+            'POST',
+            f"/_db/{WORKER_DB_CLIENT._config.database}/_api/transaction",
+            json=transaction_request,
+        )
+
         # Clean up staging file
         Path(staged_path).unlink()
         

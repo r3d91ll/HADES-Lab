@@ -125,11 +125,11 @@ def worker_process_with_gpu(worker_id: int, gpu_id: int, model_name: str,
 
             except Empty:
                 continue
-            except Exception as e:
-                logger.error(f"Worker {worker_id} error: {e}")
+            except Exception:
+                logger.exception("Worker %d error", worker_id)
 
-    except Exception as e:
-        logger.error(f"Worker {worker_id} init failed: {e}")
+    except Exception:
+        logger.exception("Worker %d init failed", worker_id)
     finally:
         print(f"Worker {worker_id} finished - {batches_processed} batches")
 
@@ -249,7 +249,7 @@ class ArxivInitialIngestWorkflow:
             return True
 
         except Exception as e:
-            logger.error(f"Workflow failed: {e}")
+            logger.exception("Workflow failed")
             return False
         finally:
             # Clean up memory client
@@ -478,8 +478,8 @@ class ArxivInitialIngestWorkflow:
                 if self.stop_event.is_set() and self.output_queue.empty():
                     break
                 continue
-            except Exception as e:
-                logger.error(f"Storage error: {e}")
+            except Exception:
+                logger.exception("Storage error")
                 self.failed_count += len(results) if 'results' in locals() else 0
 
     def _store_batch(self, batch: list[dict[str, Any]]) -> None:
@@ -511,6 +511,7 @@ class ArxivInitialIngestWorkflow:
                 chunk_doc = {
                     '_key': chunk_id,
                     'arxiv_id': arxiv_id,
+                    'document_id': arxiv_id,
                     'paper_key': sanitized_id,
                     'chunk_index': chunk.chunk_index,
                     'total_chunks': chunk.total_chunks,
@@ -526,9 +527,10 @@ class ArxivInitialIngestWorkflow:
                     '_key': f"{chunk_id}_emb",
                     'chunk_id': chunk_id,
                     'arxiv_id': arxiv_id,
+                    'document_id': arxiv_id,
                     'paper_key': sanitized_id,
                     'embedding': chunk.embedding.tolist(),
-                    'embedding_dim': len(chunk.embedding),
+                    'embedding_dim': int(chunk.embedding.shape[0]) if hasattr(chunk.embedding, 'shape') else len(chunk.embedding),
                     'model': 'jinaai/jina-embeddings-v4',
                     'created_at': datetime.now().isoformat()
                 }
@@ -548,8 +550,8 @@ class ArxivInitialIngestWorkflow:
             if self.processed_count % 1000 == 0:
                 logger.info(f"Stored {self.processed_count} papers")
 
-        except Exception as e:
-            logger.error(f"Failed to store batch: {e}")
+        except Exception:
+            logger.exception("Failed to store batch")
             self.failed_count += len(batch)
 
     def _shutdown_workers(self) -> None:
@@ -590,11 +592,12 @@ if __name__ == "__main__":
     if args.password:
         os.environ['ARANGO_PASSWORD'] = args.password
     elif not os.environ.get('ARANGO_PASSWORD'):
-        # Try to get from the specified env var
-        os.environ['ARANGO_PASSWORD'] = os.environ.get(args.password_env, '')
+        env_password = os.environ.get(args.password_env)
+        if env_password:
+            os.environ['ARANGO_PASSWORD'] = env_password
 
-    # Set password env var
-    os.environ['ARANGO_PASSWORD_ENV'] = args.password_env
+    if args.password_env:
+        os.environ['ARANGO_PASSWORD_ENV'] = args.password_env
 
     # Print config
     print("="*60)

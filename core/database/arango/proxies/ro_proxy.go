@@ -23,7 +23,7 @@ func RunReadOnlyProxy() error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", listenSocket, err)
 	}
-	ensureSocketMode(listenSocket, socketPermissions)
+	ensureSocketMode(listenSocket, roSocketPermissions)
 
 	server := &http.Server{Handler: logRequests(proxy)}
 
@@ -55,9 +55,4 @@ func allowReadOnly(r *http.Request, body []byte) error {
 		}
 	}
 	return fmt.Errorf("method %s not permitted on %s", r.Method, r.URL.Path)
-}
-
-func isCursorPath(path string) bool {
-	// Match .../_api/cursor
-	return strings.Contains(path, "/_api/cursor")
 }

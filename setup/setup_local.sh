@@ -43,7 +43,12 @@ print_info "Checking Python version..."
 python_version=$(python3 --version 2>&1 | grep -Po '(?<=Python )\d+\.\d+')
 required_version="3.11"
 
-if [ "$(printf '%s\n' "$required_version" "$python_version" | sort -V | head -n1)" = "$required_version" ]; then
+if python3 - <<'PY' "$python_version" "$required_version"; then
+import sys
+inst = tuple(map(int, sys.argv[1].split('.')[:2]))
+req = tuple(map(int, sys.argv[2].split('.')[:2]))
+sys.exit(0 if inst >= req else 1)
+PY
     print_success "Python $python_version found (>= $required_version required)"
 else
     print_error "Python $python_version found (>= $required_version required)"
@@ -85,15 +90,28 @@ if command -v poetry &> /dev/null; then
     print_success "Poetry $poetry_version found"
 else
     print_warning "Poetry not found. Installing..."
-    curl -sSL https://install.python-poetry.org | python3 -
+    installer="$(mktemp)"
+    curl -sSL https://install.python-poetry.org -o "$installer"
+    python3 "$installer"
+    rm -f "$installer"
     export PATH="$HOME/.local/bin:$PATH"
     print_success "Poetry installed"
 fi
 
 # Get project root directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_src="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+    resolved="$(readlink -f "${_src}" 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+        _src="$resolved"
+    fi
+fi
+SCRIPT_DIR="$(cd "$(dirname "${_src}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
+if ! cd "$PROJECT_ROOT"; then
+    print_error "Failed to enter project root: $PROJECT_ROOT"
+    exit 1
+fi
 
 # Install dependencies
 print_info "Installing Python dependencies with Poetry..."
@@ -124,7 +142,12 @@ if [ -z "$ARANGO_PASSWORD" ]; then
     echo "Please set: export ARANGO_PASSWORD='your_password'"
 else
     # Try to connect to ArangoDB
-    arango_host=${ARANGO_HOST:-192.168.1.69}
+    if [ -f .env ]; then
+        set -a
+        . ./.env
+        set +a
+    fi
+    arango_host=${ARANGO_HOST:-127.0.0.1}
     if curl -s -u root:"$ARANGO_PASSWORD" "http://$arango_host:8529/_api/version" > /dev/null 2>&1; then
         print_success "Connected to ArangoDB at $arango_host:8529"
     else

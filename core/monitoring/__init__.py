@@ -280,7 +280,7 @@ def calculate_context_score(local_coherence: float, instruction_fit: float,
 
 
 def calculate_conveyance(where: float, what: float, who: float, time: float,
-                        context: float, alpha: float = 1.8) -> float:
+                        context: float, alpha: float = 1.7) -> float:
     """
     Calculate Conveyance score using efficiency view.
 
@@ -304,8 +304,11 @@ def calculate_conveyance(where: float, what: float, who: float, time: float,
         Conveyance score
     """
     # Zero-propagation gate
-    if any(dim == 0 for dim in [where, what, who]) or time == 0:
+    if any(dim == 0 for dim in [where, what, who]):
         return 0.0
+
+    # Clamp time to avoid divide-by-zero while preserving efficiency relationship
+    time = max(time, 1e-9)
 
     # Efficiency view: C = (W·R·H/T)·Ctx^α
     base_conveyance = (what * where * who) / time

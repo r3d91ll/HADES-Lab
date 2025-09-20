@@ -25,6 +25,7 @@ import numpy as np
 
 from core.extractors import DoclingExtractor, LaTeXExtractor
 from core.embedders import JinaV4Embedder, ChunkWithEmbedding
+from core.embedders.embedders_base import EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -210,12 +211,20 @@ class DocumentProcessor:
         self.latex_extractor = LaTeXExtractor() if self.config.extract_equations else None
         
         # Initialize embedder with late chunking support
-        self.embedder = JinaV4Embedder(
-            device=self.config.device,
+        model_name = self.config.embedding_model or 'jinaai/jina-embeddings-v4'
+        if model_name.lower() in {'jina-v4', 'jinaai/jina-v4'}:
+            model_name = 'jinaai/jina-embeddings-v4'
+
+        embed_config = EmbeddingConfig(
+            model_name=model_name,
+            device=self.config.device or 'cuda',
+            batch_size=self.config.batch_size,
             use_fp16=self.config.use_fp16,
             chunk_size_tokens=self.config.chunk_size_tokens,
-            chunk_overlap_tokens=self.config.chunk_overlap_tokens
+            chunk_overlap_tokens=self.config.chunk_overlap_tokens,
         )
+
+        self.embedder = JinaV4Embedder(embed_config)
         
         # Setup staging directory if using RamFS
         if self.config.use_ramfs_staging:

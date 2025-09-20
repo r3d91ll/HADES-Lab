@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,11 +18,14 @@ import (
 )
 
 const (
-	defaultUpstreamSocket = "/tmp/arangodb.sock"
+	defaultUpstreamSocket = "/run/arangodb3/arangodb.sock"
 	defaultROListenSocket = "/run/hades/readonly/arangod.sock"
 	defaultRWListenSocket = "/run/hades/readwrite/arangod.sock"
-	socketPermissions     = 0o660
+	roSocketPermissions   = 0o640
+	rwSocketPermissions   = 0o600
 )
+
+var cursorPathRegexp = regexp.MustCompile(`^(/_db/[^/]+)?/_api/cursor(?:/[0-9]+)?$`)
 
 // UnixReverseProxy forwards HTTP requests to an upstream exposed via Unix socket.
 type UnixReverseProxy struct {
@@ -148,7 +152,15 @@ func getEnv(key, fallback string) string {
 
 func logRequests(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s", r.Method, r.URL.Path)
+		loggedPath := r.URL.Path
+		if r.URL.RawQuery != "" {
+			loggedPath += "?<redacted>"
+		}
+		log.Printf("%s %s", r.Method, loggedPath)
 		handler.ServeHTTP(w, r)
 	})
+}
+
+func isCursorPath(path string) bool {
+	return cursorPathRegexp.MatchString(path)
 }

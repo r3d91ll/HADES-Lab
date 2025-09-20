@@ -98,9 +98,14 @@ class ArXivAPIClient:
         self.last_request_time = 0
         
         # ArXiv API endpoints
-        self.api_base_url = "http://export.arxiv.org/api/query"
+        self.api_base_url = "https://export.arxiv.org/api/query"
         self.pdf_base_url = "https://arxiv.org/pdf"
         self.latex_base_url = "https://arxiv.org/e-print"
+
+        self.user_agent = os.getenv(
+            "HADES_USER_AGENT",
+            "HADES-Lab/1.0 (contact: support@hades.local)"
+        )
         
         logger.info(f"Initialized ArXiv API client with {rate_limit_delay}s rate limit")
     
@@ -116,17 +121,23 @@ class ArXivAPIClient:
         
         self.last_request_time = time.time()
     
-    def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+    def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None, *, stream: bool = False) -> requests.Response:
         """Make HTTP request with retries and error handling"""
         self._enforce_rate_limit()
-        
+
         for attempt in range(self.max_retries):
             try:
                 logger.debug(f"Request attempt {attempt + 1}: {url}")
-                response = requests.get(url, params=params, timeout=self.timeout)
+                response = requests.get(
+                    url,
+                    params=params,
+                    timeout=self.timeout,
+                    headers={"User-Agent": self.user_agent},
+                    stream=stream,
+                )
                 response.raise_for_status()
                 return response
-                
+
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Request failed (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:
@@ -136,7 +147,6 @@ class ArXivAPIClient:
                 else:
                     raise
         
-        raise requests.exceptions.RequestException("Max retries exceeded")
     
     def validate_arxiv_id(self, arxiv_id: str) -> bool:
         """
@@ -272,12 +282,18 @@ class ArXivAPIClient:
     
     def _check_latex_availability(self, arxiv_id: str) -> bool:
         """Check if LaTeX source is available for a paper"""
+        if os.getenv("HADES_CHECK_LATEX", "false").lower() != "true":
+            return False
         try:
             latex_url = f"{self.latex_base_url}/{arxiv_id}"
-            
+
             # Make a HEAD request to check availability
             self._enforce_rate_limit()
-            response = requests.head(latex_url, timeout=10)
+            response = requests.head(
+                latex_url,
+                timeout=10,
+                headers={"User-Agent": self.user_agent},
+            )
             
             # LaTeX is available if we get 200
             return response.status_code == 200
@@ -353,15 +369,19 @@ class ArXivAPIClient:
         try:
             logger.info(f"Downloading PDF for {arxiv_id}")
             pdf_url = f"{self.pdf_base_url}/{arxiv_id}.pdf"
-            
-            response = self._make_request(pdf_url)
-            
-            with open(pdf_path, 'wb') as f:
-                f.write(response.content)
-            
+
+            response = self._make_request(pdf_url, stream=True)
+            try:
+                with open(pdf_path, 'wb') as outfile:
+                    for chunk in response.iter_content(chunk_size=65536):
+                        if chunk:
+                            outfile.write(chunk)
+            finally:
+                response.close()
+
             file_size = pdf_path.stat().st_size
             logger.info(f"Downloaded PDF: {pdf_path} ({file_size:,} bytes)")
-            
+
         except Exception as e:
             logger.error(f"Failed to download PDF for {arxiv_id}: {e}")
             return DownloadResult(
@@ -375,14 +395,18 @@ class ArXivAPIClient:
             try:
                 logger.info(f"Downloading LaTeX for {arxiv_id}")
                 latex_url = f"{self.latex_base_url}/{arxiv_id}"
-                
-                response = self._make_request(latex_url)
-                
-                with open(latex_path, 'wb') as f:
-                    f.write(response.content)
-                
+
+                response = self._make_request(latex_url, stream=True)
+                try:
+                    with open(latex_path, 'wb') as outfile:
+                        for chunk in response.iter_content(chunk_size=65536):
+                            if chunk:
+                                outfile.write(chunk)
+                finally:
+                    response.close()
+
                 logger.info(f"Downloaded LaTeX: {latex_path}")
-                
+
             except Exception as e:
                 logger.warning(f"Failed to download LaTeX for {arxiv_id}: {e}")
                 # Don't fail the entire operation if LaTeX fails
