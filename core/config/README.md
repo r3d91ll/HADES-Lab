@@ -158,7 +158,7 @@ pipeline:
       use_fp16: true
     storage:
       database: "academy_store"
-      collection: "arxiv_papers"
+      collection: "arxiv_metadata"
 
 # Load hierarchical config
 config = ConfigManager.load_config("pipeline_config.yaml")

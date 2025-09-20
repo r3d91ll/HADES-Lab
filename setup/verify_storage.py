@@ -6,7 +6,7 @@ Verify that records are being stored properly in the database.
 import os
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Add project root to path (parent of setup/)
 project_root = Path(__file__).parent.parent
@@ -16,21 +16,31 @@ from core.database.database_factory import DatabaseFactory
 
 def verify_recent_records():
     """Check recently stored records."""
+    password = os.environ.get('ARANGO_PASSWORD')
+    if not password:
+        print(
+            "ERROR: ARANGO_PASSWORD environment variable not set. "
+            "Export the database password before running verify_storage.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     db = DatabaseFactory.get_arango_memory_service(
-        database='academy_store'
+        database='academy_store',
+        password=password,
     )
 
     print("Database Storage Verification")
     print("=" * 60)
 
     # Get counts
-    papers_count = db.execute_query("RETURN LENGTH(arxiv_papers)")[0]
-    embeddings_count = db.execute_query("RETURN LENGTH(arxiv_embeddings)")[0]
+    papers_count = db.execute_query("RETURN LENGTH(arxiv_metadata)")[0]
+    embeddings_count = db.execute_query("RETURN LENGTH(arxiv_abstract_embeddings)")[0]
     structures_count = db.execute_query("RETURN LENGTH(arxiv_structures)")[0]
 
     print(f"\nCollection Counts:")
-    print(f"  arxiv_papers:              {papers_count:,}")
-    print(f"  arxiv_embeddings:          {embeddings_count:,}")
+    print(f"  arxiv_metadata:            {papers_count:,}")
+    print(f"  arxiv_abstract_embeddings: {embeddings_count:,}")
     print(f"  arxiv_structures:          {structures_count:,}")
 
     # Check if counts are aligned (they should be close)
@@ -46,17 +56,17 @@ def verify_recent_records():
     try:
         # Get most recent from metadata
         rows = db.execute_query('''
-            FOR doc IN arxiv_papers
+            FOR doc IN arxiv_metadata
                 SORT doc.processing_timestamp DESC NULLS LAST
                 LIMIT 1
                 LET emb = FIRST(
-                    FOR e IN arxiv_embeddings
+                    FOR e IN arxiv_abstract_embeddings
                         FILTER e.arxiv_id == doc.arxiv_id
                         LIMIT 1
                         RETURN e
                 )
                 LET chunk_total = LENGTH(
-                    FOR c IN arxiv_chunks
+                    FOR c IN arxiv_abstract_chunks
                         FILTER c.arxiv_id == doc.arxiv_id
                         RETURN 1
                 )
@@ -96,13 +106,14 @@ def verify_recent_records():
     # Check processing rate over last minute
     print(f"\nRecent Processing Activity:")
     try:
-        one_min_ago = (datetime.now() - timedelta(minutes=1)).isoformat()
+        one_min_ago = datetime.now(timezone.utc) - timedelta(minutes=1)
+        one_min_ago_ms = int(one_min_ago.timestamp() * 1000)
         cursor = db.execute_query('''
-            FOR doc IN arxiv_papers
-                FILTER doc.processing_timestamp >= @time
+            FOR doc IN arxiv_metadata
+                FILTER DATE_TIMESTAMP(doc.processing_timestamp) >= @time
                 COLLECT WITH COUNT INTO count
                 RETURN count
-        ''', bind_vars={'time': one_min_ago})
+        ''', bind_vars={'time': one_min_ago_ms})
         recent_count = cursor[0] if cursor else 0
         print(f"  Records in last minute: {recent_count}")
         print(f"  Rate: ~{recent_count:.0f} records/minute")

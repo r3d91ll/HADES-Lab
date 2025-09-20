@@ -37,9 +37,9 @@ ROOT_PASSWORD="${ARANGO_PASSWORD:-}"
 
 # Collections to create
 COLLECTIONS=(
-    "arxiv_papers"
-    "arxiv_chunks"
-    "arxiv_embeddings"
+    "arxiv_metadata"
+    "arxiv_abstract_chunks"
+    "arxiv_abstract_embeddings"
     "arxiv_structures"
     "arxiv_processing_order"
     "arxiv_processing_stats"
@@ -279,132 +279,76 @@ fi
 # Test connection with new credentials
 print_info "Testing database connection..."
 
-# First test if we can import the arango_unix_client module
-if python3 -c "import sys; sys.path.insert(0, '.'); from core.database.arango_unix_client import get_database_for_workflow" 2>/dev/null; then
-    print_success "Using optimized arango_unix_client module"
-
-    # Test with the optimized client
-    python3 -c "
+python3 <<'PY'
 import os
-import sys
-sys.path.insert(0, '.')
-from core.database.arango_unix_client import get_optimized_client, get_database_for_workflow
+from datetime import datetime
+
+from core.database.database_factory import DatabaseFactory
+from core.database.arango import MemoryServiceError
 
 db_name = os.environ.get('DB_NAME', 'arxiv_repository')
 writer_user = os.environ.get('DB_WRITER_USER', 'arxiv_writer')
-writer_password = os.environ.get('DB_WRITER_PASSWORD', '')
+writer_password = os.environ.get('DB_WRITER_PASSWORD') or os.environ.get('ARANGO_PASSWORD')
+
+if not writer_password:
+    print('✗ Connection failed: database password not available')
+    raise SystemExit(1)
 
 try:
-    # Get optimized client
-    client = get_optimized_client(prefer_unix=True)
-    info = client.get_connection_info()
-
-    print(f'Connection configured:')
-    print(f'  Type: {\"Unix socket\" if info[\"using_unix\"] else \"HTTP\"}')
-    if info['using_unix']:
-        print(f'  Socket: {info[\"unix_socket\"]}')
-    else:
-        print(f'  Host: {info[\"http_host\"]}')
-
-    # Get database connection
-    db = get_database_for_workflow(
-        db_name=db_name,
+    client = DatabaseFactory.get_arango_memory_service(
+        database=db_name,
         username=writer_user,
         password=writer_password,
-        prefer_unix=True
+    )
+except Exception as exc:
+    print(f'✗ Connection failed: {exc}')
+    raise SystemExit(1)
+
+try:
+    result = client.execute_query('RETURN 1')
+    assert result == [1], 'Query test failed'
+
+    collections = client.execute_query(
+        """
+        FOR c IN _collections
+            FILTER !STARTS_WITH(c.name, '_')
+            RETURN c.name
+        """
     )
 
-    # Test query execution
-    result = list(db.aql.execute('RETURN 1'))
-    assert result == [1], 'Query test failed'
-
-    # Get collections
-    collections = db.collections()
-    user_collections = [c for c in collections if not c['name'].startswith('_')]
-
     print(f'✓ Successfully connected as {writer_user}')
-    print(f'  Collections: {len(user_collections)}')
+    print(f'  Collections: {len(collections)}')
 
-    # Test write permissions
-    test_collection = 'arxiv_papers'
-    if test_collection in [c['name'] for c in user_collections]:
-        try:
-            test_doc = db[test_collection].insert({'_key': '_test_permission', 'test': True})
-            db[test_collection].delete('_test_permission')
-            print(f'  Write permissions: ✓ Verified')
-        except:
-            print(f'  Write permissions: Read-only')
+    try:
+        client.execute_transaction(
+            write=["arxiv_metadata"],
+            action="""
+                function (params) {
+                    const db = require('@arangodb').db;
+                    db.arxiv_metadata.insert({_key: params.key, test: true, ts: params.ts});
+                    db.arxiv_metadata.remove(params.key);
+                    return true;
+                }
+            """,
+            params={
+                "key": "_test_permission",
+                "ts": datetime.utcnow().isoformat(),
+            },
+            wait_for_sync=True,
+        )
+        print('  Write permissions: ✓ Verified')
+    except MemoryServiceError:
+        print('  Write permissions: Read-only')
+except Exception as exc:
+    print(f'✗ Connection failed during verification: {exc}')
+    raise SystemExit(1)
+finally:
+    client.close()
 
-    # Performance comparison if Unix socket is available
-    if info['using_unix']:
-        print(f'\\n📊 Performance Note:')
-        print(f'  Unix sockets provide ~40% better throughput than TCP')
-        print(f'  This is optimal for local model datastores')
-
-except Exception as e:
-    print(f'✗ Connection failed: {e}')
-    exit(1)
-"
-else
-    print_warning "arango_unix_client module not found, using basic connection"
-
-    # Fallback to basic connection test
-    python3 -c "
-import os
-from arango import ArangoClient
-from pathlib import Path
-
-db_name = os.environ.get('DB_NAME', 'arxiv_repository')
-writer_user = os.environ.get('DB_WRITER_USER', 'arxiv_writer')
-writer_password = os.environ.get('DB_WRITER_PASSWORD', '')
-
-# Check for Unix socket
-unix_socket = os.environ.get('UNIX_SOCKET', '/tmp/arangodb.sock')
-use_unix = os.environ.get('USE_UNIX_SOCKET', 'true').lower() == 'true'
-
-# Determine connection URL
-if use_unix and os.path.exists(unix_socket) and Path(unix_socket).is_socket():
-    connection_url = f\"http+unix://{unix_socket.replace('/', '%2F')}\"
-    print(f'Testing Unix socket connection: {unix_socket}')
-else:
-    connection_url = os.environ.get('DB_HOST', 'http://localhost:8529')
-    print(f'Testing HTTP connection: {connection_url}')
-
-client = ArangoClient(hosts=connection_url)
-try:
-    # Test with writer credentials
-    db = client.db(db_name,
-                   username=writer_user,
-                   password=writer_password)
-
-    # Test query execution
-    result = list(db.aql.execute('RETURN 1'))
-    assert result == [1], 'Query test failed'
-
-    # Get collections
-    collections = db.collections()
-    user_collections = [c for c in collections if not c['name'].startswith('_')]
-
-    print(f'✓ Successfully connected as {writer_user}')
-    print(f'  Connection type: {\"Unix socket\" if \"unix\" in connection_url else \"HTTP\"}')
-    print(f'  Collections: {len(user_collections)}')
-
-    # Test write permissions
-    test_collection = 'arxiv_papers'
-    if test_collection in [c['name'] for c in user_collections]:
-        # Try a simple insert/delete to verify write permissions
-        try:
-            test_doc = db[test_collection].insert({'_key': '_test_permission', 'test': True})
-            db[test_collection].delete('_test_permission')
-            print(f'  Write permissions: ✓ Verified')
-        except:
-            print(f'  Write permissions: Read-only')
-
-except Exception as e:
-    print(f'✗ Connection failed: {e}')
-    exit(1)
-"
-fi
+print('\n📊 Performance Note:')
+print('  HTTP/2 over Unix sockets delivers the best throughput for local workflows.')
+print('  Configure LISTEN_SOCKET/UPSTREAM_SOCKET if using the bundled proxies.')
+PY
 
 if [ $? -eq 0 ]; then
     print_success "Database connection test passed"

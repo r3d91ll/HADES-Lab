@@ -198,9 +198,9 @@ class ArxivInitialIngestWorkflow:
         self.embedder_type = (embedder_type or os.environ.get('HADES_EMBEDDER', 'jina')).lower()
 
         # Collections
-        self.metadata_collection = 'arxiv_papers'
-        self.chunks_collection = 'arxiv_chunks'
-        self.embeddings_collection = 'arxiv_embeddings'
+        self.metadata_collection = 'arxiv_metadata'
+        self.chunks_collection = 'arxiv_abstract_chunks'
+        self.embeddings_collection = 'arxiv_abstract_embeddings'
         self.structures_collection = 'arxiv_structures'
 
         # Counters

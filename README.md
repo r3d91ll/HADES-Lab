@@ -22,7 +22,7 @@ config = ArangoHttp2Config(
     password="...",
 )
 with ArangoHttp2Client(config) as client:
-    doc = client.get_document("arxiv_papers", "0704_0003")
+    doc = client.get_document("arxiv_metadata", "0704_0003")
     print(doc)
 ```
 
@@ -34,7 +34,7 @@ memory_client = DatabaseFactory.get_arango_memory_service()
 try:
     documents = memory_client.execute_query(
         "FOR doc IN @@collection LIMIT 5 RETURN doc",
-        {"@collection": "arxiv_papers"},
+        {"@collection": "arxiv_metadata"},
     )
 finally:
     memory_client.close()
@@ -62,11 +62,17 @@ Example:
 poetry run python tests/benchmarks/arango_connection_test.py \
     --socket /run/hades/readonly/arangod.sock \
     --database arxiv_repository \
-    --collection arxiv_papers \
+    --collection arxiv_metadata \
     --key 0704_0001 --key 0704_0002 \
     --iterations 20 --concurrency 4 \
     --report-json reports/get_hot.json
 ```
+
+### Testing Infrastructure
+
+- The HTTP/2 memory client is now the default access path for automated tests.
+- Run `poetry run pytest tests/core/database/test_memory_client_config.py` for a quick sanity check.
+- Future regression suites should share the proxy-aware fixtures so workflows exercise the same transport stack.
 
 ### Production Hardening Notes
 

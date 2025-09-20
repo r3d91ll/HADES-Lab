@@ -157,15 +157,20 @@ def resolve_memory_config(
     proxies_requested = True if use_proxies is None else use_proxies
 
     if proxies_requested:
-        if read_socket is None and env_ro:
-            read_socket = env_ro
-        if write_socket is None and env_rw:
-            write_socket = env_rw
-        if read_socket is None and write_socket is None:
-            read_socket = "/run/hades/readonly/arangod.sock"
-            write_socket = "/run/hades/readwrite/arangod.sock"
+        default_ro = "/run/hades/readonly/arangod.sock"
+        default_rw = "/run/hades/readwrite/arangod.sock"
+
+        read_socket = read_socket or env_ro or default_ro
+        write_socket = write_socket or env_rw or default_rw
+
+        # If only one socket could be resolved, mirror it so we still have a
+        # functioning configuration instead of passing ``None`` into httpx.
+        if read_socket is None:
+            read_socket = write_socket or default_ro
+        if write_socket is None:
+            write_socket = read_socket or default_rw
     else:
-        direct_socket = env_direct or DEFAULT_ARANGO_SOCKET
+        direct_socket = socket_path or env_direct or DEFAULT_ARANGO_SOCKET
         read_socket = read_socket or direct_socket
         write_socket = write_socket or direct_socket
 

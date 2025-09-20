@@ -27,6 +27,16 @@ const (
 
 var cursorPathRegexp = regexp.MustCompile(`^(/_db/[^/]+)?/_api/cursor(?:/[0-9]+)?$`)
 
+var hopByHopHeaders = []string{
+	"Connection",
+	"Proxy-Connection",
+	"Keep-Alive",
+	"TE",
+	"Trailer",
+	"Transfer-Encoding",
+	"Upgrade",
+}
+
 type BodyPeeker func(limit int64) ([]byte, error)
 
 // UnixReverseProxy forwards HTTP requests to an upstream exposed via Unix socket.
@@ -77,17 +87,29 @@ func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			bodyConsumed = true
 		}()
-		data, err := io.ReadAll(r.Body)
-		if err != nil {
-			return nil, err
+
+		var buf bytes.Buffer
+		if limit > 0 {
+			lr := &io.LimitedReader{R: r.Body, N: limit + 1}
+			if _, err := buf.ReadFrom(lr); err != nil {
+				_ = r.Body.Close()
+				return nil, err
+			}
+			if lr.N <= 0 {
+				_ = r.Body.Close()
+				return nil, fmt.Errorf("request body exceeds inspection limit (%d bytes)", limit)
+			}
+		} else {
+			if _, err := buf.ReadFrom(r.Body); err != nil {
+				_ = r.Body.Close()
+				return nil, err
+			}
 		}
-		if limit > 0 && int64(len(data)) > limit {
-			return nil, fmt.Errorf("request body exceeds inspection limit (%d bytes)", limit)
-		}
-		cachedBody = data
+
 		if err := r.Body.Close(); err != nil {
 			log.Printf("warning: failed to close request body: %v", err)
 		}
+		cachedBody = append([]byte(nil), buf.Bytes()...)
 		return cachedBody, nil
 	}
 
@@ -130,12 +152,45 @@ func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func copyHeaders(dst, src http.Header) {
-	for key, values := range src {
+	cleaned := cloneHeader(src)
+	stripHopHeaders(cleaned)
+
+	for key := range dst {
 		dst.Del(key)
+	}
+
+	for key, values := range cleaned {
 		for _, value := range values {
 			dst.Add(key, value)
 		}
 	}
+}
+
+func stripHopHeaders(header http.Header) {
+	connectionValues := header.Values("Connection")
+	for _, value := range connectionValues {
+		for _, token := range strings.Split(value, ",") {
+			headerName := strings.TrimSpace(token)
+			if headerName == "" {
+				continue
+			}
+			header.Del(http.CanonicalHeaderKey(headerName))
+		}
+	}
+
+	for _, hopHeader := range hopByHopHeaders {
+		header.Del(hopHeader)
+	}
+}
+
+func cloneHeader(src http.Header) http.Header {
+	cloned := make(http.Header, len(src))
+	for key, values := range src {
+		copied := make([]string, len(values))
+		copy(copied, values)
+		cloned[key] = copied
+	}
+	return cloned
 }
 
 func buildUpstreamURL(r *http.Request) string {

@@ -28,70 +28,65 @@ class DatabaseFactory:
     """
 
     @classmethod
-    def get_arango(cls,
-                   database: str = "academy_store",
-                   username: str = "root",
-                   password: Optional[str] = None,
-                   host: str = "localhost",
-                   port: int = 8529,
-                   use_unix: bool = True,
-                   **kwargs) -> Any:
-        """
-        Get ArangoDB connection.
+    def get_arango(
+        cls,
+        database: str = "academy_store",
+        username: str = "root",
+        password: Optional[str] = None,
+        host: str = "localhost",
+        port: int = 8529,
+        use_unix: Optional[bool] = None,
+        base_url: Optional[str] = None,
+        socket_path: Optional[str] = None,
+        read_socket: Optional[str] = None,
+        write_socket: Optional[str] = None,
+        use_proxies: Optional[bool] = None,
+        connect_timeout: Optional[float] = None,
+        read_timeout: Optional[float] = None,
+        write_timeout: Optional[float] = None,
+        **_: Any,
+    ) -> ArangoMemoryClient:
+        """Return the optimized ArangoDB memory client.
 
-        Args:
-            database: Database name
-            username: Username
-            password: Password (or from env)
-            host: Database host
-            port: Database port
-            use_unix: Use Unix socket if available
-            **kwargs: Additional connection options
-
-        Returns:
-            ArangoDB connection object
+        The legacy python-arango client has been removed; this helper now wraps
+        :func:`resolve_memory_config` and returns :class:`ArangoMemoryClient` so
+        existing call-sites can seamlessly adopt the HTTP/2 pathway.
         """
-        # Get password from environment if not provided
+
         if password is None:
-            password = os.environ.get('ARANGO_PASSWORD')
+            password = os.environ.get("ARANGO_PASSWORD")
             if not password:
                 raise ValueError("ArangoDB password required (set ARANGO_PASSWORD env var)")
 
-        # Try Unix socket first if requested
-        if use_unix:
-            try:
-                from .arango_unix_client import get_database_for_workflow
-                db = get_database_for_workflow(
-                    db_name=database,
-                    username=username,
-                    password=password,
-                    prefer_unix=True
-                )
-                logger.info("✓ Using Unix socket for ArangoDB connection")
-                return db
-            except ImportError as e:
-                logger.error("Unix socket client not available - this is required for HADES")
-                raise RuntimeError("Unix socket connection is mandatory for HADES. Network access not allowed.") from e
-            except Exception as e:
-                logger.error(f"Unix socket connection failed: {e}")
-                raise RuntimeError(f"Unix socket connection failed. Network fallback not allowed for HADES: {e}") from e
+        # Preserve the old ``use_unix`` flag by mapping it to proxy usage when
+        # callers still provide it.
+        if use_unix is not None:
+            use_proxies = True if use_unix else False
 
-        # Network connection - ONLY for human debugging, never for HADES
-        if host not in {"localhost", "127.0.0.1", "::1"}:
-            if os.environ.get("HADES_ALLOW_NETWORK_DEBUG") != "true":
-                raise RuntimeError("Network connections are disabled (set HADES_ALLOW_NETWORK_DEBUG=true to override).")
-            logger.warning("Network connection requested - debugging only")
-        try:
-            from arango import ArangoClient
-            client = ArangoClient(hosts=f'http://{host}:{port}')
-            db = client.db(database, username=username, password=password)
-            logger.info(f"✓ Connected to ArangoDB via HTTP at {host}:{port} (debugging only)")
-            return db
-        except ImportError:
-            raise ImportError("python-arango not installed. Run: pip install python-arango")
-        except Exception as e:
-            logger.error(f"Failed to connect to ArangoDB: {e}")
-            raise
+        # Build a base URL from host/port when one was not explicitly supplied.
+        if base_url is None and host:
+            base_url = f"http://{host}:{port}"
+
+        config = resolve_memory_config(
+            database=database,
+            username=username,
+            password=password,
+            base_url=base_url,
+            socket_path=socket_path,
+            read_socket=read_socket,
+            write_socket=write_socket,
+            use_proxies=use_proxies,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            write_timeout=write_timeout,
+        )
+
+        logger.info(
+            "✓ Using Arango memory client via HTTP/2 (read_socket=%s, write_socket=%s)",
+            config.read_socket,
+            config.write_socket,
+        )
+        return ArangoMemoryClient(config)
 
     @classmethod
     def get_postgres(cls,

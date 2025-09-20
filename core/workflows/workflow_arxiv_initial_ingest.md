@@ -36,9 +36,9 @@ JSON Metadata File (2.8M records on NVME)
 [Storage Thread: Database Writer]
         ↓
     ArangoDB (via HTTP/2 memory client)
-    ├── arxiv_papers (papers)
-    ├── arxiv_chunks (text segments)
-    ├── arxiv_embeddings (vectors)
+    ├── arxiv_metadata (papers)
+    ├── arxiv_abstract_chunks (text segments)
+    ├── arxiv_abstract_embeddings (vectors)
     └── arxiv_structures (document structure)
 ```
 
@@ -111,9 +111,9 @@ python core/workflows/workflow_arxiv_initial_ingest_balanced.py \
 ### Database
 - **Database**: `arxiv_repository`
 - **Collections**:
-  - `arxiv_papers` - Paper metadata
-  - `arxiv_chunks` - Text chunks
-  - `arxiv_embeddings` - Vector embeddings
+  - `arxiv_metadata` - Paper metadata
+  - `arxiv_abstract_chunks` - Text chunks
+  - `arxiv_abstract_embeddings` - Vector embeddings
   - `arxiv_structures` - Document structure metadata
 
 ### Embedder

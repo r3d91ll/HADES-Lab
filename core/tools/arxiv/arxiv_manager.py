@@ -425,8 +425,8 @@ class ArXivManager:
         Persist ArXiv processing results and extracted artifacts to the configured ArangoDB collections.
         
         If no database client is configured, the call is a no-op (it logs a warning and returns). When a client is present, this inserts:
-        - a main document into the `arxiv_papers` collection (keyed by paper_info.sanitized_id) containing ArXiv metadata and processing metrics;
-        - one document per text chunk with embeddings into `arxiv_embeddings`;
+        - a main document into the `arxiv_metadata` collection (keyed by paper_info.sanitized_id) containing ArXiv metadata and processing metrics;
+        - one document per text chunk with embeddings into `arxiv_abstract_embeddings`;
         - an optional `arxiv_structures` document containing tables, equations, images, and figures when any are present.
         
         Errors raised by the DB manager or during document insertion are logged and re-raised.
@@ -514,13 +514,13 @@ function (params) {
   const structures = params.structures || [];
 
   if (papers.length) {
-    db.arxiv_papers.insert(papers, { overwriteMode: 'replace' });
+    db.arxiv_metadata.insert(papers, { overwriteMode: 'replace' });
   }
   if (chunks.length) {
-    db.arxiv_chunks.insert(chunks, { overwriteMode: 'replace' });
+    db.arxiv_abstract_chunks.insert(chunks, { overwriteMode: 'replace' });
   }
   if (embeddings.length) {
-    db.arxiv_embeddings.insert(embeddings, { overwriteMode: 'replace' });
+    db.arxiv_abstract_embeddings.insert(embeddings, { overwriteMode: 'replace' });
   }
   if (structures.length) {
     db.arxiv_structures.insert(structures, { overwriteMode: 'replace' });
@@ -543,7 +543,7 @@ function (params) {
             }
 
             result_summary = self.db_client.execute_transaction(
-                write=['arxiv_papers', 'arxiv_chunks', 'arxiv_embeddings', 'arxiv_structures'],
+                write=['arxiv_metadata', 'arxiv_abstract_chunks', 'arxiv_abstract_embeddings', 'arxiv_structures'],
                 action=transaction_action,
                 params=transaction_params,
             )

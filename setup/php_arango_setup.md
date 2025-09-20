@@ -61,7 +61,7 @@ php core/database/arango/php_unix_bridge.php check_collections
 
 ### Bulk Insert Example
 ```bash
-echo '{"collection":"arxiv_papers","documents":[{"_key":"test","title":"Test"}]}' | \
+echo '{"collection":"arxiv_metadata","documents":[{"_key":"test","title":"Test"}]}' | \
 php core/database/arango/php_unix_bridge.php bulk_insert
 ```
 
@@ -71,9 +71,9 @@ php core/database/arango/php_unix_bridge.php bulk_insert
 - PHP can connect to ArangoDB via TCP
 - PHP can see all collections correctly
 - PHP reports correct document counts:
-- arxiv_papers: 2,828,974 documents
-- arxiv_embeddings: 728,960 documents
-- arxiv_chunks: 0 documents
+- arxiv_metadata: 2,828,974 documents
+- arxiv_abstract_embeddings: 728,960 documents
+- arxiv_abstract_chunks: 0 documents
 
 ⚠️ **TODO**:
 - Fix Unix socket permissions (currently getting "Permission denied")

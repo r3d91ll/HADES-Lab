@@ -57,7 +57,7 @@ try {
         case 'create_collections':
             // Create the required collections
             $collectionHandler = new CollectionHandler($connection);
-            $collections = ['arxiv_papers', 'arxiv_embeddings', 'arxiv_chunks', 'arxiv_structures'];
+            $collections = ['arxiv_metadata', 'arxiv_abstract_embeddings', 'arxiv_abstract_chunks', 'arxiv_structures'];
             $created = [];
 
             foreach ($collections as $name) {
@@ -85,7 +85,7 @@ try {
         case 'drop_collections':
             // Drop collections
             $collectionHandler = new CollectionHandler($connection);
-            $collections = ['arxiv_papers', 'arxiv_embeddings', 'arxiv_chunks', 'arxiv_structures'];
+            $collections = ['arxiv_metadata', 'arxiv_abstract_embeddings', 'arxiv_abstract_chunks', 'arxiv_structures'];
             $dropped = [];
 
             foreach ($collections as $name) {
@@ -107,7 +107,7 @@ try {
         case 'check_collections':
             // Check collection status
             $collectionHandler = new CollectionHandler($connection);
-            $collections = ['arxiv_papers', 'arxiv_embeddings', 'arxiv_chunks', 'arxiv_structures'];
+            $collections = ['arxiv_metadata', 'arxiv_abstract_embeddings', 'arxiv_abstract_chunks', 'arxiv_structures'];
             $status = [];
 
             foreach ($collections as $name) {
@@ -140,7 +140,7 @@ try {
                 throw new \Exception("Invalid JSON input");
             }
 
-            $collectionName = $data['collection'] ?? 'arxiv_papers';
+            $collectionName = $data['collection'] ?? 'arxiv_metadata';
             $documents = $data['documents'] ?? [];
 
             $documentHandler = new DocumentHandler($connection);
@@ -194,7 +194,7 @@ try {
         case 'stats':
             // Get database statistics
             $collectionHandler = new CollectionHandler($connection);
-            $collections = ['arxiv_papers', 'arxiv_embeddings', 'arxiv_chunks', 'arxiv_structures'];
+            $collections = ['arxiv_metadata', 'arxiv_abstract_embeddings', 'arxiv_abstract_chunks', 'arxiv_structures'];
             $stats = [
                 'connection' => 'unix:///tmp/arangodb.sock',
                 'database' => 'arxiv_repository',

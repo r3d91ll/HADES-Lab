@@ -158,6 +158,14 @@ def build_record(
     time_seconds = raw_value / scale if scale != 0 else raw_value
     time_seconds = max(time_seconds, 1e-9)
 
+    try:
+        alpha_value = float(alpha)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("alpha must be a numeric value between 1.5 and 2.0") from exc
+
+    if not 1.5 <= alpha_value <= 2.0:
+        raise ValueError("alpha must be between 1.5 and 2.0 (inclusive)")
+
     ctx_value = context.weighted_sum()
     conveyance_payload = compute_conveyance(
         what=what,
@@ -165,7 +173,7 @@ def build_record(
         who=who,
         time_seconds=time_seconds,
         ctx_value=ctx_value,
-        alpha=alpha,
+        alpha=alpha_value,
     )
 
     record = {
@@ -181,7 +189,7 @@ def build_record(
         "what": what,
         "where": where,
         "who": who,
-        "alpha": alpha,
+        "alpha": alpha_value,
         "context": context.as_dict(),
         "notes": notes,
     }

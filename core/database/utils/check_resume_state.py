@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 import sys
@@ -34,17 +34,17 @@ def _count_documents(db, collection: str) -> int:
 
 
 def _print_recent_papers(db) -> None:
-    """Display the most recent processed papers."""
+    """Display the most recent processed metadata records."""
     print("\nRecent Papers")
     print("-" * 60)
     try:
         rows = db.execute_query(
             """
-            FOR doc IN arxiv_papers
+            FOR doc IN arxiv_metadata
                 SORT doc.processing_timestamp DESC NULLS LAST
                 LIMIT 5
                 LET emb = FIRST(
-                    FOR e IN arxiv_embeddings
+                    FOR e IN arxiv_abstract_embeddings
                         FILTER e.arxiv_id == doc.arxiv_id
                         LIMIT 1
                         RETURN e
@@ -63,7 +63,7 @@ def _print_recent_papers(db) -> None:
             """
         )
     except MemoryServiceError:
-        print("No arxiv_papers collection available yet.")
+        print("No arxiv_metadata collection available yet.")
         return
 
     if not rows:
@@ -83,23 +83,24 @@ def _print_recent_papers(db) -> None:
 
 
 def _print_recent_activity(db) -> None:
-    """Show records processed in the last minute."""
+    """Show metadata records processed in the last minute."""
     print("\nRecent Activity (last minute)")
     print("-" * 60)
-    since = (datetime.now() - timedelta(minutes=1)).isoformat()
+    since = datetime.now(timezone.utc) - timedelta(minutes=1)
+    since_ms = int(since.timestamp() * 1000)
     try:
         result = db.execute_query(
             """
-            FOR doc IN arxiv_papers
-                FILTER doc.processing_timestamp >= @ts
+            FOR doc IN arxiv_metadata
+                FILTER DATE_TIMESTAMP(doc.processing_timestamp) >= @ts
                 COLLECT WITH COUNT INTO count
                 RETURN count
             """,
-            bind_vars={"ts": since},
+            bind_vars={"ts": since_ms},
         )
         recent = int(result[0]) if result else 0
-        print(f"Papers processed: {recent}")
-        print(f"Rate: ~{recent:.0f} papers/minute")
+        print(f"Metadata records processed: {recent}")
+        print(f"Rate: ~{recent:.0f} records/minute")
     except MemoryServiceError as exc:
         print(f"Unable to query recent activity: {exc.details()}")
 
@@ -160,20 +161,13 @@ def main() -> None:
     print("CURRENT DATABASE STATE")
     print("=" * 60)
 
-    papers_count = _count_documents(db, "arxiv_papers")
-    embeddings_count = _count_documents(db, "arxiv_embeddings")
+    metadata_count = _count_documents(db, "arxiv_metadata")
+    embeddings_count = _count_documents(db, "arxiv_abstract_embeddings")
     structures_count = _count_documents(db, "arxiv_structures")
-    legacy_metadata = _count_documents(db, "arxiv_metadata")
 
-    print(f"arxiv_papers:      {papers_count:,}")
-    print(f"arxiv_embeddings:  {embeddings_count:,}")
-    print(f"arxiv_structures:  {structures_count:,}")
-    if legacy_metadata:
-        legacy_embeddings = _count_documents(db, "arxiv_abstract_embeddings")
-        legacy_chunks = _count_documents(db, "arxiv_abstract_chunks")
-        print(f"arxiv_metadata:    {legacy_metadata:,} (legacy)")
-        print(f"legacy embeddings: {legacy_embeddings:,}")
-        print(f"legacy chunks:     {legacy_chunks:,}")
+    print(f"arxiv_metadata:             {metadata_count:,}")
+    print(f"arxiv_abstract_embeddings:  {embeddings_count:,}")
+    print(f"arxiv_structures:           {structures_count:,}")
 
     _print_recent_papers(db)
     _print_recent_activity(db)

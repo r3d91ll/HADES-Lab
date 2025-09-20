@@ -254,7 +254,7 @@ python workflow_pdf_batch.py \
     --num-workers 32
 
 # Run ArXiv metadata workflow
-python workflow_arxiv_metadata.py \
+python workflow_arxiv_initial_ingest.py \
     --config ../config/workflows/arxiv_metadata_default.yaml
 ```
 
