@@ -1,6 +1,6 @@
 # Issue 46: Remove redundant SentenceTransformersEmbedder and standardize on JinaV4
 
-- Source: https://github.com/r3d91ll/HADES-Lab/issues/46
+- Source: <https://github.com/r3d91ll/HADES-Lab/issues/46>
 - Created: 2025-09-17
 - Author: r3d91ll
 - Status: open

@@ -154,22 +154,25 @@ def resolve_memory_config(
     env_rw = env.get("ARANGO_RW_SOCKET")
     env_direct = env.get("ARANGO_SOCKET")
 
-    if read_socket is None and env_ro:
-        read_socket = env_ro
-    if write_socket is None and env_rw:
-        write_socket = env_rw
+    proxies_requested = True if use_proxies is None else use_proxies
 
-    if socket_path and not (read_socket or write_socket):
-        read_socket = socket_path
-        write_socket = socket_path
+    if proxies_requested:
+        default_ro = "/run/hades/readonly/arangod.sock"
+        default_rw = "/run/hades/readwrite/arangod.sock"
 
-    if read_socket is None and write_socket is None:
-        read_socket = "/run/hades/readonly/arangod.sock"
-        write_socket = "/run/hades/readwrite/arangod.sock"
+        read_socket = read_socket or env_ro or default_ro
+        write_socket = write_socket or env_rw or default_rw
 
-    if env_direct and (read_socket is None or write_socket is None):
-        read_socket = read_socket or env_direct
-        write_socket = write_socket or env_direct
+        # If only one socket could be resolved, mirror it so we still have a
+        # functioning configuration instead of passing ``None`` into httpx.
+        if read_socket is None:
+            read_socket = write_socket or default_ro
+        if write_socket is None:
+            write_socket = read_socket or default_rw
+    else:
+        direct_socket = socket_path or env_direct or DEFAULT_ARANGO_SOCKET
+        read_socket = read_socket or direct_socket
+        write_socket = write_socket or direct_socket
 
     connect_timeout = connect_timeout if connect_timeout is not None else _parse_timeout(env.get("ARANGO_CONNECT_TIMEOUT"), 5.0)
     read_timeout = read_timeout if read_timeout is not None else _parse_timeout(env.get("ARANGO_READ_TIMEOUT"), 30.0)
@@ -236,23 +239,72 @@ class ArangoMemoryClient:
         except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
             raise self._wrap_error(exc) from exc
 
-    def bulk_insert(self, collection: str, documents: Iterable[dict[str, Any]]) -> int:
-        payload = list(documents)
-        if not payload:
-            return 0
-        try:
-            response = self._write_client.insert_documents(collection, payload)
-        except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
-            raise self._wrap_error(exc) from exc
+    def bulk_insert(
+        self,
+        collection: str,
+        documents: Iterable[dict[str, Any]],
+        *,
+        chunk_size: int = 1000,
+    ) -> int:
+        total_inserted = 0
+        batch: list[dict[str, Any]] = []
 
-        created = response.get("created")
-        if isinstance(created, int):
-            return created
-        return len(payload)
+        def flush() -> int:
+            if not batch:
+                return 0
+            try:
+                response = self._write_client.insert_documents(collection, batch)
+            except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
+                raise self._wrap_error(exc) from exc
+            created = response.get("created")
+            return int(created) if isinstance(created, int) else len(batch)
+
+        for doc in documents:
+            batch.append(doc)
+            if len(batch) >= chunk_size:
+                total_inserted += flush()
+                batch.clear()
+
+        if batch:
+            total_inserted += flush()
+            batch.clear()
+
+        return total_inserted
 
     def get_document(self, collection: str, key: str) -> dict[str, Any]:
         try:
             return self._read_client.get_document(collection, key)
+        except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
+            raise self._wrap_error(exc) from exc
+
+    def execute_transaction(
+        self,
+        *,
+        write: Sequence[str],
+        read: Sequence[str] | None = None,
+        exclusive: Sequence[str] | None = None,
+        action: str,
+        params: dict[str, Any] | None = None,
+        wait_for_sync: bool | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "collections": {
+                "write": list(write),
+            },
+            "action": action,
+            "params": params or {},
+        }
+
+        if read:
+            payload["collections"]["read"] = list(read)
+        if exclusive:
+            payload["collections"]["exclusive"] = list(exclusive)
+        if wait_for_sync is not None:
+            payload["waitForSync"] = bool(wait_for_sync)
+
+        path = f"/_db/{self._config.database}/_api/transaction"
+        try:
+            return self._write_client.request("POST", path, json=payload)
         except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
             raise self._wrap_error(exc) from exc
 
@@ -267,28 +319,48 @@ class ArangoMemoryClient:
                 raise self._wrap_error(exc) from exc
 
     def create_collections(self, definitions: Iterable[CollectionDefinition]) -> None:
-        for definition in definitions:
-            options = dict(definition.options or {})
-            collection_type = 3 if definition.type.lower() == "edge" else 2
-            options.setdefault("type", collection_type)
-            options.setdefault("name", definition.name)
-            path = f"/_db/{self._config.database}/_api/collection"
-            try:
-                self._write_client.request("POST", path, json=options)
-            except ArangoHttpError as exc:
-                if exc.status_code != 409:
-                    raise self._wrap_error(exc) from exc
+        created: list[str] = []
+        try:
+            for definition in definitions:
+                options = dict(definition.options or {})
+                collection_type = 3 if definition.type.lower() == "edge" else 2
+                options.setdefault("type", collection_type)
+                options.setdefault("name", definition.name)
+                path = f"/_db/{self._config.database}/_api/collection"
 
-            if definition.indexes:
-                for index in definition.indexes:
-                    index_path = f"/_db/{self._config.database}/_api/index"
-                    params = {"collection": definition.name}
-                    try:
-                        self._write_client.request("POST", index_path, json=index, params=params)
-                    except ArangoHttpError as exc:
-                        # Ignore duplicate index errors (already exists)
-                        if exc.status_code != 409:
-                            raise self._wrap_error(exc) from exc
+                try:
+                    self._write_client.request("POST", path, json=options)
+                except ArangoHttpError as exc:
+                    if exc.status_code != 409:
+                        raise
+                else:
+                    created.append(definition.name)
+
+                if definition.indexes:
+                    for index in definition.indexes:
+                        index_path = f"/_db/{self._config.database}/_api/index"
+                        params = {"collection": definition.name}
+                        try:
+                            self._write_client.request("POST", index_path, json=index, params=params)
+                        except ArangoHttpError as exc:
+                            if exc.status_code != 409:
+                                raise
+        except ArangoHttpError as exc:
+            self._rollback_created(created)
+            raise self._wrap_error(exc) from exc
+        except Exception:
+            self._rollback_created(created)
+            raise
+
+    def _rollback_created(self, created: Sequence[str]) -> None:
+        """Attempt to drop collections created earlier in this call."""
+        for name in reversed(created):
+            path = f"/_db/{self._config.database}/_api/collection/{name}"
+            try:
+                self._write_client.request("DELETE", path)
+            except ArangoHttpError:
+                # Suppress rollback errors; best-effort cleanup
+                continue
 
     # Internal helpers --------------------------------------------------
     def _wrap_error(self, error: ArangoHttpError) -> MemoryServiceError:

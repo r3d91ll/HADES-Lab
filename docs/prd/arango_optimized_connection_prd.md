@@ -4,6 +4,18 @@
 
 We evaluated and implemented a custom HTTP/2 client over Unix sockets to replace the PHP subprocess bridge. The new client reduces request latency by more than 10x (GET <1 ms, bulk insert of 1,000 documents ≈6 ms, query ≈0.7 ms) and supports proxy-based process isolation.
 
+## Conveyance Scorecard (Efficiency stance)
+
+| Dimension | Score | Evidence |
+|-----------|-------|----------|
+| **W** (What) | 0.95 | Full-response verification and payload integrity checks in the Phase 4 harness. |
+| **R** (Where) | 0.92 | Dedicated RO/RW proxies on `/run/hades/...` with systemd-managed credentials. |
+| **H** (Who) | 0.93 | Optimised Python client with HTTP/2 multiplexing; bounded connection pool. |
+| **T** (Time) | 0.97 | Hot-cache p95 latency ≤1.0 ms (see [Phase 4 benchmarks](../benchmarks/arango_phase4_summary.md)). |
+| **Ctx** (L/I/A/G) | 0.90 | L=0.90, I=0.90, A=0.90, G=0.90 via observability playbooks and isolation hardening. |
+
+Using α = 1.7, Conveyance = (W·R·H / T) · Ctx^α ≈ **0.70**.
+
 ## Phase 1 – Prototype & Benchmark (Completed)
 - HTTP/2 client (`core/database/arango/optimized_client.py`) with GET, insert, and query operations.
 - Manual benchmark harness under `tests/benchmarks/arango_connection_test.py`.
@@ -29,7 +41,7 @@ We evaluated and implemented a custom HTTP/2 client over Unix sockets to replace
   - Emits JSON reports to backfill cold vs hot curves.
 - HTTP/2 enforcement: client now rejects non-H2 responses so regressions surface immediately.
 - Proxy boundary formalised as the "neural process isolation" layer; documentation tracks systemd socket ownership and permissions plan.
-- Updated success targets (single host, hot cache):
+- Updated success targets (single host, HTTP/2 over `/run/hades/...` proxies with warm cache; raw data in [Phase 4 benchmarks](../benchmarks/arango_phase4_summary.md)):
   - **GET by key**: p95 ≤ 1.0 ms, p99 ≤ 1.5 ms.
   - **AQL cursor (1k docs)**: p95 ≤ 2.0 ms, p99 ≤ 3.0 ms.
   - **Bulk insert 1k docs (~1 KB, waitForSync=false)**: median ≤ 10 ms, p95 ≤ 15 ms.
@@ -50,3 +62,8 @@ We evaluated and implemented a custom HTTP/2 client over Unix sockets to replace
 - Implement streaming cursor support and adaptive connection pooling once workload patterns justify it.
 - Publish systemd/socket deployment runbooks for the RO/RW proxy pair and peer-credential enforcement.
 - Investigate optional RAM caching for high-frequency hot sets if latency margins tighten further.
+
+## Meta
+
+- **Version:** 2025.09.20
+- **Last updated:** 2025-09-20

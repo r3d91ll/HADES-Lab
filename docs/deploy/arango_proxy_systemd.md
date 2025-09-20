@@ -33,7 +33,7 @@ SocketMode=0640
 RemoveOnStop=yes
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=sockets.target
 ```
 
 ```ini
@@ -50,7 +50,7 @@ SocketMode=0600
 RemoveOnStop=yes
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=sockets.target
 ```
 
 ## Service Units
@@ -65,7 +65,7 @@ After=arangodb3.service
 [Service]
 ExecStart=/usr/local/bin/hades-arango-ro-proxy
 Environment=LISTEN_SOCKET=/run/hades/readonly/arangod.sock
-Environment=UPSTREAM_SOCKET=/tmp/arangodb.sock
+Environment=UPSTREAM_SOCKET=/run/arangodb3/arangodb.sock
 User=arangodb
 Group=arangodb
 Restart=on-failure
@@ -84,7 +84,7 @@ After=arangodb3.service
 [Service]
 ExecStart=/usr/local/bin/hades-arango-rw-proxy
 Environment=LISTEN_SOCKET=/run/hades/readwrite/arangod.sock
-Environment=UPSTREAM_SOCKET=/tmp/arangodb.sock
+Environment=UPSTREAM_SOCKET=/run/arangodb3/arangodb.sock
 User=arangodb
 Group=arangodb
 Restart=on-failure
@@ -103,6 +103,7 @@ shipped alongside the deployment.
 sudo mkdir -p /run/hades/readonly /run/hades/readwrite
 sudo chown inference:hades /run/hades/readonly
 sudo chown consolidation:hades /run/hades/readwrite
+# Replace the user/group pairs above if your deployment uses different service accounts.
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now hades-arango-ro.socket hades-arango-rw.socket
@@ -124,4 +125,3 @@ tears down and recreates the proxy sockets.
 If you need belt-and-suspenders protection, wrap the proxy binary with a
 small launcher that verifies `SO_PEERCRED` on accepted connections and
 rejects unexpected UIDs/GIDs before proxying traffic.
-

@@ -140,15 +140,15 @@ class ArangoDocumentProvider(DocumentProvider):
     
     def get_document_chunks(self, document_id: str) -> List[str]:
         """
-        Retrieve ordered text chunks for a paper from the ArangoDB `arxiv_chunks` collection.
+        Retrieve ordered text chunks for a paper from the ArangoDB `arxiv_abstract_chunks` collection.
         
-        Given a paper identifier, queries the `arxiv_chunks` collection for documents with matching
+        Given a paper identifier, queries the `arxiv_abstract_chunks` collection for documents with matching
         `paper_id`, sorts results by `chunk_index` ascending, and returns the list of chunk texts.
         On any error (including query failure) an empty list is returned.
         """
         try:
             cursor = self.db.aql.execute("""
-            FOR chunk IN arxiv_chunks
+            FOR chunk IN arxiv_abstract_chunks
                 FILTER chunk.paper_id == @paper_id
                 SORT chunk.chunk_index ASC
                 RETURN chunk.text

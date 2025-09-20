@@ -37,8 +37,6 @@ gpu_device: "cuda:0"
 # Checkpoint Configuration (Default)
 checkpoint_interval: 10000
 resume_from_checkpoint: true
-checkpoint_file: "/tmp/arxiv_metadata_checkpoint.json"
-state_file: "/tmp/arxiv_metadata_state.json"
 
 # Performance Monitoring (Default)
 monitor_interval: 100

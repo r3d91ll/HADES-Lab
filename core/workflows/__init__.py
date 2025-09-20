@@ -11,20 +11,24 @@ This module replaces scattered orchestration code with a unified structure.
 from .workflow_base import WorkflowBase, WorkflowConfig, WorkflowResult
 
 # Import specific workflows if they exist
-try:
-    from .workflow_pdf import PDFWorkflow
-except ImportError:
-    pass
+PDFWorkflow = None
+BatchPDFWorkflow = None
+ArxivInitialIngestWorkflow = None
 
 try:
-    from .workflow_pdf_batch import BatchPDFWorkflow
+    from .workflow_pdf import PDFWorkflow  # type: ignore[assignment]
 except ImportError:
-    pass
+    PDFWorkflow = None
 
 try:
-    from .workflow_arxiv_metadata import ArxivMetadataWorkflow
+    from .workflow_pdf_batch import BatchPDFWorkflow  # type: ignore[assignment]
 except ImportError:
-    pass
+    BatchPDFWorkflow = None
+
+try:
+    from .workflow_arxiv_initial_ingest import ArxivInitialIngestWorkflow  # type: ignore[assignment]
+except ImportError:
+    ArxivInitialIngestWorkflow = None
 
 # State management
 from .state import StateManager, CheckpointManager
@@ -36,7 +40,11 @@ __all__ = [
     'WorkflowResult',
     'StateManager',
     'CheckpointManager',
-    'PDFWorkflow',
-    'BatchPDFWorkflow',
-    'ArxivMetadataWorkflow',
 ]
+
+if PDFWorkflow is not None:
+    __all__.append('PDFWorkflow')
+if BatchPDFWorkflow is not None:
+    __all__.append('BatchPDFWorkflow')
+if ArxivInitialIngestWorkflow is not None:
+    __all__.append('ArxivInitialIngestWorkflow')

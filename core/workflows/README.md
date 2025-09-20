@@ -434,9 +434,9 @@ workflow:
     type: arango
     database: academy_store
     collections:
-      papers: arxiv_papers
-      chunks: arxiv_chunks
-      embeddings: arxiv_embeddings
+      metadata: arxiv_metadata
+      chunks: arxiv_abstract_chunks
+      embeddings: arxiv_abstract_embeddings
 
   error_handling:
     max_retries: 3

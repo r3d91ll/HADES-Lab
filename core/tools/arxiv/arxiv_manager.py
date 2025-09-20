@@ -18,6 +18,7 @@ import re
 import json
 import logging
 import asyncio
+from functools import partial
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple, Union
@@ -28,7 +29,10 @@ from core.workflows.workflow_pdf import (
     ProcessingConfig,
     ProcessingResult
 )
-from core.database.arango.arango_client import ArangoDBManager
+from core.database.arango import (
+    ArangoMemoryClient,
+    resolve_memory_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +106,11 @@ class ArXivValidator:
         base_id = re.sub(r'v\d+$', '', arxiv_id)
         
         # Check new format (YYMM.NNNNN)
-        if cls.ARXIV_ID_PATTERN.match(arxiv_id):
+        if cls.ARXIV_ID_PATTERN.match(base_id):
             return True, None
-        
+
         # Check old format (category/YYMMNNN)
-        if cls.OLD_ARXIV_ID_PATTERN.match(arxiv_id):
+        if cls.OLD_ARXIV_ID_PATTERN.match(base_id):
             return True, None
         
         return False, f"Invalid ArXiv ID format: {arxiv_id}"
@@ -250,8 +254,11 @@ class ArXivManager:
         # Initialize generic processor
         self.processor = DocumentProcessor(processing_config)
         
-        # Initialize database manager if config provided
-        self.db_manager = ArangoDBManager(arango_config) if arango_config else None
+        # Initialize database client if config provided
+        self.db_client: ArangoMemoryClient | None = None
+        if arango_config:
+            memory_config = resolve_memory_config(**arango_config)
+            self.db_client = ArangoMemoryClient(memory_config)
         
         # Initialize validator
         self.validator = ArXivValidator()
@@ -326,15 +333,29 @@ class ArXivManager:
         # Get metadata from cache or use defaults
         metadata = self.metadata_cache.get(id_components['base_id'], {})
         
+        raw_authors = metadata.get('authors', [])
+        authors = (
+            raw_authors
+            if isinstance(raw_authors, list)
+            else [a.strip() for a in re.split(r'[;,]\s*', raw_authors) if a.strip()]
+        )
+
+        raw_categories = metadata.get('categories', [])
+        categories = (
+            raw_categories
+            if isinstance(raw_categories, list)
+            else raw_categories.split()
+        )
+
         return ArXivPaperInfo(
             arxiv_id=arxiv_id,
             version=id_components['version'],
             pdf_path=pdf_path,
             latex_path=latex_path,
             title=metadata.get('title', f'ArXiv Paper {arxiv_id}'),
-            authors=metadata.get('authors', []).split(', ') if isinstance(metadata.get('authors'), str) else metadata.get('authors', []),
+            authors=authors,
             abstract=metadata.get('abstract', ''),
-            categories=metadata.get('categories', '').split() if isinstance(metadata.get('categories'), str) else metadata.get('categories', []),
+            categories=categories,
             submission_date=metadata.get('created', ''),
             update_date=metadata.get('updated'),
             comments=metadata.get('comments'),
@@ -369,11 +390,14 @@ class ArXivManager:
         paper_info = self.get_paper_info(arxiv_id)
         
         # Step 2: Use generic processor for expensive operations
-        processing_result = self.processor.process_document(
+        loop = asyncio.get_running_loop()
+        process_fn = partial(
+            self.processor.process_document,
             pdf_path=paper_info.pdf_path,
             latex_path=paper_info.latex_path,
-            document_id=arxiv_id
+            document_id=arxiv_id,
         )
+        processing_result = await loop.run_in_executor(None, process_fn)
         
         # Step 3: Attach ArXiv-specific metadata
         processing_result.processing_metadata.update({
@@ -386,12 +410,13 @@ class ArXivManager:
         })
         
         # Step 4: Store in ArXiv-specific collections if requested
-        if store_in_db and self.db_manager and processing_result.success:
-            await self._store_arxiv_result(paper_info, processing_result)
+        if store_in_db and self.db_client and processing_result.success:
+            store_fn = partial(self._store_arxiv_result_sync, paper_info, processing_result)
+            await loop.run_in_executor(None, store_fn)
         
         return processing_result
     
-    async def _store_arxiv_result(
+    def _store_arxiv_result_sync(
         self,
         paper_info: ArXivPaperInfo,
         result: ProcessingResult
@@ -399,17 +424,17 @@ class ArXivManager:
         """
         Persist ArXiv processing results and extracted artifacts to the configured ArangoDB collections.
         
-        If no database manager is configured, the call is a no-op (it logs a warning and returns). When a DB manager is present, this inserts:
-        - a main document into the `arxiv_papers` collection (keyed by paper_info.sanitized_id) containing ArXiv metadata and processing metrics;
-        - one document per text chunk with embeddings into `arxiv_embeddings`;
+        If no database client is configured, the call is a no-op (it logs a warning and returns). When a client is present, this inserts:
+        - a main document into the `arxiv_metadata` collection (keyed by paper_info.sanitized_id) containing ArXiv metadata and processing metrics;
+        - one document per text chunk with embeddings into `arxiv_abstract_embeddings`;
         - an optional `arxiv_structures` document containing tables, equations, images, and figures when any are present.
         
         Errors raised by the DB manager or during document insertion are logged and re-raised.
         """
-        if not self.db_manager:
-            logger.warning("No database manager configured, skipping storage")
+        if not self.db_client:
+            logger.warning("No database client configured, skipping storage")
             return
-        
+
         try:
             # Prepare ArXiv-specific document
             arxiv_doc = {
@@ -435,40 +460,103 @@ class ArXivManager:
                 'status': 'PROCESSED'
             }
             
-            # Store main paper document
-            self.db_manager.insert_document('arxiv_papers', arxiv_doc)
-            
-            # Store chunks with embeddings
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            chunk_docs: List[dict[str, Any]] = []
+            embedding_docs: List[dict[str, Any]] = []
             for chunk in result.chunks:
-                chunk_doc = {
-                    '_key': f"{paper_info.sanitized_id}_chunk_{chunk.chunk_index}",
-                    'paper_id': paper_info.sanitized_id,
+                chunk_id = f"{paper_info.sanitized_id}_chunk_{chunk.chunk_index}"
+                chunk_docs.append({
+                    '_key': chunk_id,
                     'arxiv_id': paper_info.arxiv_id,
+                    'document_id': paper_info.arxiv_id,
+                    'paper_key': paper_info.sanitized_id,
                     'chunk_index': chunk.chunk_index,
+                    'total_chunks': chunk.total_chunks,
                     'text': chunk.text,
-                    'embedding': chunk.embedding.tolist(),
                     'start_char': chunk.start_char,
                     'end_char': chunk.end_char,
-                    'context_window_used': chunk.context_window_used
-                }
-                self.db_manager.insert_document('arxiv_embeddings', chunk_doc)
-            
-            # Store structures if present
+                    'context_window_used': chunk.context_window_used,
+                    'created_at': now_iso,
+                })
+
+                embedding_docs.append({
+                    '_key': f"{chunk_id}_emb",
+                    'chunk_id': chunk_id,
+                    'arxiv_id': paper_info.arxiv_id,
+                    'document_id': paper_info.arxiv_id,
+                    'paper_key': paper_info.sanitized_id,
+                    'embedding': chunk.embedding.tolist(),
+                    'embedding_dim': int(chunk.embedding.shape[0]) if hasattr(chunk.embedding, 'shape') else len(chunk.embedding),
+                    'model': getattr(self.processor, 'embedding_model', 'jinaai/jina-embeddings-v4'),
+                    'created_at': now_iso,
+                })
+
+            structures_docs: List[dict[str, Any]] = []
             if result.extraction.tables or result.extraction.equations or result.extraction.images:
-                structures_doc = {
+                structures_docs.append({
                     '_key': paper_info.sanitized_id,
                     'arxiv_id': paper_info.arxiv_id,
+                    'document_id': paper_info.arxiv_id,
                     'tables': result.extraction.tables,
                     'equations': result.extraction.equations,
                     'images': result.extraction.images,
-                    'figures': result.extraction.figures
-                }
-                self.db_manager.insert_document('arxiv_structures', structures_doc)
+                    'figures': result.extraction.figures,
+                    'updated_at': now_iso,
+                })
+
+            transaction_action = """
+function (params) {
+  const db = require('@arangodb').db;
+  const papers = params.papers || [];
+  const chunks = params.chunks || [];
+  const embeddings = params.embeddings || [];
+  const structures = params.structures || [];
+
+  if (papers.length) {
+    db.arxiv_metadata.insert(papers, { overwriteMode: 'replace' });
+  }
+  if (chunks.length) {
+    db.arxiv_abstract_chunks.insert(chunks, { overwriteMode: 'replace' });
+  }
+  if (embeddings.length) {
+    db.arxiv_abstract_embeddings.insert(embeddings, { overwriteMode: 'replace' });
+  }
+  if (structures.length) {
+    db.arxiv_structures.insert(structures, { overwriteMode: 'replace' });
+  }
+
+  return {
+    papers: papers.length,
+    chunks: chunks.length,
+    embeddings: embeddings.length,
+    structures: structures.length
+  };
+}
+"""
+
+            transaction_params = {
+                'papers': [arxiv_doc],
+                'chunks': chunk_docs,
+                'embeddings': embedding_docs,
+                'structures': structures_docs,
+            }
+
+            result_summary = self.db_client.execute_transaction(
+                write=['arxiv_metadata', 'arxiv_abstract_chunks', 'arxiv_abstract_embeddings', 'arxiv_structures'],
+                action=transaction_action,
+                params=transaction_params,
+            )
+
+            logger.info(
+                "Stored ArXiv paper %s (chunks=%s, embeddings=%s)",
+                paper_info.arxiv_id,
+                result_summary.get('chunks'),
+                result_summary.get('embeddings'),
+            )
             
-            logger.info(f"Stored ArXiv paper {paper_info.arxiv_id} in database")
-            
-        except Exception as e:
-            logger.error(f"Failed to store ArXiv paper {paper_info.arxiv_id}: {e}")
+        except Exception:
+            logger.exception("Failed to store ArXiv paper %s", paper_info.arxiv_id)
             raise
     
     async def process_batch(
@@ -488,27 +576,28 @@ class ArXivManager:
         Returns:
             List[ProcessingResult]: A list of ProcessingResult objects in the same order as arxiv_ids. Entries for IDs that failed during processing are returned as failed ProcessingResult instances containing the error details.
         """
-        results = []
-        
-        for arxiv_id in arxiv_ids:
+        async def _process_one(aid: str) -> ProcessingResult:
             try:
-                result = await self.process_arxiv_paper(arxiv_id, store_in_db)
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Failed to process {arxiv_id}: {e}")
-                # Create failed result
+                return await self.process_arxiv_paper(aid, store_in_db)
+            except Exception as exc:  # pragma: no cover - surfaced to caller
+                logger.exception("Failed to process %s", aid)
                 from core.workflows.workflow_pdf import ProcessingResult, ExtractionResult
-                failed_result = ProcessingResult(
+                return ProcessingResult(
                     extraction=ExtractionResult(full_text=""),
                     chunks=[],
-                    processing_metadata={'arxiv_id': arxiv_id, 'error': str(e)},
+                    processing_metadata={'arxiv_id': aid, 'error': str(exc)},
                     total_processing_time=0,
                     extraction_time=0,
                     chunking_time=0,
                     embedding_time=0,
                     success=False,
-                    errors=[str(e)]
+                    errors=[str(exc)]
                 )
-                results.append(failed_result)
-        
-        return results
+
+        sem = asyncio.Semaphore(min(8, max(1, len(arxiv_ids))))
+
+        async def _guarded(aid: str) -> ProcessingResult:
+            async with sem:
+                return await _process_one(aid)
+
+        return await asyncio.gather(*(_guarded(aid) for aid in arxiv_ids))

@@ -22,6 +22,21 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _prefix_char_offsets(tokens: List[str]) -> List[int]:
+    """Return cumulative character offsets for whitespace-joined tokens."""
+    if not tokens:
+        return [0]
+
+    offsets = [0]
+    total = 0
+    for idx, token in enumerate(tokens):
+        if idx:
+            total += 1  # account for the single space we insert between tokens
+        total += len(token)
+        offsets.append(total)
+    return offsets
+
+
 @dataclass
 class TextChunk:
     """
@@ -170,8 +185,13 @@ class TokenBasedChunking(ChunkingStrategy):
             # Simple word tokenization
             tokens = text.split()
         
+        if not tokens:
+            logger.info("Created 0 token-based chunks from 0 tokens")
+            return []
+
         chunks: List[TextChunk] = []
         stride = self.chunk_size - self.chunk_overlap
+        prefix_chars = _prefix_char_offsets(tokens)
         
         for i in range(0, len(tokens), stride):
             # Get chunk tokens
@@ -195,7 +215,7 @@ class TokenBasedChunking(ChunkingStrategy):
                 chunk_text = ' '.join(chunk_tokens)
             
             # Calculate character positions (approximate)
-            start_char = len(' '.join(tokens[:i]))
+            start_char = prefix_chars[i]
             end_char = start_char + len(chunk_text)
             
             chunk = TextChunk(
@@ -477,14 +497,42 @@ class SlidingWindowChunking(ChunkingStrategy):
         """
         text = self._clean_text(text)
         tokens = text.split()  # Simple tokenization
-        
+
+        if not tokens:
+            logger.info("Created 0 sliding-window chunks from 0 tokens")
+            return []
+
+        prefix_chars = _prefix_char_offsets(tokens)
         chunks: List[TextChunk] = []
-        for i in range(0, len(tokens) - self.window_size + 1, self.step_size):
-            window_tokens = tokens[i:i + self.window_size]
+
+        # If the document is shorter than the window, return a single chunk
+        if len(tokens) <= self.window_size:
+            chunk_text = ' '.join(tokens)
+            chunk = TextChunk(
+                text=chunk_text,
+                start_char=0,
+                end_char=len(chunk_text),
+                chunk_index=0,
+                metadata={
+                    'strategy': 'sliding_window',
+                    'window_size': len(tokens),
+                    'step_size': min(self.step_size, len(tokens)),
+                    'overlap_ratio': 0.0,
+                    'token_count': len(tokens),
+                    'first_token_index': 0,
+                    'last_token_index': len(tokens)
+                }
+            )
+            return [chunk]
+
+        last_window_end = 0
+        for start in range(0, len(tokens) - self.window_size + 1, self.step_size):
+            end = start + self.window_size
+            window_tokens = tokens[start:end]
             chunk_text = ' '.join(window_tokens)
-            
-            start_char = len(' '.join(tokens[:i]))
-            
+
+            start_char = prefix_chars[start]
+
             chunk = TextChunk(
                 text=chunk_text,
                 start_char=start_char,
@@ -495,32 +543,34 @@ class SlidingWindowChunking(ChunkingStrategy):
                     'window_size': self.window_size,
                     'step_size': self.step_size,
                     'overlap_ratio': 1 - (self.step_size / self.window_size),
-                    'token_count': len(window_tokens)
+                    'token_count': len(window_tokens),
+                    'first_token_index': start,
+                    'last_token_index': end
                 }
             )
             chunks.append(chunk)
-        
-        # Handle remainder if any
-        if len(tokens) > self.window_size:
-            last_index = len(chunks) * self.step_size
-            if last_index < len(tokens):
-                remaining_tokens = tokens[last_index:]
-                if len(remaining_tokens) >= self.step_size:  # Only if substantial
-                    chunk_text = ' '.join(remaining_tokens)
-                    start_char = len(' '.join(tokens[:last_index]))
-                    
-                    chunk = TextChunk(
-                        text=chunk_text,
-                        start_char=start_char,
-                        end_char=start_char + len(chunk_text),
-                        chunk_index=len(chunks),
-                        metadata={
-                            'strategy': 'sliding_window_remainder',
-                            'token_count': len(remaining_tokens)
-                        }
-                    )
-                    chunks.append(chunk)
-        
+            last_window_end = end
+
+        # Handle remainder if any tokens remain after the final full window
+        if last_window_end < len(tokens):
+            remaining_tokens = tokens[last_window_end:]
+            if remaining_tokens:
+                chunk_text = ' '.join(remaining_tokens)
+                start_char = prefix_chars[last_window_end]
+                chunk = TextChunk(
+                    text=chunk_text,
+                    start_char=start_char,
+                    end_char=start_char + len(chunk_text),
+                    chunk_index=len(chunks),
+                    metadata={
+                        'strategy': 'sliding_window_remainder',
+                        'token_count': len(remaining_tokens),
+                        'first_token_index': last_window_end,
+                        'last_token_index': len(tokens)
+                    }
+                )
+                chunks.append(chunk)
+
         logger.info(f"Created {len(chunks)} sliding window chunks with {self.step_size}/{self.window_size} step/window")
         return chunks
 
@@ -564,5 +614,11 @@ class ChunkingStrategyFactory:
         strategy_class = strategies.get(strategy_type.lower())
         if not strategy_class:
             raise ValueError(f"Unknown chunking strategy: {strategy_type}")
-        
+
+        safe_kwargs = {
+            key: ('<callable>' if callable(value) else type(value).__name__ if not isinstance(value, (str, int, float, bool)) else value)
+            for key, value in kwargs.items()
+            if key not in {'tokenizer', 'text'}
+        }
+        logger.debug("Creating chunking strategy '%s' with kwargs=%s", strategy_type, safe_kwargs)
         return strategy_class(**kwargs)

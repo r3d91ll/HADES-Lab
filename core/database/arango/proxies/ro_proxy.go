@@ -1,6 +1,7 @@
 package proxies
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -23,7 +24,7 @@ func RunReadOnlyProxy() error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", listenSocket, err)
 	}
-	ensureSocketMode(listenSocket, socketPermissions)
+	ensureSocketMode(listenSocket, roSocketPermissions)
 
 	server := &http.Server{Handler: logRequests(proxy)}
 
@@ -34,15 +35,43 @@ func RunReadOnlyProxy() error {
 	return nil
 }
 
-func allowReadOnly(r *http.Request, body []byte) error {
+func allowReadOnly(r *http.Request, peek BodyPeeker) error {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return nil
 	case http.MethodPost:
 		if isCursorPath(r.URL.Path) {
+			body, err := peek(128 * 1024)
+			if err != nil {
+				return err
+			}
+			var payload struct {
+				Query string `json:"query"`
+			}
+			if err := json.Unmarshal(body, &payload); err == nil && payload.Query != "" {
+				upper := strings.ToUpper(payload.Query)
+				tokens := strings.FieldsFunc(upper, func(r rune) bool {
+					return r < 'A' || r > 'Z'
+				})
+				forbiddenKeywords := map[string]struct{}{
+					"INSERT":   {},
+					"UPDATE":   {},
+					"UPSERT":   {},
+					"REMOVE":   {},
+					"REPLACE":  {},
+					"TRUNCATE": {},
+					"DROP":     {},
+				}
+				for _, token := range tokens {
+					if _, forbidden := forbiddenKeywords[token]; forbidden {
+						return fmt.Errorf("forbidden keyword %q detected in AQL", token)
+					}
+				}
+				return nil
+			}
+			// Fallback: conservative scan of raw body
 			upper := strings.ToUpper(string(body))
-			forbiddenKeywords := []string{"INSERT", "UPDATE", "UPSERT", "REMOVE", "REPLACE", "TRUNCATE", "DROP"}
-			for _, keyword := range forbiddenKeywords {
+			for _, keyword := range []string{"INSERT", "UPDATE", "UPSERT", "REMOVE", "REPLACE", "TRUNCATE", "DROP"} {
 				if strings.Contains(upper, keyword) {
 					return fmt.Errorf("forbidden keyword %q detected in request body", keyword)
 				}
@@ -55,9 +84,4 @@ func allowReadOnly(r *http.Request, body []byte) error {
 		}
 	}
 	return fmt.Errorf("method %s not permitted on %s", r.Method, r.URL.Path)
-}
-
-func isCursorPath(path string) bool {
-	// Match .../_api/cursor
-	return strings.Contains(path, "/_api/cursor")
 }

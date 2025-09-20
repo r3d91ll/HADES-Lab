@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,20 +18,35 @@ import (
 )
 
 const (
-	defaultUpstreamSocket = "/tmp/arangodb.sock"
+	defaultUpstreamSocket = "/run/arangodb3/arangodb.sock"
 	defaultROListenSocket = "/run/hades/readonly/arangod.sock"
 	defaultRWListenSocket = "/run/hades/readwrite/arangod.sock"
-	socketPermissions     = 0o660
+	roSocketPermissions   = 0o640
+	rwSocketPermissions   = 0o600
 )
+
+var cursorPathRegexp = regexp.MustCompile(`^(/_db/[^/]+)?/_api/cursor(?:/[0-9]+)?$`)
+
+var hopByHopHeaders = []string{
+	"Connection",
+	"Proxy-Connection",
+	"Keep-Alive",
+	"TE",
+	"Trailer",
+	"Transfer-Encoding",
+	"Upgrade",
+}
+
+type BodyPeeker func(limit int64) ([]byte, error)
 
 // UnixReverseProxy forwards HTTP requests to an upstream exposed via Unix socket.
 type UnixReverseProxy struct {
 	upstreamSocket string
-	allowFunc      func(*http.Request, []byte) error
+	allowFunc      func(*http.Request, BodyPeeker) error
 	client         *http.Client
 }
 
-func newUnixReverseProxy(upstreamSocket string, allowFunc func(*http.Request, []byte) error) *UnixReverseProxy {
+func newUnixReverseProxy(upstreamSocket string, allowFunc func(*http.Request, BodyPeeker) error) *UnixReverseProxy {
 	transport := newUnixTransport(upstreamSocket)
 	return &UnixReverseProxy{
 		upstreamSocket: upstreamSocket,
@@ -57,25 +73,69 @@ func newUnixTransport(socketPath string) *http.Transport {
 }
 
 func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	bodyBytes, err := readBody(r.Body)
-	if err != nil {
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
-		return
+	var cachedBody []byte
+	bodyConsumed := false
+
+	bodyReader := func(limit int64) ([]byte, error) {
+		if bodyConsumed {
+			return cachedBody, nil
+		}
+		if r.Body == nil {
+			bodyConsumed = true
+			return nil, nil
+		}
+		defer func() {
+			bodyConsumed = true
+		}()
+
+		var buf bytes.Buffer
+		if limit > 0 {
+			lr := &io.LimitedReader{R: r.Body, N: limit + 1}
+			if _, err := buf.ReadFrom(lr); err != nil {
+				_ = r.Body.Close()
+				return nil, err
+			}
+			if lr.N <= 0 {
+				_ = r.Body.Close()
+				return nil, fmt.Errorf("request body exceeds inspection limit (%d bytes)", limit)
+			}
+		} else {
+			if _, err := buf.ReadFrom(r.Body); err != nil {
+				_ = r.Body.Close()
+				return nil, err
+			}
+		}
+
+		if err := r.Body.Close(); err != nil {
+			log.Printf("warning: failed to close request body: %v", err)
+		}
+		cachedBody = append([]byte(nil), buf.Bytes()...)
+		return cachedBody, nil
 	}
 
-	if err := p.allowFunc(r, bodyBytes); err != nil {
+	if err := p.allowFunc(r, bodyReader); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
+	var upstreamBody io.ReadCloser
+	if bodyConsumed {
+		upstreamBody = io.NopCloser(bytes.NewReader(cachedBody))
+	} else {
+		upstreamBody = r.Body
+	}
+
 	upstreamURL := buildUpstreamURL(r)
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(bodyBytes))
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, upstreamBody)
 	if err != nil {
 		http.Error(w, "failed to build upstream request", http.StatusInternalServerError)
 		return
 	}
 
 	copyHeaders(upstreamReq.Header, r.Header)
+	if bodyConsumed {
+		upstreamReq.ContentLength = int64(len(cachedBody))
+	}
 
 	resp, err := p.client.Do(upstreamReq)
 	if err != nil {
@@ -91,21 +151,46 @@ func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func readBody(body io.ReadCloser) ([]byte, error) {
-	if body == nil {
-		return nil, nil
-	}
-	defer body.Close()
-	return io.ReadAll(body)
-}
-
 func copyHeaders(dst, src http.Header) {
-	for key, values := range src {
+	cleaned := cloneHeader(src)
+	stripHopHeaders(cleaned)
+
+	for key := range dst {
 		dst.Del(key)
+	}
+
+	for key, values := range cleaned {
 		for _, value := range values {
 			dst.Add(key, value)
 		}
 	}
+}
+
+func stripHopHeaders(header http.Header) {
+	connectionValues := header.Values("Connection")
+	for _, value := range connectionValues {
+		for _, token := range strings.Split(value, ",") {
+			headerName := strings.TrimSpace(token)
+			if headerName == "" {
+				continue
+			}
+			header.Del(http.CanonicalHeaderKey(headerName))
+		}
+	}
+
+	for _, hopHeader := range hopByHopHeaders {
+		header.Del(hopHeader)
+	}
+}
+
+func cloneHeader(src http.Header) http.Header {
+	cloned := make(http.Header, len(src))
+	for key, values := range src {
+		copied := make([]string, len(values))
+		copy(copied, values)
+		cloned[key] = copied
+	}
+	return cloned
 }
 
 func buildUpstreamURL(r *http.Request) string {
@@ -148,7 +233,15 @@ func getEnv(key, fallback string) string {
 
 func logRequests(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s", r.Method, r.URL.Path)
+		loggedPath := r.URL.Path
+		if r.URL.RawQuery != "" {
+			loggedPath += "?<redacted>"
+		}
+		log.Printf("%s %s", r.Method, loggedPath)
 		handler.ServeHTTP(w, r)
 	})
+}
+
+func isCursorPath(path string) bool {
+	return cursorPathRegexp.MatchString(path)
 }

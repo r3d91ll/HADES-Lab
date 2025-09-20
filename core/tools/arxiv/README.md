@@ -4,7 +4,7 @@ Minimal ArXiv-specific processing tools for HADES-Lab.
 
 ## Structure
 
-```
+```text
 tools/arxiv/
 ├── arxiv_manager.py      # ArXiv document manager using core workflows
 ├── arxiv_api_client.py   # ArXiv API interactions

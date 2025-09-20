@@ -140,15 +140,6 @@ class ArxivMetadataConfig(BaseConfig):
         default=True,
         description="Resume from last checkpoint if available"
     )
-    checkpoint_file: Path = Field(
-        default=Path("/tmp/arxiv_metadata_checkpoint.json"),
-        description="Path to checkpoint file"
-    )
-    state_file: Path = Field(
-        default=Path("/tmp/arxiv_metadata_state.json"),
-        description="Path to state file"
-    )
-
     # Performance monitoring
     monitor_interval: int = Field(
         default=100,

@@ -17,8 +17,8 @@ from core.database.arango.optimized_client import ArangoHttp2Client, ArangoHttp2
 
 config = ArangoHttp2Config(
     database="arxiv_repository",
-    socket_path="/tmp/arango_ro_proxy.sock",
-    username="root",
+    socket_path="/run/hades/readonly/arangod.sock",
+    username="arxiv_reader",
     password="...",
 )
 with ArangoHttp2Client(config) as client:
@@ -45,7 +45,7 @@ finally:
 2. Run RO proxy: `go run ./cmd/roproxy`
 3. Run RW proxy: `go run ./cmd/rwproxy`
 
-Sockets default to `/tmp/arango_ro_proxy.sock` and `/tmp/arango_rw_proxy.sock`. Ensure permissions (0660) and adjust via env vars `LISTEN_SOCKET`, `UPSTREAM_SOCKET`.
+Sockets default to `/run/hades/readonly/arangod.sock` and `/run/hades/readwrite/arangod.sock` (systemd-managed). Ensure permissions (0640/0600) and adjust via env vars `LISTEN_SOCKET`, `UPSTREAM_SOCKET`.
 
 ### Benchmark CLI (Phase 4)
 
@@ -60,13 +60,19 @@ Example:
 
 ```
 poetry run python tests/benchmarks/arango_connection_test.py \
-    --socket /tmp/arango_ro_proxy.sock \
+    --socket /run/hades/readonly/arangod.sock \
     --database arxiv_repository \
     --collection arxiv_metadata \
     --key 0704_0001 --key 0704_0002 \
     --iterations 20 --concurrency 4 \
     --report-json reports/get_hot.json
 ```
+
+### Testing Infrastructure
+
+- The HTTP/2 memory client is now the default access path for automated tests.
+- Run `poetry run pytest tests/core/database/test_memory_client_config.py` for a quick sanity check.
+- Future regression suites should share the proxy-aware fixtures so workflows exercise the same transport stack.
 
 ### Production Hardening Notes
 

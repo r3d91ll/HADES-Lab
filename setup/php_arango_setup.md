@@ -25,10 +25,10 @@ composer --version
 ### 3. Install ArangoDB PHP Driver
 ```bash
 cd ~/olympus/HADES-Lab
-composer require triagens/arangodb
+composer install
 ```
 
-This creates:
+This installs the dependencies listed in `composer.json`, including `triagens/arangodb`:
 - `composer.json` - PHP dependencies
 - `composer.lock` - Locked versions
 - `vendor/` - PHP libraries
@@ -71,9 +71,9 @@ php core/database/arango/php_unix_bridge.php bulk_insert
 - PHP can connect to ArangoDB via TCP
 - PHP can see all collections correctly
 - PHP reports correct document counts:
-  - arxiv_metadata: 2,828,974 documents
-  - arxiv_abstract_embeddings: 728,960 documents
-  - arxiv_abstract_chunks: 0 documents
+- arxiv_metadata: 2,828,974 documents
+- arxiv_abstract_embeddings: 728,960 documents
+- arxiv_abstract_chunks: 0 documents
 
 ⚠️ **TODO**:
 - Fix Unix socket permissions (currently getting "Permission denied")
