@@ -410,7 +410,8 @@ tools/arxiv/utils/SCRIPT_ANALYSIS.md
 scratch/*
 dev-utils/*
 core/database/arango/proxies/.gocache/
-*.gocache/*
+*.gocache/
+**/.gocache/
 core/database/arango/proxies/roproxy
 core/database/arango/proxies/rwproxy
 benchmarks/reports/*
