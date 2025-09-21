@@ -13,6 +13,7 @@
 | **Zero-propagation** | pass | All factors > 0; no forced-zero terms. |
 
 ## GET Latency (ms)
+
 | Scenario | Concurrency | TTFB p95 | TTFB p99 | E2E p95 | E2E p99 |
 |----------|-------------|----------|----------|---------|---------|
 | Hot baseline (`get_hot.json`) | 1 | 0.360 | 1.337 | 0.402 | 1.409 |
@@ -23,6 +24,7 @@
 | Cold concurrency 128 (`get_cold_c128.json`) | 128 | 32.349 | 32.694 | 61.206 | 62.886 |
 
 ## Query Latency (LIMIT 1000, ms)
+
 | Scenario | Concurrency | E2E p95 | E2E p99 |
 |----------|-------------|---------|---------|
 | Hot baseline (`query_hot.json`) | 1 | 0.983 | 1.677 |
@@ -30,6 +32,7 @@
 | Cold baseline (`query_cold.json`) | 1 | 1.122 | 2.192 |
 
 ## Bulk Insert Latency (1k docs, ms)
+
 | Scenario | Doc Bytes | waitForSync | E2E p95 | E2E p99 |
 |----------|-----------|-------------|---------|---------|
 | Hot async (`insert_hot_async.json`) | 1024 | False | 10.046 | 10.102 |
