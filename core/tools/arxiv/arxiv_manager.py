@@ -24,10 +24,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
 
-from core.workflows.workflow_pdf import (
+from core.processors.document_processor import (
     DocumentProcessor,
     ProcessingConfig,
-    ProcessingResult
+    ProcessingResult,
 )
 from core.database.arango import (
     ArangoMemoryClient,
@@ -581,7 +581,7 @@ function (params) {
                 return await self.process_arxiv_paper(aid, store_in_db)
             except Exception as exc:  # pragma: no cover - surfaced to caller
                 logger.exception("Failed to process %s", aid)
-                from core.workflows.workflow_pdf import ProcessingResult, ExtractionResult
+                from core.processors.document_processor import ProcessingResult, ExtractionResult
                 return ProcessingResult(
                     extraction=ExtractionResult(full_text=""),
                     chunks=[],

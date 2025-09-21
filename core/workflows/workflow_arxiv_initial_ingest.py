@@ -287,13 +287,30 @@ class ArxivInitialIngestWorkflow:
 
         if self.drop_collections:
             logger.info("Dropping existing collections via HTTP/2 client")
+            alias_map = {
+                "arxiv_metadata": ["arxiv_metadata"],
+                "arxiv_metadata": ["arxiv_metadata"],
+                "arxiv_abstract_chunks": ["arxiv_chunks"],
+                "arxiv_chunks": ["arxiv_abstract_chunks"],
+                "arxiv_abstract_embeddings": ["arxiv_embeddings"],
+                "arxiv_embeddings": ["arxiv_abstract_embeddings"],
+            }
+
+            drop_targets = {
+                self.metadata_collection,
+                self.chunks_collection,
+                self.embeddings_collection,
+                self.structures_collection,
+            }
+
+            drop_targets.update(alias_map.get(self.metadata_collection, []))
+            drop_targets.update(alias_map.get(self.chunks_collection, []))
+            drop_targets.update(alias_map.get(self.embeddings_collection, []))
+
+            drop_list = sorted(drop_targets)
+            logger.debug("Dropping collections: %s", ", ".join(drop_list))
             self.memory_client.drop_collections(
-                [
-                    self.metadata_collection,
-                    self.chunks_collection,
-                    self.embeddings_collection,
-                    self.structures_collection,
-                ],
+                drop_list,
                 ignore_missing=True,
             )
 

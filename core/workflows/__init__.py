@@ -14,6 +14,7 @@ from .workflow_base import WorkflowBase, WorkflowConfig, WorkflowResult
 PDFWorkflow = None
 BatchPDFWorkflow = None
 ArxivInitialIngestWorkflow = None
+ArxivSinglePDFWorkflow = None
 
 try:
     from .workflow_pdf import PDFWorkflow  # type: ignore[assignment]
@@ -29,6 +30,11 @@ try:
     from .workflow_arxiv_initial_ingest import ArxivInitialIngestWorkflow  # type: ignore[assignment]
 except ImportError:
     ArxivInitialIngestWorkflow = None
+
+try:
+    from .workflow_arxiv_single_pdf import ArxivSinglePDFWorkflow  # type: ignore[assignment]
+except ImportError:
+    ArxivSinglePDFWorkflow = None
 
 # State management
 from .state import StateManager, CheckpointManager
@@ -48,3 +54,5 @@ if BatchPDFWorkflow is not None:
     __all__.append('BatchPDFWorkflow')
 if ArxivInitialIngestWorkflow is not None:
     __all__.append('ArxivInitialIngestWorkflow')
+if ArxivSinglePDFWorkflow is not None:
+    __all__.append('ArxivSinglePDFWorkflow')

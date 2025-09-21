@@ -1,22 +1,28 @@
-"""
-Core Processors Module
-======================
+"""Core processors module aggregating reusable processing utilities."""
 
-This module provides text processing utilities including chunking strategies.
-"""
-
+from .document_processor import (
+    DocumentProcessor,
+    ProcessingConfig,
+    ProcessingResult,
+    ExtractionResult,
+)
 from .text.chunking_strategies import (
     ChunkingStrategy,
     ChunkingStrategyFactory,
     SemanticChunking,
     TokenBasedChunking,
-    SlidingWindowChunking
+    SlidingWindowChunking,
 )
 
 __all__ = [
-    'ChunkingStrategy',
-    'ChunkingStrategyFactory',
-    'SemanticChunking',
-    'TokenBasedChunking',
-    'SlidingWindowChunking',
+    "DocumentProcessor",
+    "ProcessingConfig",
+    "ProcessingResult",
+    "ExtractionResult",
+    "ChunkingStrategy",
+    "ChunkingStrategyFactory",
+    "SemanticChunking",
+    "TokenBasedChunking",
+    "SlidingWindowChunking",
 ]
+
