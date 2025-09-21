@@ -1,0 +1,17 @@
+# HiRAG × PathRAG runtime configuration
+hirag_pathrag:
+  topic_k: 8
+  beam: [8, 4, 2]
+  candidate_cap: 500
+  deg_alpha: 0.005
+  path_max_paths: 6
+  path_max_hops: 5
+  path_lambda: 0.3
+  path_epsilon: 1.0e-6
+  relation_boost:
+    refers_to: 0.8
+    implements: 0.7
+    cites: 0.6
+    derives_from: 0.6
+    extends: 0.5
+    coref: 0.4
