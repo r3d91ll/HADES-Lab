@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
 from core.database.arango.memory_client import ArangoMemoryClient
 
 from . import aql
+from .builders import build_category_hierarchy, build_semantic_relations, ingest_entities_from_arxiv
 from .schema_manager import GraphSchemaManager, GraphCollections
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,9 @@ def _relation_boost_defaults() -> dict[str, float]:
         "coref": 0.4,
     }
 
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 @dataclass(slots=True)
 class HiragPathragConfig:
@@ -68,19 +73,31 @@ class HiragPathragService:
 
     # ------------------------------------------------------------------
     def build_entities_from_arxiv(self, *, limit: int | None = None) -> int:
-        """Placeholder for entity extraction from ``arxiv_metadata``."""
+        """Upsert paper entities from the arXiv corpus."""
 
-        raise NotImplementedError("Entity builder not implemented yet")
+        return ingest_entities_from_arxiv(self._client, self._schema_manager.collections, limit=limit)
 
-    def build_relations_from_embeddings(self, *, top_k: int = 10, similarity_threshold: float = 0.6) -> int:
-        """Placeholder for semantic edge construction."""
+    def build_relations_from_embeddings(
+        self, *, top_k: int = 10, base_weight: float = 0.5, limit: int | None = None
+    ) -> int:
+        """Bootstrap semantic relations based on shared categories."""
 
-        raise NotImplementedError("Relation builder not implemented yet")
+        return build_semantic_relations(
+            self._client,
+            self._schema_manager.collections,
+            top_k=top_k,
+            base_weight=base_weight,
+            limit=limit,
+        )
 
-    def build_hierarchy(self) -> int:
-        """Placeholder for cluster construction."""
+    def build_hierarchy(self, *, limit: int | None = None) -> Mapping[str, int]:
+        """Construct L1/L2 clusters from primary categories."""
 
-        raise NotImplementedError("Hierarchy builder not implemented yet")
+        return build_category_hierarchy(
+            self._client,
+            self._schema_manager.collections,
+            limit=limit,
+        )
 
     # ------------------------------------------------------------------
     def get_candidate_subgraph(
@@ -135,9 +152,15 @@ class HiragPathragService:
 
     # ------------------------------------------------------------------
     def log_query_trace(self, payload: Mapping[str, object]) -> None:
-        """Stub for writing query trace documents to ``query_logs``."""
+        """Persist a query trace document in the query log collection."""
 
-        raise NotImplementedError("Telemetry logging not implemented yet")
+        doc = dict(payload)
+        doc.setdefault('created_at', _utc_now_iso())
+        query = f'INSERT @doc INTO {self._schema_manager.collections.query_logs} RETURN NEW._key'
+        try:
+            self._client.execute_query(query, {'doc': doc})
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception('Failed to record query trace')
 
     # ------------------------------------------------------------------
     @property
