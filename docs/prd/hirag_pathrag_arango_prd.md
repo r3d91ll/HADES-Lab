@@ -48,7 +48,7 @@ Flat GraphRAG tends to over‑retrieve redundant facts, inflating tokens and lat
 
 ### Collections (Documents)
 
-```
+```text
 papers_raw       // raw arXiv papers & metadata (late‑chunked refs; not traversed)
 entities         // extracted entities (paper|concept|method|person|code_symbol)
 clusters         // hierarchy summary nodes (L1 topics, L2 super‑topics)
@@ -60,7 +60,7 @@ cluster_membership_journal // optional: membership changes for reproducibility/r
 
 ### Collections (Edges)
 
-```
+```text
 relations       // entity↔entity (cites|implements|extends|refers_to|coref|derives_from)
 cluster_edges   // member↔cluster and cluster↔cluster links (SUBTOPIC_OF, PART_OF)
 ```
@@ -133,6 +133,7 @@ Paper representation: we adopt the “paper as entity” model. Papers that part
 - Optional: ArangoSearch view `entities_view` over `entities.name`, `entities.summary` (and `papers_raw.title` as needed) for lexical fallback/rerank; vector index (3.12.4+ experimental) for embeddings if used directly in Arango.
 
 Directionality conventions
+
 - `cites`: paper → paper (citer → cited)
 - `implements`: paper/method → code_symbol
 - `derives_from`: method_new → method_base
@@ -146,25 +147,25 @@ Directionality conventions
 
 ## Hierarchy Construction (HiIndex)
 
-1) Level 0 → Level 1 (Topic clusters)
+(1) Level 0 → Level 1 (Topic clusters)
 
 - Input: `entities.layer=0.embedding` (Jina v4 per ingestion PRD).
 - Method: HDBSCAN (cosine), `min_cluster_size≈5`, `min_samples≈3`.
 - Output: create `clusters` (level=1) with centroid embeddings and abstractive summaries.
 
-2) Structural refinement
+(2) Structural refinement
 
 - Build 1–2 hop neighborhoods via `relations`; run Louvain/Leiden; reconcile with embedding clusters via consensus labels; adjust memberships.
 
-3) Level 1 → Level 2 (Super‑topics)
+(3) Level 1 → Level 2 (Super‑topics)
 
 - Agglomerative over L1 centroids; ensure max fan‑out and depth limits for traversal.
 
-4) Cluster edges
+(4)) Cluster edges
 
 - `cluster_edges`: member→cluster (entities→L1), cluster→super (L1→L2), optional cross‑links between L1 siblings for known taxonomies.
 
-5) Bridge labeling
+(5) Bridge labeling
 
 - Mark `relations.layer_bridge=true` if edge crosses levels (0↔1, 1↔2) or joins distant communities with high semantic similarity/provenance.
 
@@ -351,7 +352,7 @@ if (!db._graphs().some(g => g._key === graphName)) {
 
 ### Appendix B — Path Prompt Template
 
-```
+```text
 Hierarchy context (HiRAG):
 - Topic ▸ Subtopic ▸ Section summaries: <N lines>
 

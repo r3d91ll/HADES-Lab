@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Mapping
+from typing import Any, Mapping
 
 from core.database.arango.memory_client import ArangoMemoryClient
 
@@ -12,7 +12,7 @@ from .schema_manager import GraphCollections
 logger = logging.getLogger(__name__)
 
 
-def _sum_result(result: list[int]) -> int:
+def _sum_result(result: list[Any]) -> int:
     return int(sum(result)) if result else 0
 
 
@@ -64,12 +64,12 @@ def ingest_entities_from_arxiv(
         }}
       IN {collections.entities}
       OPTIONS {{ keepNull: false }}
-      RETURN 1
+      RETURN {{ count: 1 }}
     """
 
     logger.debug("Upserting entities from arxiv_metadata", extra={"limit": limit})
     result = client.execute_query(query, bind)
-    return _sum_result(result)
+    return _sum_result([row.get('count', 0) for row in result])
 
 
 def build_semantic_relations(
@@ -139,12 +139,12 @@ def build_semantic_relations(
           }}
         IN {collections.relations}
         OPTIONS {{ keepNull: false }}
-        RETURN 1
+        RETURN {{ count: 1 }}
     """
 
     logger.debug("Building bootstrap relations", extra={"top_k": top_k, "limit": limit})
     result = client.execute_query(query, bind)
-    return _sum_result(result)
+    return _sum_result([row.get('count', 0) for row in result])
 
 
 def build_category_hierarchy(
@@ -228,7 +228,7 @@ def build_category_hierarchy(
         UPDATE {{ updated_at: now }}
       IN {collections.cluster_edges}
       OPTIONS {{ keepNull: false }}
-      RETURN 1
+      RETURN {{ count: 1 }}
     """
 
     membership_query = f"""
@@ -257,14 +257,14 @@ def build_category_hierarchy(
       OPTIONS {{ keepNull: false }}
       UPDATE entity_doc WITH {{ cluster_id: cluster_id }} IN {collections.entities}
       OPTIONS {{ keepNull: false }}
-      RETURN 1
+      RETURN {{ count: 1 }}
     """
 
     logger.debug("Building category hierarchy", extra={"limit": limit})
     cluster_result = client.execute_query(cluster_query, bind)
     membership_result = client.execute_query(membership_query, bind)
     return {
-        "cluster_links": _sum_result(cluster_result),
-        "membership_edges": _sum_result(membership_result),
+        "cluster_links": _sum_result([row.get('count', 0) for row in cluster_result]),
+        "membership_edges": _sum_result([row.get('count', 0) for row in membership_result]),
     }
 
