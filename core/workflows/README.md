@@ -92,7 +92,7 @@ workflow = PDFWorkflow(
             "chunk_size": 1000
         },
         "embedding": {
-            "model": "jinaai/jina-embeddings-v3",
+            "model": "jinaai/jina-embeddings-v4",
             "device": "cuda",
             "batch_size": 32
         },
@@ -425,7 +425,7 @@ workflow:
     chunk_overlap: 200
 
   embedding:
-    model: jinaai/jina-embeddings-v3
+    model: jinaai/jina-embeddings-v4
     device: cuda
     batch_size: 32
     use_fp16: true
@@ -434,9 +434,9 @@ workflow:
     type: arango
     database: academy_store
     collections:
-      papers: arxiv_papers
-      chunks: arxiv_chunks
-      embeddings: arxiv_embeddings
+      metadata: arxiv_metadata
+      chunks: arxiv_abstract_chunks
+      embeddings: arxiv_abstract_embeddings
 
   error_handling:
     max_retries: 3

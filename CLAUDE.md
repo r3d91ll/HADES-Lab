@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+***THIS PROJECT USES jina_embeddings_v4***
+***ALL CONFIGURATION SCRIPTS AND YAML FILES GO IN THE core/config/ DIRECTORY***
+
 ## HADES — Conveyance Framework (System Prompt)
 
 **Mission:**
@@ -100,8 +103,8 @@ For each run/condition:
 
 From the Conveyance Framework: **C = (W·R·H/T)·Ctx^α**
 
-- **Naive chunking** breaks context awareness → Ctx approaches 0 → **C = 0** (zero-propagation)
-- **Late chunking** preserves full document context → Ctx remains high → **C is maximized**
+* **Naive chunking** breaks context awareness → Ctx approaches 0 → **C = 0** (zero-propagation)
+* **Late chunking** preserves full document context → Ctx remains high → **C is maximized**
 
 ### Implementation Requirements
 
@@ -121,9 +124,9 @@ chunks = create_chunks_with_context(full_encoding, chunk_size=512)  # Context-aw
 
 ### Embedder Selection
 
-- **High throughput (48+ papers/sec)**: Use `SentenceTransformersEmbedder`
-- **Sophisticated processing**: Use `JinaV4Embedder` (transformers)
-- **Both MUST use late chunking**: This is non-negotiable
+* **High throughput (48+ papers/sec)**: Use `SentenceTransformersEmbedder`
+* **Sophisticated processing**: Use `JinaV4Embedder` (transformers)
+* **Both MUST use late chunking**: This is non-negotiable
 
 ## 🚨 CRITICAL: Development Cycle
 
@@ -251,7 +254,7 @@ python workflow_pdf_batch.py \
     --num-workers 32
 
 # Run ArXiv metadata workflow
-python workflow_arxiv_metadata.py \
+python workflow_arxiv_initial_ingest.py \
     --config ../config/workflows/arxiv_metadata_default.yaml
 ```
 
@@ -289,30 +292,30 @@ tail -f core/logs/*.log
 The HADES system implements a parallel processing architecture optimized for the Conveyance Framework equation **C = (W·R·H/T)·Ctx^α**:
 
 1. **Workflow Layer** (`core/workflows/`)
-   - `workflow_base.py`: Abstract base class for all workflows
-   - `workflow_arxiv_parallel.py`: Production multi-GPU parallel processing
-   - `workflow_pdf_batch.py`: Direct PDF processing without database dependencies
-   - `workflow_arxiv_memory.py`: Memory-optimized processing for large documents
+   * `workflow_base.py`: Abstract base class for all workflows
+   * `workflow_arxiv_parallel.py`: Production multi-GPU parallel processing
+   * `workflow_pdf_batch.py`: Direct PDF processing without database dependencies
+   * `workflow_arxiv_memory.py`: Memory-optimized processing for large documents
 
 2. **Embedder Layer** (`core/embedders/`)
-   - `JinaV4Embedder`: 2048-dimensional embeddings with 32k context window
-   - `SentenceTransformersEmbedder`: High-throughput embeddings
-   - All embedders implement late chunking (mandatory)
+   * `JinaV4Embedder`: 2048-dimensional embeddings with 32k context window
+   * `SentenceTransformersEmbedder`: High-throughput embeddings
+   * All embedders implement late chunking (mandatory)
 
 3. **Storage Layer** (`core/database/`)
-   - **ArangoDB**: Graph database for processed documents and embeddings
-   - **PostgreSQL**: Complete ArXiv metadata (2.7M+ papers)
-   - **LMDB**: High-performance key-value storage for caching
+   * **ArangoDB**: Graph database for processed documents and embeddings
+   * **PostgreSQL**: Complete ArXiv metadata (2.7M+ papers)
+   * **LMDB**: High-performance key-value storage for caching
 
 4. **Monitoring Layer** (`core/monitoring/`)
-   - Real-time progress tracking
-   - Performance metrics collection
-   - GPU utilization monitoring
-   - Memory usage tracking
+   * Real-time progress tracking
+   * Performance metrics collection
+   * GPU utilization monitoring
+   * Memory usage tracking
 
 ### Module Organization
 
-```
+```dir
 HADES-Lab/
 ├── core/                      # Core infrastructure (reusable)
 │   ├── workflows/            # Processing workflows
@@ -334,20 +337,20 @@ HADES-Lab/
 
 ### Key Technical Features
 
-- **Parallel GPU Processing**: Multi-worker architecture with GPU isolation
-- **Late Chunking**: Preserves context across chunk boundaries (mandatory)
-- **Atomic Transactions**: All-or-nothing database operations
-- **Memory Optimization**: Streaming processing for large documents
-- **Error Recovery**: Checkpoint-based resumption
-- **Phase Separation**: Extraction → Embedding pipeline
+* **Parallel GPU Processing**: Multi-worker architecture with GPU isolation
+* **Late Chunking**: Preserves context across chunk boundaries (mandatory)
+* **Atomic Transactions**: All-or-nothing database operations
+* **Memory Optimization**: Streaming processing for large documents
+* **Error Recovery**: Checkpoint-based resumption
+* **Phase Separation**: Extraction → Embedding pipeline
 
 ### Performance Characteristics
 
-- **Throughput**: 40+ papers/second with parallel processing
-- **GPU Memory**: 7-8GB per worker with fp16
-- **Batch Sizes**: 1000 records (I/O), 128 embeddings (GPU)
-- **Context Window**: 32k tokens (Jina v4)
-- **Embedding Dimensions**: 2048 (Jina v4), 768 (Sentence Transformers)
+* **Throughput**: 40+ papers/second with parallel processing
+* **GPU Memory**: 7-8GB per worker with fp16
+* **Batch Sizes**: 1000 records (I/O), 128 embeddings (GPU)
+* **Context Window**: 32k tokens (Jina v4)
+* **Embedding Dimensions**: 2048 (Jina v4), 768 (Sentence Transformers)
 
 ## Acheron Protocol - Code Preservation
 

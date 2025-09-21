@@ -110,7 +110,7 @@ class ArangoDocumentProvider(DocumentProvider):
     Document provider for ArangoDB (our current ArXiv setup).
     """
     
-    def __init__(self, arango_client, db_name: str = 'academy_store', username: str = None):
+    def __init__(self, arango_client, db_name: str = 'academy_store', username: Optional[str] = None):
         """
         Initialize the ArangoDocumentProvider and establish a connection to the ArangoDB database.
         
@@ -140,15 +140,15 @@ class ArangoDocumentProvider(DocumentProvider):
     
     def get_document_chunks(self, document_id: str) -> List[str]:
         """
-        Retrieve ordered text chunks for a paper from the ArangoDB `arxiv_chunks` collection.
+        Retrieve ordered text chunks for a paper from the ArangoDB `arxiv_abstract_chunks` collection.
         
-        Given a paper identifier, queries the `arxiv_chunks` collection for documents with matching
+        Given a paper identifier, queries the `arxiv_abstract_chunks` collection for documents with matching
         `paper_id`, sorts results by `chunk_index` ascending, and returns the list of chunk texts.
         On any error (including query failure) an empty list is returned.
         """
         try:
             cursor = self.db.aql.execute("""
-            FOR chunk IN arxiv_chunks
+            FOR chunk IN arxiv_abstract_chunks
                 FILTER chunk.paper_id == @paper_id
                 SORT chunk.chunk_index ASC
                 RETURN chunk.text
@@ -175,10 +175,10 @@ class FileSystemDocumentProvider(DocumentProvider):
     
     def get_document_text(self, document_id: str) -> Optional[str]:
         """
-        Return the full text of a document read from the filesystem or None if unavailable"""
         Return the full text of a document stored as "<document_id>.txt" under the provider's base path.
-        
-        If the file is found and readable, returns its contents as a UTF-8 string. If the file cannot be opened or read, logs the error and returns None.
+
+        If the file is found and readable, returns its contents as a UTF-8 string.
+        If the file cannot be opened or read, logs the error and returns None.
         """
         try:
             file_path = f"{self.base_path}/{document_id}.txt"
@@ -244,7 +244,7 @@ class CitationStorage(ABC):
 class ArangoCitationStorage(CitationStorage):
     """Citation storage for ArangoDB."""
     
-    def __init__(self, arango_client, db_name: str = 'academy_store', username: str = None):
+    def __init__(self, arango_client, db_name: str = 'academy_store', username: Optional[str] = None):
         """
         Initialize the ArangoDocumentProvider and establish a connection to the ArangoDB database.
         
@@ -531,7 +531,7 @@ class UniversalBibliographyExtractor:
             logger.error(f"Error parsing bibliography entries for {paper_id}: {e}")
             return []
     
-    def _parse_single_entry(self, entry_text: str, paper_id: str, entry_number: str = None) -> Optional[BibliographyEntry]:
+    def _parse_single_entry(self, entry_text: str, paper_id: str, entry_number: Optional[str] = None) -> Optional[BibliographyEntry]:
         """
         Parse a single bibliography entry string into a BibliographyEntry dataclass.
         

@@ -17,10 +17,11 @@ import re
 import time
 import logging
 import requests
-import xml.etree.ElementTree as ET
+from requests.adapters import HTTPAdapter
+from defusedxml import ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 from urllib.parse import quote
 import hashlib
@@ -98,10 +99,21 @@ class ArXivAPIClient:
         self.last_request_time = 0
         
         # ArXiv API endpoints
-        self.api_base_url = "http://export.arxiv.org/api/query"
+        self.api_base_url = "https://export.arxiv.org/api/query"
         self.pdf_base_url = "https://arxiv.org/pdf"
         self.latex_base_url = "https://arxiv.org/e-print"
-        
+
+        self.user_agent = os.getenv(
+            "HADES_USER_AGENT",
+            "HADES-Lab/1.0 (contact: support@hades.local)"
+        )
+
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": self.user_agent})
+        adapter = HTTPAdapter()
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+
         logger.info(f"Initialized ArXiv API client with {rate_limit_delay}s rate limit")
     
     def _enforce_rate_limit(self):
@@ -116,19 +128,34 @@ class ArXivAPIClient:
         
         self.last_request_time = time.time()
     
-    def _make_request(self, url: str, params: Dict = None) -> requests.Response:
-        """Make HTTP request with retries and error handling"""
+    def _make_request(
+        self,
+        url: str,
+        params: Optional[Dict[str, Any]] = None,
+        *,
+        method: str = "GET",
+        stream: bool = False,
+        allow_redirects: bool = True,
+    ) -> requests.Response:
+        """Make HTTP request with retries and error handling."""
         self._enforce_rate_limit()
-        
+
         for attempt in range(self.max_retries):
             try:
-                logger.debug(f"Request attempt {attempt + 1}: {url}")
-                response = requests.get(url, params=params, timeout=self.timeout)
+                logger.debug("Request attempt %d: %s", attempt + 1, url)
+                response = self.session.request(
+                    method,
+                    url,
+                    params=params,
+                    timeout=self.timeout,
+                    stream=stream,
+                    allow_redirects=allow_redirects,
+                )
                 response.raise_for_status()
                 return response
-                
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Request failed (attempt {attempt + 1}): {e}")
+
+            except requests.exceptions.RequestException as exc:
+                logger.warning("Request failed (attempt %d): %s", attempt + 1, exc)
                 if attempt < self.max_retries - 1:
                     # Exponential backoff
                     delay = (2 ** attempt) * self.rate_limit_delay
@@ -136,26 +163,26 @@ class ArXivAPIClient:
                 else:
                     raise
         
-        raise requests.exceptions.RequestException("Max retries exceeded")
     
     def validate_arxiv_id(self, arxiv_id: str) -> bool:
         """
         Validate ArXiv ID format.
-        
+
         Supports both old and new formats:
         - New: YYMM.NNNNN[vN] (e.g., 2508.21038, 1234.5678v2)
         - Old: subject-class/YYMMnnn (e.g., cs.AI/0601001)
         """
+        base_id = re.sub(r'v\d+$', '', arxiv_id)
         # New format: YYMM.NNNNN[vN]
-        new_format = re.match(r'^\d{4}\.\d{4,5}(v\d+)?$', arxiv_id)
+        new_format = re.match(r'^\d{4}\.\d{4,5}$', base_id)
         if new_format:
             return True
-        
+
         # Old format: subject-class/YYMMnnn
-        old_format = re.match(r'^[a-z-]+(\.[A-Z]{2})?/\d{7}$', arxiv_id)
+        old_format = re.match(r'^[a-z-]+(\.[A-Z]{2})?/\d{7}$', base_id)
         if old_format:
             return True
-        
+
         return False
     
     def get_paper_metadata(self, arxiv_id: str) -> Optional[ArXivMetadata]:
@@ -272,16 +299,25 @@ class ArXivAPIClient:
     
     def _check_latex_availability(self, arxiv_id: str) -> bool:
         """Check if LaTeX source is available for a paper"""
+        if os.getenv("HADES_CHECK_LATEX", "false").lower() != "true":
+            return False
         try:
             latex_url = f"{self.latex_base_url}/{arxiv_id}"
-            
-            # Make a HEAD request to check availability
-            self._enforce_rate_limit()
-            response = requests.head(latex_url, timeout=10)
-            
-            # LaTeX is available if we get 200
+            response = self._make_request(
+                latex_url,
+                method="HEAD",
+                allow_redirects=True,
+            )
+
             return response.status_code == 200
-            
+
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status == 404:
+                return False
+            logger.debug("HEAD request for %s failed with status %s", arxiv_id, status)
+            return False
+
         except Exception:
             # If check fails, assume no LaTeX
             return False
@@ -353,17 +389,40 @@ class ArXivAPIClient:
         try:
             logger.info(f"Downloading PDF for {arxiv_id}")
             pdf_url = f"{self.pdf_base_url}/{arxiv_id}.pdf"
-            
-            response = self._make_request(pdf_url)
-            
-            with open(pdf_path, 'wb') as f:
-                f.write(response.content)
-            
+
+            response = self._make_request(pdf_url, stream=True)
+            bytes_written = 0
+            try:
+                with open(pdf_path, 'wb') as outfile:
+                    for chunk in response.iter_content(chunk_size=65536):
+                        if chunk:
+                            outfile.write(chunk)
+                            bytes_written += len(chunk)
+            finally:
+                response.close()
+
+            content_length = response.headers.get('Content-Length')
+            if content_length:
+                try:
+                    expected = int(content_length)
+                except ValueError:
+                    expected = None
+                else:
+                    if expected != bytes_written:
+                        pdf_path.unlink(missing_ok=True)
+                        raise IOError(
+                            f"Incomplete PDF download: expected {expected} bytes, got {bytes_written}"
+                        )
+
             file_size = pdf_path.stat().st_size
             logger.info(f"Downloaded PDF: {pdf_path} ({file_size:,} bytes)")
-            
+
         except Exception as e:
             logger.error(f"Failed to download PDF for {arxiv_id}: {e}")
+            try:
+                pdf_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             return DownloadResult(
                 success=False,
                 arxiv_id=arxiv_id,
@@ -375,17 +434,40 @@ class ArXivAPIClient:
             try:
                 logger.info(f"Downloading LaTeX for {arxiv_id}")
                 latex_url = f"{self.latex_base_url}/{arxiv_id}"
-                
-                response = self._make_request(latex_url)
-                
-                with open(latex_path, 'wb') as f:
-                    f.write(response.content)
-                
+
+                response = self._make_request(latex_url, stream=True)
+                bytes_written = 0
+                try:
+                    with open(latex_path, 'wb') as outfile:
+                        for chunk in response.iter_content(chunk_size=65536):
+                            if chunk:
+                                outfile.write(chunk)
+                                bytes_written += len(chunk)
+                finally:
+                    response.close()
+
+                content_length = response.headers.get('Content-Length')
+                if content_length:
+                    try:
+                        expected = int(content_length)
+                    except ValueError:
+                        expected = None
+                    else:
+                        if expected != bytes_written:
+                            latex_path.unlink(missing_ok=True)
+                            raise IOError(
+                                f"Incomplete LaTeX download: expected {expected} bytes, got {bytes_written}"
+                            )
+
                 logger.info(f"Downloaded LaTeX: {latex_path}")
-                
+
             except Exception as e:
                 logger.warning(f"Failed to download LaTeX for {arxiv_id}: {e}")
                 # Don't fail the entire operation if LaTeX fails
+                try:
+                    latex_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 latex_path = None
         
         return DownloadResult(
@@ -419,7 +501,7 @@ class ArXivAPIClient:
         Returns:
             Dictionary mapping ArXiv ID to metadata (None if failed)
         """
-        results = {}
+        results: Dict[str, Optional[ArXivMetadata]] = {}
         
         # Process in batches to respect API limits
         batch_size = 10
@@ -461,12 +543,19 @@ class ArXivAPIClient:
         logger.info(f"Fetched metadata for {len([r for r in results.values() if r])} out of {len(arxiv_ids)} papers")
         return results
 
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        self.session.close()
+
 
 # Convenience functions for common operations
 def quick_fetch_metadata(arxiv_id: str) -> Optional[ArXivMetadata]:
     """Quick metadata fetch for a single paper"""
     client = ArXivAPIClient()
-    return client.get_paper_metadata(arxiv_id)
+    try:
+        return client.get_paper_metadata(arxiv_id)
+    finally:
+        client.close()
 
 
 def quick_download_paper(arxiv_id: str, 
@@ -476,8 +565,10 @@ def quick_download_paper(arxiv_id: str,
     client = ArXivAPIClient()
     pdf_path = Path(pdf_dir)
     latex_path = Path(pdf_dir.replace('/pdf', '/latex')) if include_latex else None
-    
-    return client.download_paper(arxiv_id, pdf_path, latex_path)
+    try:
+        return client.download_paper(arxiv_id, pdf_path, latex_path)
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

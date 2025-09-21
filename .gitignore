@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# PHP dependencies (Composer)
+vendor/
+
 # C extensions
 *.so
 
@@ -207,9 +210,25 @@ credentials/
 config.ini
 config.yaml
 config.yml
+*_config.json
+secrets*.json
+*.env
+*.env.local
+*.env.production
 !config.example.*
 !config.sample.*
 !config.template.*
+!*.example.env
+
+# Database passwords and API keys
+*password*.txt
+*credential*.json
+*secret*.yml
+arxiv_repository.env
+arango_password.txt
+!*example*
+!*template*
+!*sample*
 
 # Data files (customize as needed)
 /data/
@@ -389,3 +408,10 @@ tools/arxiv/REORGANIZATION_NOTICE.md
 tools/arxiv/SCRIPT_REORGANIZATION_ANALYSIS.md
 tools/arxiv/utils/SCRIPT_ANALYSIS.md
 scratch/*
+dev-utils/*
+core/database/arango/proxies/.gocache/
+*.gocache/
+**/.gocache/
+core/database/arango/proxies/roproxy
+core/database/arango/proxies/rwproxy
+benchmarks/reports/*

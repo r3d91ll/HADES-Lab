@@ -16,8 +16,8 @@ try:
     from .embedders_jina import JinaV4Embedder, ChunkWithEmbedding
     EmbedderFactory.register("jina", JinaV4Embedder)
 except ImportError:
-    JinaV4Embedder = None
-    ChunkWithEmbedding = None
+    JinaV4Embedder = None  # type: ignore[misc]
+    ChunkWithEmbedding = None  # type: ignore[misc]
 
 # Backward compatibility exports
 __all__ = [

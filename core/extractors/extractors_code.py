@@ -57,6 +57,7 @@ class CodeExtractor(ExtractorBase):
         
         # Initialize Tree-sitter extractor
         self.use_tree_sitter = use_tree_sitter
+        self.tree_sitter: Optional[TreeSitterExtractor]
         if use_tree_sitter:
             try:
                 self.tree_sitter = TreeSitterExtractor()

@@ -158,7 +158,7 @@ pipeline:
       use_fp16: true
     storage:
       database: "academy_store"
-      collection: "arxiv_papers"
+      collection: "arxiv_metadata"
 
 # Load hierarchical config
 config = ConfigManager.load_config("pipeline_config.yaml")
@@ -286,7 +286,7 @@ class EmbeddingConfig(BaseConfig):
     Embedding configuration.
 
     Attributes:
-        model_name: Name of embedding model (e.g., "jinaai/jina-embeddings-v3")
+        model_name: Name of embedding model (e.g., "jinaai/jina-embeddings-v4")
         device: Compute device ("cuda" or "cpu")
         batch_size: Number of texts to process simultaneously
         use_fp16: Use half-precision for memory efficiency

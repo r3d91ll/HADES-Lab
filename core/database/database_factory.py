@@ -10,9 +10,11 @@ The factory enables flexible WHERE dimension management by abstracting
 the specific database implementation from the workflow logic.
 """
 
-from typing import Optional, Dict, Any
 import logging
 import os
+from typing import Any, Dict, Optional
+
+from core.database.arango import ArangoMemoryClient, resolve_memory_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,64 +28,65 @@ class DatabaseFactory:
     """
 
     @classmethod
-    def get_arango(cls,
-                   database: str = "academy_store",
-                   username: str = "root",
-                   password: Optional[str] = None,
-                   host: str = "localhost",
-                   port: int = 8529,
-                   use_unix: bool = True,
-                   **kwargs) -> Any:
-        """
-        Get ArangoDB connection.
+    def get_arango(
+        cls,
+        database: str = "academy_store",
+        username: str = "root",
+        password: Optional[str] = None,
+        host: str = "localhost",
+        port: int = 8529,
+        use_unix: Optional[bool] = None,
+        base_url: Optional[str] = None,
+        socket_path: Optional[str] = None,
+        read_socket: Optional[str] = None,
+        write_socket: Optional[str] = None,
+        use_proxies: Optional[bool] = None,
+        connect_timeout: Optional[float] = None,
+        read_timeout: Optional[float] = None,
+        write_timeout: Optional[float] = None,
+        **_: Any,
+    ) -> ArangoMemoryClient:
+        """Return the optimized ArangoDB memory client.
 
-        Args:
-            database: Database name
-            username: Username
-            password: Password (or from env)
-            host: Database host
-            port: Database port
-            use_unix: Use Unix socket if available
-            **kwargs: Additional connection options
-
-        Returns:
-            ArangoDB connection object
+        The legacy python-arango client has been removed; this helper now wraps
+        :func:`resolve_memory_config` and returns :class:`ArangoMemoryClient` so
+        existing call-sites can seamlessly adopt the HTTP/2 pathway.
         """
-        # Get password from environment if not provided
+
         if password is None:
-            password = os.environ.get('ARANGO_PASSWORD')
+            password = os.environ.get("ARANGO_PASSWORD")
             if not password:
                 raise ValueError("ArangoDB password required (set ARANGO_PASSWORD env var)")
 
-        # Try Unix socket first if requested
-        if use_unix:
-            try:
-                from .arango_unix_client import get_database_for_workflow
-                db = get_database_for_workflow(
-                    db_name=database,
-                    username=username,
-                    password=password,
-                    prefer_unix=True
-                )
-                logger.info("✓ Using Unix socket for ArangoDB connection")
-                return db
-            except ImportError:
-                logger.warning("Unix socket client not available, falling back to HTTP")
-            except Exception as e:
-                logger.warning(f"Unix socket connection failed: {e}, falling back to HTTP")
+        # Preserve the old ``use_unix`` flag by mapping it to proxy usage when
+        # callers still provide it.
+        if use_unix is not None:
+            use_proxies = True if use_unix else False
 
-        # Fall back to standard HTTP connection
-        try:
-            from arango import ArangoClient
-            client = ArangoClient(hosts=f'http://{host}:{port}')
-            db = client.db(database, username=username, password=password)
-            logger.info(f"✓ Connected to ArangoDB via HTTP at {host}:{port}")
-            return db
-        except ImportError:
-            raise ImportError("python-arango not installed. Run: pip install python-arango")
-        except Exception as e:
-            logger.error(f"Failed to connect to ArangoDB: {e}")
-            raise
+        # Build a base URL from host/port when one was not explicitly supplied.
+        if base_url is None and host:
+            base_url = f"http://{host}:{port}"
+
+        config = resolve_memory_config(
+            database=database,
+            username=username,
+            password=password,
+            base_url=base_url,
+            socket_path=socket_path,
+            read_socket=read_socket,
+            write_socket=write_socket,
+            use_proxies=use_proxies,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            write_timeout=write_timeout,
+        )
+
+        logger.info(
+            "✓ Using Arango memory client via HTTP/2 (read_socket=%s, write_socket=%s)",
+            config.read_socket,
+            config.write_socket,
+        )
+        return ArangoMemoryClient(config)
 
     @classmethod
     def get_postgres(cls,
@@ -138,6 +141,62 @@ class DatabaseFactory:
         except Exception as e:
             logger.error(f"Failed to connect to PostgreSQL: {e}")
             raise
+
+    @classmethod
+    def get_arango_memory_service(
+        cls,
+        *,
+        database: str = "arxiv_repository",
+        username: str = "root",
+        password: Optional[str] = None,
+        socket_path: Optional[str] = None,
+        read_socket: Optional[str] = None,
+        write_socket: Optional[str] = None,
+        use_proxies: Optional[bool] = None,
+        base_url: Optional[str] = None,
+        connect_timeout: Optional[float] = None,
+        read_timeout: Optional[float] = None,
+        write_timeout: Optional[float] = None,
+    ) -> ArangoMemoryClient:
+        """Return the optimized ArangoDB memory client.
+
+        Args:
+            database: Target database name.
+            username: Authentication user (default "root").
+            password: Password (falls back to ``ARANGO_PASSWORD``).
+            socket_path: Explicit Unix socket used for both reads and writes.
+            read_socket: Optional read-only proxy socket.
+            write_socket: Optional read-write proxy socket.
+            use_proxies: Force proxy usage (defaults to environment autodetect).
+            base_url: Base URL for HTTP/2 client (defaults to http://localhost).
+            connect_timeout: Override connection timeout.
+            read_timeout: Override read timeout.
+            write_timeout: Override write timeout.
+
+        Returns:
+            Configured :class:`ArangoMemoryClient` instance.
+        """
+
+        config = resolve_memory_config(
+            database=database,
+            username=username,
+            password=password,
+            socket_path=socket_path,
+            read_socket=read_socket,
+            write_socket=write_socket,
+            use_proxies=use_proxies,
+            base_url=base_url,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            write_timeout=write_timeout,
+        )
+
+        logger.info(
+            "✓ Using Arango memory client (read_socket=%s, write_socket=%s)",
+            config.read_socket,
+            config.write_socket,
+        )
+        return ArangoMemoryClient(config)
 
     @classmethod
     def get_redis(cls,

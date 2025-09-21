@@ -52,6 +52,7 @@ reviews:
     - "!**/*.pyo"
     - "!**/*.egg-info/**"
     - "!**/Acheron/**"         # Our deprecated code archive
+    - "!**/tests/**"             # Exclude tests from review scope
 
   # Path-specific instructions - apply to all paths
   path_instructions:
@@ -98,6 +99,20 @@ reviews:
         - α value (default 1.7)
         - Zero-propagation check
         - Evidence links
+
+    - path: "core/workflows/**/*.py"
+      instructions: |
+        Embedding strategy expectations:
+        - Prefer JinaV4Embedder with late chunking for high-fidelity workflows.
+        - When SentenceTransformersEmbedder is selected for throughput, document the trade-off explicitly.
+        - Confirm late chunking paths never discard tail tokens.
+
+    - path: "core/embedders/**/*.py"
+      instructions: |
+        Embedders must honor the standard EmbeddingConfig interface:
+        - Accept EmbeddingConfig or equivalent dict input.
+        - Ensure fallback embeddings match EMBEDDING_DIM.
+        - Preserve late chunking semantics (encode once, pool later).
 
   # Pre-merge checks for PR descriptions
   pre_merge_checks:
