@@ -1,6 +1,8 @@
 import pytest
 
 from core.tools.sharding.spec import PartitionResult, PartitionSpec
+from core.tools.sharding import NullTokenBucket
+from core.tools.sharding.lease import LeaseRecord
 from core.workflows.arxiv_repository.arxiv_graph_build.workflow_arxiv_graph_build import (
     ArxivGraphBuildConfig,
     ArxivGraphBuildWorkflow,
@@ -78,6 +80,28 @@ def test_arxiv_graph_build_workflow(monkeypatch):
     monkeypatch.setattr(module, "ArxivPartitionAdapter", DummyAdapter)
     monkeypatch.setattr(module, "ShardRunner", DummyRunner)
 
+    class DummyLeaseStore:
+        async def acquire(self, partition_id, owner, ttl):
+            return True
+
+        async def heartbeat(self, partition_id, owner, ttl):
+            return None
+
+        async def release(self, partition_id, owner):
+            return None
+
+        async def mark_succeeded(self, partition_id, owner, result):
+            return None
+
+        async def mark_failed(self, partition_id, owner, error):
+            return 0
+
+        async def get_record(self, partition_id):
+            return LeaseRecord(partition_id=partition_id)
+
+        def close(self):
+            return None
+
     workflow = ArxivGraphBuildWorkflow(
         ArxivGraphBuildConfig(
             total_buckets=2,
@@ -87,6 +111,8 @@ def test_arxiv_graph_build_workflow(monkeypatch):
             semantic_score_threshold=0.8,
             semantic_embed_source="test_source",
             semantic_snapshot_id="snapshot-test",
+            lease_store_factory=lambda: DummyLeaseStore(),
+            token_bucket_factory=lambda: {"default": NullTokenBucket()},
         )
     )
 

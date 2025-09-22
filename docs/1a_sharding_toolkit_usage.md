@@ -152,6 +152,11 @@ async def run_ingest(adapter):
 
 For HiRAG-specific use cases, import ready-made jobs such as `HiragEntityIngestJob`, `HiragRelationsJob`, `HiragHierarchyJob`, and `HiragSemanticEdgesJob` from `core.tools.sharding`.
 
+### 5. Lease & Throttle Backends
+
+- Default configuration uses Redis (via `/run/redis/redis-server.sock`) for both leases and token buckets when available.
+- When Redis is unavailable, the toolkit falls back to in-memory leases and no-op throttles; for distributed runs, configure `redis_socket_path` in the workflow or pass custom factories.
+
 ## Monitoring & Telemetry
 
 The runner emits metric events via an optional `metrics` callback. Recommended payloads:

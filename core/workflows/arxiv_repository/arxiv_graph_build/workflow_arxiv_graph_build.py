@@ -4,26 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Mapping, Optional
+
+try:
+    import redis  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    redis = None  # type: ignore
 
 from core.database.database_factory import DatabaseFactory
 from core.graph.hirag.service import HiragService
 from core.graph.schema import GraphSchemaManager
 from core.tools.sharding import (
     ArxivPartitionAdapter,
-    FixedTokenBucket,
     HiragEntityIngestJob,
     HiragHierarchyJob,
     HiragRelationsJob,
     HiragSemanticEdgesJob,
-    InMemoryLeaseStore,
     NullTokenBucket,
     PartitionResult,
+    RedisLeaseStore,
+    RedisTokenBucket,
     ShardRunner,
 )
-from core.tools.sharding.lease import LeaseStore
+from core.tools.sharding.lease import LeaseStore, InMemoryLeaseStore
 from core.tools.sharding.token_bucket import TokenBucket
 from core.tools.sharding.spec import PartitionSpec
 from core.workflows.workflow_base import WorkflowBase, WorkflowConfig, WorkflowResult
@@ -32,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 LeaseStoreFactory = Callable[[], LeaseStore]
+TokenBucketFactory = Callable[[], Dict[str, TokenBucket]]
 @dataclass
 class ArxivGraphBuildConfig(WorkflowConfig):
     """Configuration for the ArXiv graph build workflow."""
@@ -49,16 +55,47 @@ class ArxivGraphBuildConfig(WorkflowConfig):
     semantic_embed_source: str = "jina_v4"
     semantic_snapshot_id: str = "snapshot-unknown"
     lease_store_factory: Optional[LeaseStoreFactory] = None
+    token_bucket_factory: Optional[TokenBucketFactory] = None
+    redis_socket_path: Optional[str] = "/run/redis/redis-server.sock"
 
     def build_lease_store(self) -> LeaseStore:
         if self.lease_store_factory is not None:
             return self.lease_store_factory()
+        socket_path = self.redis_socket_path
+        if socket_path and redis is not None:
+            try:
+                probe = redis.Redis(unix_socket_path=socket_path)
+                probe.ping()
+                probe.close()
+                return RedisLeaseStore(
+                    socket_path=socket_path,
+                    namespace=f"hades:{self.name}:lease",
+                )
+            except Exception:
+                pass
+        # Fallback: in-memory store for local runs (non-durable)
         return InMemoryLeaseStore()
 
     def build_token_buckets(self) -> Dict[str, TokenBucket]:
+        if self.token_bucket_factory is not None:
+            return self.token_bucket_factory()
         if self.rate_limit is None or self.rate_limit <= 0:
             return {"default": NullTokenBucket()}
-        return {"default": FixedTokenBucket(self.rate_limit)}
+        socket_path = self.redis_socket_path
+        if socket_path and redis is not None:
+            try:
+                probe = redis.Redis(unix_socket_path=socket_path)
+                probe.ping()
+                probe.close()
+                bucket = RedisTokenBucket(
+                    socket_path=socket_path,
+                    bucket_id=f"{self.name}:default",
+                    capacity=self.rate_limit,
+                )
+                return {"default": bucket}
+            except Exception:
+                pass
+        return {"default": NullTokenBucket()}
 
 
 class ArxivGraphBuildWorkflow(WorkflowBase):
@@ -119,6 +156,14 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
                 results = self._run_async(runner.run(partitions=partitions))
                 phase_results[phase_name] = results
                 items_processed += len(results)
+
+                close_fn = getattr(lease_store, "close", None)
+                if callable(close_fn):
+                    close_fn()
+                for bucket in token_buckets.values():
+                    close_bucket = getattr(bucket, "close", None)
+                    if callable(close_bucket):
+                        close_bucket()
 
                 if len(results) != total_partitions:
                     skipped = total_partitions - len(results)
