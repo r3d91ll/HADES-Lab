@@ -415,3 +415,5 @@ core/database/arango/proxies/.gocache/
 core/database/arango/proxies/roproxy
 core/database/arango/proxies/rwproxy
 benchmarks/reports/*
+# Keep local PRDs out of version control
+docs/prd/

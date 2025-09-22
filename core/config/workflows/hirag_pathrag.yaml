@@ -1,9 +1,11 @@
-# HiRAG × PathRAG runtime configuration
-hirag_pathrag:
+# HiRAG × PathRAG runtime configuration (split modules)
+hirag: &hirag_defaults
   topic_k: 8
   beam: [8, 4, 2]
   candidate_cap: 500
   deg_alpha: 0.005
+
+pathrag: &pathrag_defaults
   path_max_paths: 6
   path_max_hops: 5
   path_lambda: 0.3
@@ -15,3 +17,8 @@ hirag_pathrag:
     derives_from: 0.6
     extends: 0.5
     coref: 0.4
+
+# Backwards compatibility block; prefer the explicit `hirag` and `pathrag` keys above.
+hirag_pathrag:
+  hirag: *hirag_defaults
+  pathrag: *pathrag_defaults
