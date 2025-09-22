@@ -17,6 +17,14 @@ class PathExtractionConfig:
 
 def build_weighted_path_query(config: PathExtractionConfig) -> str:
     """Return an AQL query that extracts weighted paths."""
+    
+    # Validate parameters to prevent injection
+    if config.max_paths <= 0:
+        raise ValueError("max_paths must be positive")
+    if config.max_hops <= 0:
+        raise ValueError("max_hops must be positive")
+    if config.lambda_term < 0:
+        raise ValueError("lambda_term must be non-negative")
 
     query = f"""
     FOR v, e, p IN OUTBOUND SHORTEST_PATH @source TO @target

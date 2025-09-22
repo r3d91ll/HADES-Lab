@@ -27,6 +27,9 @@ class ShardJob(Protocol):
         ...
 
 
+ShardExecutor = Callable[[PartitionSpec, Mapping[str, Any]], Awaitable[JobOutput]]
+
+
 class PythonShardJob(ShardJob):
     """Wraps a Python callable into the shard job interface."""
 
@@ -79,7 +82,7 @@ class AqlShardJob(ShardJob):
 class ExternalShardJob(ShardJob):
     """Placeholder for out-of-process workers (e.g., Go, gRPC)."""
 
-    def __init__(self, executor: Callable[[PartitionSpec, Mapping[str, Any]], Awaitable[JobOutput]]):
+    def __init__(self, executor: ShardExecutor):
         self._executor = executor
 
     async def run(self, spec: PartitionSpec, params: Mapping[str, Any]) -> JobOutput:

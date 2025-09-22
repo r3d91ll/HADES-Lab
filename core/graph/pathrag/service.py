@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Mapping as MappingABC
+from dataclasses import MISSING, dataclass, field, fields
 from datetime import datetime, timezone
+from numbers import Real
 from typing import Mapping
 
 from core.database.arango.memory_client import ArangoMemoryClient
@@ -43,11 +45,80 @@ class PathragConfig:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> "PathragConfig":
+        if not isinstance(payload, MappingABC):
+            raise TypeError(
+                f"{cls.__name__}.from_dict expected a mapping, got {type(payload).__name__}"
+            )
+
         data = dict(payload)
-        relation_boost = data.get("relation_boost")
-        if relation_boost is not None:
-            data["relation_boost"] = dict(relation_boost)
-        return cls(**data)
+        field_defs = {f.name: f for f in fields(cls)}
+
+        unexpected_keys = sorted(set(data) - set(field_defs))
+        if unexpected_keys:
+            raise ValueError(
+                f"Unexpected config keys: {', '.join(unexpected_keys)}"
+            )
+
+        missing_required = [
+            name
+            for name, definition in field_defs.items()
+            if definition.default is MISSING
+            and definition.default_factory is MISSING
+            and name not in data
+        ]
+        if missing_required:
+            raise ValueError(
+                f"Missing required config keys: {', '.join(missing_required)}"
+            )
+
+        def _ensure_int(name: str, value: object) -> int:
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(
+                    f"{cls.__name__}.{name} must be an int, got {type(value).__name__}"
+                )
+            return int(value)
+
+        def _ensure_real(name: str, value: object) -> float:
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise TypeError(
+                    f"{cls.__name__}.{name} must be a real number, got {type(value).__name__}"
+                )
+            return float(value)
+
+        processed: dict[str, object] = {}
+
+        if "path_max_paths" in data:
+            processed["path_max_paths"] = _ensure_int("path_max_paths", data["path_max_paths"])
+
+        if "path_max_hops" in data:
+            processed["path_max_hops"] = _ensure_int("path_max_hops", data["path_max_hops"])
+
+        if "path_lambda" in data:
+            processed["path_lambda"] = _ensure_real("path_lambda", data["path_lambda"])
+
+        if "path_epsilon" in data:
+            processed["path_epsilon"] = _ensure_real("path_epsilon", data["path_epsilon"])
+
+        if "relation_boost" in data:
+            relation_boost = data["relation_boost"]
+            if not isinstance(relation_boost, MappingABC):
+                raise TypeError(
+                    f"{cls.__name__}.relation_boost must be a mapping, got {type(relation_boost).__name__}"
+                )
+            converted: dict[str, float] = {}
+            for key, value in relation_boost.items():
+                if not isinstance(key, str):
+                    raise TypeError(
+                        f"{cls.__name__}.relation_boost keys must be strings, got {type(key).__name__}"
+                    )
+                if isinstance(value, bool) or not isinstance(value, Real):
+                    raise TypeError(
+                        f"{cls.__name__}.relation_boost values must be real numbers, got {type(value).__name__} for key '{key}'"
+                    )
+                converted[key] = float(value)
+            processed["relation_boost"] = dict(converted)
+
+        return cls(**processed)
 
 
 class PathragService:

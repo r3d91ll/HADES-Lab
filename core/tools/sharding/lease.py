@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Protocol
+from dataclasses import dataclass
+from typing import Protocol
 
 from .spec import PartitionResult
 
@@ -47,7 +47,7 @@ class InMemoryLeaseStore(LeaseStore):
     """Lease store suitable for tests and local runs."""
 
     def __init__(self) -> None:
-        self._records: Dict[str, LeaseRecord] = {}
+        self._records: dict[str, LeaseRecord] = {}
         self._lock = asyncio.Lock()
 
     async def acquire(self, partition_id: str, owner: str, ttl: float) -> bool:

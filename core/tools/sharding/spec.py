@@ -61,10 +61,10 @@ class BasePartitionAdapter:
     """Convenience base class providing optional hooks."""
 
     def pre_shard(self, spec: PartitionSpec) -> None:  # noqa: D401 - trivial default
-        return None
+        pass
 
     def post_shard(self, spec: PartitionSpec, result: PartitionResult) -> None:  # noqa: D401 - trivial default
-        return None
+        pass
 
     def expected_invariants(self, spec: PartitionSpec, result: PartitionResult) -> None:
-        return None
+        pass

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import uuid
 from contextlib import asynccontextmanager
-from typing import Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .jobs import JobOutput, ShardJob, enrich_result
 from .lease import LeaseStore
 from .spec import PartitionInvariantError, PartitionProvider, PartitionResult, PartitionSpec
 from .token_bucket import NullTokenBucket, TokenBucket
 
-MetricEmitter = Callable[[str, PartitionSpec, Mapping[str, object]], None]
+logger = logging.getLogger(__name__)
+
+
+MetricEmitter = Callable[[str, PartitionSpec, Mapping[str, Any]], None]
 
 
 class ShardRunner:
@@ -122,9 +126,15 @@ class ShardRunner:
             try:
                 await self._lease_store.heartbeat(spec.id, self._owner_id, self._lease_ttl)
             except Exception:
+                logger.exception(
+                    "lease heartbeat failed for spec %s owner %s",
+                    spec.id,
+                    self._owner_id,
+                    extra={"spec_id": spec.id, "owner_id": self._owner_id},
+                )
                 break
 
-    def _emit(self, name: str, spec: PartitionSpec, payload: Mapping[str, object]) -> None:
+    def _emit(self, name: str, spec: PartitionSpec, payload: Mapping[str, Any]) -> None:
         if self._metrics is None:
             return
         self._metrics(name, spec, payload)

@@ -27,10 +27,12 @@ class ArxivPartitionAdapter(BasePartitionAdapter):
 
     def bind_params(self, spec: PartitionSpec) -> MutableMapping[str, object]:
         bounds = dict(spec.bounds)
+        if "hash_low" not in bounds or "hash_high" not in bounds:
+            raise ValueError(f"Missing hash bounds in partition spec: {spec.id}")
         return {
             "hash_mod": bounds.get("hash_mod", self.total_buckets),
-            "hash_low": bounds.get("hash_low", 0),
-            "hash_high": bounds.get("hash_high", 0),
+            "hash_low": bounds["hash_low"],
+            "hash_high": bounds["hash_high"],
             "collection": self.metadata_collection,
             "key_field": self.key_field,
         }

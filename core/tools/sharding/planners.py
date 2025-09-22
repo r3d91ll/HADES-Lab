@@ -16,13 +16,15 @@ def build_hash_partitions(
     if total_buckets <= 0:
         raise ValueError("total_buckets must be positive")
     partitions: list[PartitionSpec] = []
+    max_index = max(0, total_buckets - 1)
+    width = max(2, len(str(max_index)))
     for bucket in range(total_buckets):
         shard_affinity = None
         if shard_count and shard_count > 0:
             shard_affinity = f"shard_{bucket % shard_count}"
         partitions.append(
             PartitionSpec(
-                id=f"{prefix}-{bucket:02d}",
+                id=f"{prefix}-{bucket:0{width}d}",
                 bounds={"hash_mod": total_buckets, "hash_low": bucket, "hash_high": bucket},
                 shard_affinity=shard_affinity,
             )
@@ -38,12 +40,14 @@ def build_time_partitions(
     """Create time-window partitions from explicit ranges."""
 
     partitions: list[PartitionSpec] = []
+    max_index = max(0, len(ranges) - 1)
+    width = max(2, len(str(max_index)))
     for idx, (start, end) in enumerate(ranges):
         if end <= start:
             raise ValueError("time range end must be after start")
         partitions.append(
             PartitionSpec(
-                id=f"{prefix}-{idx:02d}",
+                id=f"{prefix}-{idx:0{width}d}",
                 bounds={"start": start.isoformat(), "end": end.isoformat()},
             )
         )

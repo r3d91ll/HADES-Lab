@@ -35,8 +35,5 @@ class FixedTokenBucket(TokenBucket):
     async def reserve(self, cost: int = 1):
         if cost != 1:
             raise NotImplementedError("fixed bucket currently supports cost=1")
-        await self._semaphore.acquire()
-        try:
+        async with self._semaphore:
             yield
-        finally:
-            self._semaphore.release()

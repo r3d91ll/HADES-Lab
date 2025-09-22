@@ -27,11 +27,12 @@ def _load_object(path: str) -> Any:
 
 
 def _instantiate(component: Any, config: Mapping[str, Any]) -> Any:
-    if callable(component):
-        if hasattr(component, "__call__") and hasattr(component, "__mro__"):
-            return component(**config)
-        return component
-    raise TypeError("component must be callable or class")
+    if not callable(component):
+        raise TypeError("component must be callable or class")
+    # Check if it's a class (has __mro__) vs a function
+    if hasattr(component, "__mro__"):
+        return component(**config)
+    return component
 
 
 def _parse_kv(payload: str) -> dict[str, Any]:
@@ -77,7 +78,7 @@ async def _run_async(args: argparse.Namespace) -> None:
     lease_store = _lease_store_from_uri(args.lease_store)
     token_buckets = _build_token_buckets(args.rate_limit)
 
-    def emit(name: str, spec, payload: Mapping[str, object]) -> None:
+    def emit(name: str, spec, payload: Mapping[str, Any]) -> None:
         logger.info("%s %s %s", name, spec.id, payload)
 
     runner = ShardRunner(

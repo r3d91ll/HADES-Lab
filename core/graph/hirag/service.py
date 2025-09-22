@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass, fields
 from typing import Mapping, Sequence
 
 from core.database.arango.memory_client import ArangoMemoryClient
@@ -27,8 +27,22 @@ class HiragConfig:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> "HiragConfig":
-        data = dict(payload)
-        return cls(**data)
+        field_defs = fields(cls)
+        allowed_keys = {field.name for field in field_defs}
+        filtered_data = {key: payload[key] for key in allowed_keys if key in payload}
+
+        missing_required = {
+            field.name
+            for field in field_defs
+            if field.default is MISSING and getattr(field, "default_factory", MISSING) is MISSING
+            and field.name not in filtered_data
+        }
+
+        if missing_required:
+            missing_list = ", ".join(sorted(missing_required))
+            raise ValueError(f"Missing required HiragConfig fields: {missing_list}")
+
+        return cls(**filtered_data)
 
 
 class HiragService:
