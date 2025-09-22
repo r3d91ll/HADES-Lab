@@ -21,6 +21,9 @@ def ingest_entities_from_arxiv(
     collections: GraphCollections,
     *,
     limit: int | None = None,
+    hash_mod: int | None = None,
+    hash_low: int | None = None,
+    hash_high: int | None = None,
 ) -> int:
     """Upsert paper entities from ``arxiv_metadata`` into ``entities``."""
 
@@ -30,10 +33,15 @@ def ingest_entities_from_arxiv(
         limit_clause = "LIMIT @limit"
         bind["limit"] = limit
 
+    hash_clause = ""
+    if hash_mod is not None and hash_low is not None:
+        hash_clause = "FILTER MOD(ABS(FNV64(doc.arxiv_id)), @hash_mod) == @hash_low"
+
     query = f"""
     LET now = DATE_ISO8601(DATE_NOW())
     FOR doc IN arxiv_metadata
       FILTER doc.title != null
+      {hash_clause}
       SORT doc.arxiv_id
       {limit_clause}
       LET key = CONCAT('paper_', doc.arxiv_id)
@@ -68,6 +76,12 @@ def ingest_entities_from_arxiv(
     """
 
     logger.debug("Upserting entities from arxiv_metadata", extra={"limit": limit})
+    if hash_mod is not None and hash_low is not None:
+        bind["hash_mod"] = hash_mod
+        bind["hash_low"] = hash_low
+        if hash_high is not None:
+            bind["hash_high"] = hash_high
+
     result = client.execute_query(query, bind)
     return _sum_result([row.get("count", 0) for row in result])
 
@@ -79,6 +93,9 @@ def build_semantic_relations(
     top_k: int,
     base_weight: float,
     limit: int | None = None,
+    hash_mod: int | None = None,
+    hash_low: int | None = None,
+    hash_high: int | None = None,
 ) -> int:
     """Create simple co-category relations as a bootstrap semantic graph."""
 
@@ -93,10 +110,15 @@ def build_semantic_relations(
         limit_clause = "LIMIT @limit"
         bind["limit"] = limit
 
+    hash_clause = ""
+    if hash_mod is not None and hash_low is not None:
+        hash_clause = "FILTER MOD(ABS(FNV64(doc.arxiv_id)), @hash_mod) == @hash_low"
+
     query = f"""
     LET now = DATE_ISO8601(DATE_NOW())
     FOR doc IN arxiv_metadata
       FILTER doc.primary_category != null
+      {hash_clause}
       SORT doc.arxiv_id
       {limit_clause}
       LET from_key = CONCAT('paper_', doc.arxiv_id)
@@ -143,6 +165,112 @@ def build_semantic_relations(
     """
 
     logger.debug("Building bootstrap relations", extra={"top_k": top_k, "limit": limit})
+    if hash_mod is not None and hash_low is not None:
+        bind["hash_mod"] = hash_mod
+        bind["hash_low"] = hash_low
+        if hash_high is not None:
+            bind["hash_high"] = hash_high
+
+    result = client.execute_query(query, bind)
+    return _sum_result([row.get("count", 0) for row in result])
+
+
+def build_semantic_similarity_edges(
+    client: ArangoMemoryClient,
+    collections: GraphCollections,
+    *,
+    top_k: int,
+    score_threshold: float,
+    embed_source: str,
+    snapshot_id: str,
+    hash_mod: int | None = None,
+    hash_low: int | None = None,
+    hash_high: int | None = None,
+) -> int:
+    """Construct ``semantic_similar_to`` edges using embedding cosine similarity."""
+
+    hash_clause = ""
+    if hash_mod is not None and hash_low is not None:
+        hash_clause = "FILTER MOD(ABS(FNV64(doc.paper_key)), @hash_mod) == @hash_low"
+
+    query = f"""
+    LET now = DATE_ISO8601(DATE_NOW())
+    FOR doc IN arxiv_abstract_embeddings
+      FILTER doc.embedding != null
+      FILTER doc.paper_key != null
+      {hash_clause}
+      LET neighbors = (
+        FOR candidate IN arxiv_abstract_embeddings
+          FILTER candidate.embedding != null
+          FILTER candidate.paper_key != null
+          FILTER candidate.paper_key != doc.paper_key
+          SORT COSINE_DISTANCE(doc.embedding, candidate.embedding) ASC
+          LIMIT @top_k
+          LET score = 1 - COSINE_DISTANCE(doc.embedding, candidate.embedding)
+          FILTER score >= @score_threshold
+          RETURN {{ candidate: candidate, score: score }}
+      )
+      FOR neighbor IN neighbors
+        LET from_key = CONCAT('paper_', doc.paper_key)
+        LET to_key = CONCAT('paper_', neighbor.candidate.paper_key)
+        LET edge_key = CONCAT(from_key, '::semantic::', to_key)
+        UPSERT {{ _key: edge_key }}
+          INSERT {{
+            _key: edge_key,
+            _from: CONCAT(@entities_prefix, from_key),
+            _to: CONCAT(@entities_prefix, to_key),
+            type: 'semantic_similar_to',
+            weight: neighbor.score,
+            weight_components: {{
+              sim: neighbor.score,
+              type_prior: neighbor.score,
+              evidence: 0.0,
+              freshness: 0.0
+            }},
+            embed_source: @embed_source,
+            embed_dim: LENGTH(doc.embedding),
+            snapshot_id: @snapshot_id,
+            ts: now,
+            score: neighbor.score,
+            quality: neighbor.score,
+            recency: 0.0,
+            metadata: {{
+              from_chunk: doc.chunk_id,
+              to_chunk: neighbor.candidate.chunk_id
+            }}
+          }}
+          UPDATE {{
+            weight: neighbor.score,
+            weight_components: MERGE(OLD.weight_components, {{ sim: neighbor.score }}),
+            score: neighbor.score,
+            quality: neighbor.score,
+            embed_source: @embed_source,
+            snapshot_id: @snapshot_id,
+            ts: now
+          }}
+        IN {collections.relations}
+        OPTIONS {{ keepNull: false }}
+        RETURN {{ count: 1 }}
+    """
+
+    bind: dict[str, object] = {
+        "top_k": top_k,
+        "score_threshold": score_threshold,
+        "embed_source": embed_source,
+        "snapshot_id": snapshot_id,
+        "entities_prefix": f"{collections.entities}/",
+    }
+
+    if hash_mod is not None and hash_low is not None:
+        bind["hash_mod"] = hash_mod
+        bind["hash_low"] = hash_low
+        if hash_high is not None:
+            bind["hash_high"] = hash_high
+
+    logger.debug(
+        "Building semantic similarity edges",
+        extra={"top_k": top_k, "threshold": score_threshold, "hash": hash_low},
+    )
     result = client.execute_query(query, bind)
     return _sum_result([row.get("count", 0) for row in result])
 
@@ -152,6 +280,9 @@ def build_category_hierarchy(
     collections: GraphCollections,
     *,
     limit: int | None = None,
+    hash_mod: int | None = None,
+    hash_low: int | None = None,
+    hash_high: int | None = None,
 ) -> Mapping[str, int]:
     """Create L1/L2 clusters based on primary categories and link entities."""
 
@@ -165,11 +296,16 @@ def build_category_hierarchy(
         limit_clause = "LIMIT @limit"
         bind["limit"] = limit
 
+    hash_clause = ""
+    if hash_mod is not None and hash_low is not None:
+        hash_clause = "FILTER MOD(ABS(FNV64(doc.arxiv_id)), @hash_mod) == @hash_low"
+
     cluster_query = f"""
     LET now = DATE_ISO8601(DATE_NOW())
     FOR row IN (
       FOR doc IN arxiv_metadata
         FILTER doc.primary_category != null
+        {hash_clause}
         {limit_clause}
         COLLECT category = doc.primary_category WITH COUNT INTO count
         RETURN {{ category, count }}
@@ -235,6 +371,7 @@ def build_category_hierarchy(
     LET now = DATE_ISO8601(DATE_NOW())
     FOR doc IN arxiv_metadata
       FILTER doc.primary_category != null
+      {hash_clause}
       SORT doc.arxiv_id
       {limit_clause}
       LET entity_key = CONCAT('paper_', doc.arxiv_id)
@@ -261,6 +398,12 @@ def build_category_hierarchy(
     """
 
     logger.debug("Building category hierarchy", extra={"limit": limit})
+    if hash_mod is not None and hash_low is not None:
+        bind["hash_mod"] = hash_mod
+        bind["hash_low"] = hash_low
+        if hash_high is not None:
+            bind["hash_high"] = hash_high
+
     cluster_result = client.execute_query(cluster_query, bind)
     membership_result = client.execute_query(membership_query, bind)
     return {

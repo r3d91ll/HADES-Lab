@@ -7,12 +7,15 @@ The ArXiv initial ingest workflow processes 2.8+ million academic papers from th
 ## Key Design Decisions
 
 ### No Complex Recovery
+
 This is a **one-time batch job** on static data. The workflow prioritizes simplicity:
+
 - No checkpointing or complex recovery mechanisms
 - If interrupted, simply restart with `--drop-collections`
 - Total runtime: ~15-16 hours (down from 24 hours in earlier versions)
 
 ### Processing Strategy
+
 - **Size-sorted processing**: Papers processed smallest to largest for optimal GPU batching
 - **Late chunking**: Full document context preserved before chunking (mandatory per Conveyance Framework)
 - **PHP bridge**: Database operations use PHP to bypass python-arango limitations
@@ -105,10 +108,12 @@ python core/workflows/workflow_arxiv_initial_ingest_balanced.py \
 ## Configuration
 
 ### Data Location
+
 - **Metadata file**: `data/arxiv-kaggle-latest.json` (NVME for fast loading)
 - **Original location**: `/bulk-store/arxiv-data/metadata/` (slower HDD)
 
 ### Database
+
 - **Database**: `arxiv_repository`
 - **Collections**:
   - `arxiv_metadata` - Paper metadata
@@ -117,6 +122,7 @@ python core/workflows/workflow_arxiv_initial_ingest_balanced.py \
   - `arxiv_structures` - Document structure metadata
 
 ### Embedder
+
 - **Model**: Jina v4 (jinaai/jina-embeddings-v4)
 - **Dimensions**: 2048
 - **Context window**: 32k tokens
@@ -134,6 +140,7 @@ python core/workflows/workflow_arxiv_initial_ingest_balanced.py \
 | Batch efficiency | 95%+ GPU utilization |
 
 ### Optimization History
+
 - **Original**: 24 hours
 - **After late chunking fix**: 15-16 hours (37.5% improvement)
 - **Size-sorted batching**: Consistent throughput
@@ -208,6 +215,7 @@ Currently using TCP (`tcp://localhost:8529`) until Unix socket permissions are r
 - **α**: 1.5-2.0 (context amplification)
 
 ### Critical: Late Chunking
+
 - Process full document first → Then chunk with context
 - Early chunking (chunk → embed) violates framework (Ctx→0)
 - This fix alone improved performance significantly
@@ -215,11 +223,13 @@ Currently using TCP (`tcp://localhost:8529`) until Unix socket permissions are r
 ## File Organization
 
 ### Active Files
+
 - `core/workflows/workflow_arxiv_initial_ingest.py` - Main ingest workflow (HTTP/2 client)
 - `core/database/arango/memory_client.py` - Optimized HTTP/2 memory client
 - `core/embedders/embedders_jina.py` - Embedder with late chunking
 
 ### Archived to Acheron
+
 - `workflow_arxiv_sorted.py` - Deprecated complex version
 - `workflow_arxiv_parallel.py` - Older parallel implementation
 - `workflow_arxiv_metadata.py` - Metadata-only workflow (archive)
@@ -230,6 +240,7 @@ Currently using TCP (`tcp://localhost:8529`) until Unix socket permissions are r
 ## Support
 
 For issues:
+
 1. Check GPU status: `nvidia-smi`
 2. Confirm proxies: `systemctl status hades-arango-ro.socket`
 3. Inspect database state: `poetry run python core/database/utils/check_resume_state.py`

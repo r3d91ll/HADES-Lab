@@ -11,7 +11,12 @@ from core.database.arango.memory_client import ArangoMemoryClient
 from core.graph.schema import GraphCollections, GraphSchemaManager
 
 from . import aql
-from .builders import build_category_hierarchy, build_semantic_relations, ingest_entities_from_arxiv
+from .builders import (
+    build_category_hierarchy,
+    build_semantic_relations,
+    build_semantic_similarity_edges,
+    ingest_entities_from_arxiv,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +69,34 @@ class HiragService:
         self._schema_manager.ensure_schema()
 
     # ------------------------------------------------------------------
-    def build_entities_from_arxiv(self, *, limit: int | None = None) -> int:
+    def build_entities_from_arxiv(
+        self,
+        *,
+        limit: int | None = None,
+        hash_mod: int | None = None,
+        hash_low: int | None = None,
+        hash_high: int | None = None,
+    ) -> int:
         """Upsert paper entities from the arXiv corpus."""
 
-        return ingest_entities_from_arxiv(self._client, self._schema_manager.collections, limit=limit)
+        return ingest_entities_from_arxiv(
+            self._client,
+            self._schema_manager.collections,
+            limit=limit,
+            hash_mod=hash_mod,
+            hash_low=hash_low,
+            hash_high=hash_high,
+        )
 
     def build_relations_from_embeddings(
-        self, *, top_k: int = 10, base_weight: float = 0.5, limit: int | None = None
+        self,
+        *,
+        top_k: int = 10,
+        base_weight: float = 0.5,
+        limit: int | None = None,
+        hash_mod: int | None = None,
+        hash_low: int | None = None,
+        hash_high: int | None = None,
     ) -> int:
         """Bootstrap semantic relations based on shared categories."""
 
@@ -80,15 +106,53 @@ class HiragService:
             top_k=top_k,
             base_weight=base_weight,
             limit=limit,
+            hash_mod=hash_mod,
+            hash_low=hash_low,
+            hash_high=hash_high,
         )
 
-    def build_hierarchy(self, *, limit: int | None = None) -> Mapping[str, int]:
+    def build_semantic_similarity_edges(
+        self,
+        *,
+        top_k: int = 10,
+        score_threshold: float = 0.7,
+        embed_source: str = "jina_v4",
+        snapshot_id: str = "snapshot-unknown",
+        hash_mod: int | None = None,
+        hash_low: int | None = None,
+        hash_high: int | None = None,
+    ) -> int:
+        """Create semantic similarity edges backed by embeddings."""
+
+        return build_semantic_similarity_edges(
+            self._client,
+            self._schema_manager.collections,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            embed_source=embed_source,
+            snapshot_id=snapshot_id,
+            hash_mod=hash_mod,
+            hash_low=hash_low,
+            hash_high=hash_high,
+        )
+
+    def build_hierarchy(
+        self,
+        *,
+        limit: int | None = None,
+        hash_mod: int | None = None,
+        hash_low: int | None = None,
+        hash_high: int | None = None,
+    ) -> Mapping[str, int]:
         """Construct L1/L2 clusters from primary categories."""
 
         return build_category_hierarchy(
             self._client,
             self._schema_manager.collections,
             limit=limit,
+            hash_mod=hash_mod,
+            hash_low=hash_low,
+            hash_high=hash_high,
         )
 
     # ------------------------------------------------------------------

@@ -5,6 +5,13 @@ from .runner import ShardRunner
 from .lease import LeaseStore, InMemoryLeaseStore
 from .token_bucket import TokenBucket, NullTokenBucket, FixedTokenBucket
 from .jobs import ShardJob, PythonShardJob, CallableShardJob
+from .hirag_jobs import (
+    HiragEntityIngestJob,
+    HiragRelationsJob,
+    HiragHierarchyJob,
+    HiragSemanticEdgesJob,
+)
+from .adapters.arxiv import ArxivPartitionAdapter
 
 __all__ = [
     "PartitionSpec",
@@ -19,4 +26,9 @@ __all__ = [
     "ShardJob",
     "PythonShardJob",
     "CallableShardJob",
+    "HiragEntityIngestJob",
+    "HiragRelationsJob",
+    "HiragHierarchyJob",
+    "HiragSemanticEdgesJob",
+    "ArxivPartitionAdapter",
 ]

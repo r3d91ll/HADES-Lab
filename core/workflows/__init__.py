@@ -15,6 +15,7 @@ PDFWorkflow = None
 BatchPDFWorkflow = None
 ArxivInitialIngestWorkflow = None
 ArxivSinglePDFWorkflow = None
+ArxivGraphBuildWorkflow = None
 
 try:
     from .workflow_pdf import PDFWorkflow  # type: ignore[assignment]
@@ -30,6 +31,13 @@ try:
     from .workflow_arxiv_initial_ingest import ArxivInitialIngestWorkflow  # type: ignore[assignment]
 except ImportError:
     ArxivInitialIngestWorkflow = None
+
+try:
+    from .arxiv_repository.arxiv_graph_build.workflow_arxiv_graph_build import (  # type: ignore[assignment]
+        ArxivGraphBuildWorkflow,
+    )
+except ImportError:
+    ArxivGraphBuildWorkflow = None
 
 try:
     from .workflow_arxiv_single_pdf import ArxivSinglePDFWorkflow  # type: ignore[assignment]
@@ -54,5 +62,7 @@ if BatchPDFWorkflow is not None:
     __all__.append('BatchPDFWorkflow')
 if ArxivInitialIngestWorkflow is not None:
     __all__.append('ArxivInitialIngestWorkflow')
+if ArxivGraphBuildWorkflow is not None:
+    __all__.append('ArxivGraphBuildWorkflow')
 if ArxivSinglePDFWorkflow is not None:
     __all__.append('ArxivSinglePDFWorkflow')
