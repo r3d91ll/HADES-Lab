@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import socket
 import uuid
@@ -58,14 +59,29 @@ class ShardRunner:
             for spec in specs
         ]
         results: list[PartitionResult] = []
-        for task in asyncio.as_completed(tasks):
-            try:
-                result = await task
-            except Exception:
-                logger.exception("partition task failed")
-                continue
-            if result is not None:
-                results.append(result)
+        try:
+            for task in asyncio.as_completed(tasks):
+                try:
+                    result = await task
+                except asyncio.CancelledError:
+                    # Propagate cancellation: stop all remaining tasks and exit quickly.
+                    logger.info("shard runner cancelled; stopping remaining tasks")
+                    for t in tasks:
+                        t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+                except Exception:
+                    logger.exception("partition task failed")
+                    continue
+                if result is not None:
+                    results.append(result)
+        finally:
+            # Ensure no background tasks linger if we exit early.
+            pending = [t for t in tasks if not t.done()]
+            if pending:
+                for t in pending:
+                    t.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
         return results
 
     async def _run_partition_with_guard(self, spec: PartitionSpec) -> PartitionResult | None:
@@ -96,6 +112,10 @@ class ShardRunner:
                     await self._lease_store.mark_failed(spec.id, self._owner_id, f"invariant: {exc}")
                     self._emit("shard.failed", spec, {"attempt": attempt, "error": str(exc)})
                     raise
+                except asyncio.CancelledError:
+                    # Respect cooperative cancellation.
+                    self._emit("shard.cancelled", spec, {"attempt": attempt})
+                    raise
                 except Exception as exc:
                     attempts = await self._lease_store.mark_failed(spec.id, self._owner_id, str(exc))
                     self._emit("shard.failed", spec, {"attempt": attempt, "error": str(exc)})
@@ -120,7 +140,10 @@ class ShardRunner:
             yield
         finally:
             stop_event.set()
-            await heartbeat_task
+            # Cancel heartbeat immediately to avoid waiting for its sleep interval.
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
             await self._lease_store.release(spec.id, self._owner_id)
 
     async def _heartbeat(self, spec: PartitionSpec, stop_event: asyncio.Event) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 from typing import Sequence
+import asyncio
 
 from core.workflows.arxiv_repository.arxiv_graph_build.workflow_arxiv_graph_build import (
     ArxivGraphBuildConfig,
@@ -96,7 +97,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.error("Validation failed; aborting")
         return 1
 
-    result = workflow.execute()
+    try:
+        result = workflow.execute()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.warning("Interrupted by user (Ctrl-C); cancelling outstanding work")
+        return 130
     logger.info("Workflow success: %s", result.success)
     logger.info("Items processed: %s", result.items_processed)
     phase_stats = result.metadata.get("phase_stats", [])

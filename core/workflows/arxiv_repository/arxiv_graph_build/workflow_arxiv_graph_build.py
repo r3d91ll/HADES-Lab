@@ -170,6 +170,9 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
             metadata["phase_stats"] = phase_stats
 
             success = not errors
+        except (asyncio.CancelledError, KeyboardInterrupt):  # graceful shutdown on Ctrl-C
+            logger.info("Workflow cancelled by user; shutting down")
+            raise
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("ArxivGraphBuildWorkflow failed")
             errors.append(str(exc))

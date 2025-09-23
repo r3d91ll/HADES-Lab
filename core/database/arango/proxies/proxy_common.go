@@ -19,10 +19,13 @@ import (
 
 const (
 	defaultUpstreamSocket = "/run/arangodb3/arangodb.sock"
-	defaultROListenSocket = "/run/hades/readonly/arangod.sock"
-	defaultRWListenSocket = "/run/hades/readwrite/arangod.sock"
-	roSocketPermissions   = 0o640
-	rwSocketPermissions   = 0o600
+    defaultROListenSocket = "/run/hades/readonly/arangod.sock"
+    defaultRWListenSocket = "/run/hades/readwrite/arangod.sock"
+    // RO socket must be group-writable so readers in the configured group
+    // (e.g., "hades") can connect. RW socket should also be group-writable
+    // so authorized writers in the service group can connect.
+    roSocketPermissions   = 0o660
+    rwSocketPermissions   = 0o660
 )
 
 var cursorPathRegexp = regexp.MustCompile(`^(/_db/[^/]+)?/_api/cursor(?:/[0-9]+)?$`)
@@ -104,42 +107,48 @@ func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var cachedBody []byte
 	bodyConsumed := false
 
-	bodyReader := func(limit int64) ([]byte, error) {
-		if bodyConsumed {
-			return cachedBody, nil
-		}
-		if r.Body == nil {
-			bodyConsumed = true
-			return nil, nil
-		}
-		defer func() {
-			bodyConsumed = true
-		}()
+    bodyReader := func(limit int64) ([]byte, error) {
+        // If we've already fully consumed and cached the body (unlimited peek),
+        // serve from cache.
+        if bodyConsumed {
+            return cachedBody, nil
+        }
 
-		var buf bytes.Buffer
-		if limit > 0 {
-			lr := &io.LimitedReader{R: r.Body, N: limit + 1}
-			if _, err := buf.ReadFrom(lr); err != nil {
-				_ = r.Body.Close()
-				return nil, err
-			}
-			if lr.N <= 0 {
-				_ = r.Body.Close()
-				return nil, fmt.Errorf("request body exceeds inspection limit (%d bytes)", limit)
-			}
-		} else {
-			if _, err := buf.ReadFrom(r.Body); err != nil {
-				_ = r.Body.Close()
-				return nil, err
-			}
-		}
+        if r.Body == nil {
+            return nil, nil
+        }
 
-		if err := r.Body.Close(); err != nil {
-			log.Printf("warning: failed to close request body: %v", err)
-		}
-		cachedBody = append([]byte(nil), buf.Bytes()...)
-		return cachedBody, nil
-	}
+        var buf bytes.Buffer
+        if limit > 0 {
+            // Read up to limit+1 bytes for inspection, but do NOT consume the
+            // request body. Reconstruct r.Body to include the bytes we read
+            // followed by the remaining stream so upstream sees the full body.
+            lr := &io.LimitedReader{R: r.Body, N: limit + 1}
+            if _, err := buf.ReadFrom(lr); err != nil && err != io.EOF {
+                return nil, err
+            }
+            // Push back the bytes we read so the upstream request body remains intact.
+            prefix := append([]byte(nil), buf.Bytes()...)
+            r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(prefix), r.Body))
+
+            if int64(len(prefix)) > limit {
+                // Signal that the body exceeded the inspection limit while still
+                // keeping the request body intact for forwarding.
+                return prefix[:limit], fmt.Errorf("request body exceeds inspection limit (%d bytes)", limit)
+            }
+            return prefix, nil
+        }
+
+        // Unlimited peek: consume and cache entire body and replace r.Body so it
+        // can be forwarded from cache.
+        if _, err := buf.ReadFrom(r.Body); err != nil && err != io.EOF {
+            return nil, err
+        }
+        cachedBody = append([]byte(nil), buf.Bytes()...)
+        r.Body = io.NopCloser(bytes.NewReader(cachedBody))
+        bodyConsumed = true
+        return cachedBody, nil
+    }
 
 	if err := p.allowFunc(r, bodyReader); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -153,17 +162,35 @@ func (p *UnixReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		upstreamBody = r.Body
 	}
 
-	upstreamURL := buildUpstreamURL(r)
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, upstreamBody)
-	if err != nil {
-		http.Error(w, "failed to build upstream request", http.StatusInternalServerError)
-		return
-	}
+    upstreamURL := buildUpstreamURL(r)
+    upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, upstreamBody)
+    if err != nil {
+        http.Error(w, "failed to build upstream request", http.StatusInternalServerError)
+        return
+    }
 
-	copyHeaders(upstreamReq.Header, r.Header)
-	if bodyConsumed {
-		upstreamReq.ContentLength = int64(len(cachedBody))
-	}
+    copyHeaders(upstreamReq.Header, r.Header)
+    if bodyConsumed {
+        upstreamReq.ContentLength = int64(len(cachedBody))
+    } else {
+        // If we didn't cache the body and the incoming request did not carry a
+        // concrete ContentLength (e.g., HTTP/2 without Content-Length header),
+        // buffer it now to avoid sending chunked encoding upstream, which
+        // ArangoDB does not accept for request bodies.
+        if r.ContentLength >= 0 {
+            upstreamReq.ContentLength = r.ContentLength
+        } else if upstreamBody != nil {
+            var buf bytes.Buffer
+            if _, err := buf.ReadFrom(upstreamBody); err != nil {
+                http.Error(w, "failed to buffer request body", http.StatusBadGateway)
+                return
+            }
+            cachedBody = append([]byte(nil), buf.Bytes()...)
+            bodyConsumed = true
+            upstreamReq.Body = io.NopCloser(bytes.NewReader(cachedBody))
+            upstreamReq.ContentLength = int64(len(cachedBody))
+        }
+    }
 
 	resp, err := p.client.Do(upstreamReq)
 	if err != nil {
