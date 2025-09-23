@@ -239,6 +239,24 @@ class ArangoMemoryClient:
         except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
             raise self._wrap_error(exc) from exc
 
+    def execute_write_query(
+        self,
+        aql: str,
+        bind_vars: dict[str, Any] | None = None,
+        *,
+        batch_size: int | None = None,
+        full_count: bool = False,
+    ) -> list[dict[str, Any]]:
+        try:
+            return self._write_client.query(
+                aql,
+                bind_vars=bind_vars,
+                batch_size=batch_size or 1000,
+                full_count=full_count,
+            )
+        except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
+            raise self._wrap_error(exc) from exc
+
     def bulk_insert(
         self,
         collection: str,
@@ -306,6 +324,38 @@ class ArangoMemoryClient:
         try:
             return self._write_client.request("POST", path, json=payload)
         except ArangoHttpError as exc:  # pragma: no cover - thin wrapper
+            raise self._wrap_error(exc) from exc
+
+    def drop_named_graph(
+        self,
+        name: str,
+        *,
+        drop_collections: bool = False,
+        ignore_missing: bool = True,
+    ) -> bool:
+        """Drop a named graph if it exists.
+
+        Args:
+            name: Graph identifier (``_key``) to remove.
+            drop_collections: When ``True``, also drop collections managed by the
+                graph definition (mirrors Arango's ``dropCollections`` flag).
+            ignore_missing: If ``True`` suppress ``404`` errors and return
+                ``False`` to signal that the graph was absent.
+
+        Returns:
+            ``True`` when the graph deletion request succeeds, ``False`` when the
+            graph was not found and ``ignore_missing`` is set.
+        """
+
+        params = {"dropCollections": "true" if drop_collections else "false"}
+        path = f"/_db/{self._config.database}/_api/gharial/{name}"
+
+        try:
+            self._write_client.request("DELETE", path, params=params)
+            return True
+        except ArangoHttpError as exc:
+            if ignore_missing and exc.status_code == 404:
+                return False
             raise self._wrap_error(exc) from exc
 
     def drop_collections(self, names: Iterable[str], *, ignore_missing: bool = True) -> None:

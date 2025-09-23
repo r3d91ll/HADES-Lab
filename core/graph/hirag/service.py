@@ -76,6 +76,7 @@ class HiragService:
         hash_mod: int | None = None,
         hash_low: int | None = None,
         hash_high: int | None = None,
+        keys: Sequence[str] | None = None,
     ) -> int:
         """Upsert paper entities from the arXiv corpus."""
 
@@ -86,6 +87,7 @@ class HiragService:
             hash_mod=hash_mod,
             hash_low=hash_low,
             hash_high=hash_high,
+            keys=keys,
         )
 
     def build_relations_from_embeddings(

@@ -5,6 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Mapping
 
+
+def _chunk(items, size):
+    for idx in range(0, len(items), size):
+        yield items[idx : idx + size]
+
 from core.database.database_factory import DatabaseFactory
 from core.graph.hirag.service import HiragService
 from core.graph.schema import GraphSchemaManager
@@ -36,22 +41,48 @@ class _BaseHiragJob(ShardJob):
 class HiragEntityIngestJob(_BaseHiragJob):
     """Run entity ingestion for a single hash partition."""
 
+    def __init__(self, *, chunk_size: int = 5000, database: str = "arxiv_repository") -> None:
+        super().__init__(database=database)
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        self._chunk_size = chunk_size
+
     async def run(self, spec: PartitionSpec, params: Mapping[str, object]) -> JobOutput:
         hash_mod = int(params["hash_mod"])
         hash_low = int(params["hash_low"])
         hash_high = int(params.get("hash_high", hash_low))
 
         def _call(service: HiragService) -> JobOutput:
-            count = service.build_entities_from_arxiv(
-                hash_mod=hash_mod,
-                hash_low=hash_low,
-                hash_high=hash_high,
-            )
+            client = service._client
+            key_bind = {"hash_mod": hash_mod, "hash_low": hash_low}
+            key_query = """
+            FOR doc IN arxiv_metadata
+              FILTER doc._key != null
+              FILTER HASH(doc._key) % @hash_mod == @hash_low
+              SORT doc._key
+              RETURN doc._key
+            """
+            keys = client.execute_query(key_query, key_bind, batch_size=max(self._chunk_size * 2, 1000))
+
+            total_entities = 0
+            for batch in _chunk(keys, self._chunk_size):
+                if not batch:
+                    continue
+                total_entities += service.build_entities_from_arxiv(keys=batch)
+
             return JobOutput(
-                rows_read=count,
-                rows_written=count,
-                metrics={"entities": count},
-                details={"hash_mod": hash_mod, "hash_low": hash_low},
+                rows_read=len(keys),
+                rows_written=total_entities,
+                metrics={
+                    "entities": total_entities,
+                    "entity_batches": (len(keys) + self._chunk_size - 1) // self._chunk_size,
+                },
+                details={
+                    "hash_mod": hash_mod,
+                    "hash_low": hash_low,
+                    "hash_high": hash_high,
+                    "total_keys": len(keys),
+                },
             )
 
         return await self._run_service(_call)

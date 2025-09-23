@@ -70,7 +70,11 @@ class InMemoryLeaseStore(LeaseStore):
     async def heartbeat(self, partition_id: str, owner: str, ttl: float) -> None:
         async with self._lock:
             record = self._records.get(partition_id)
-            if not record or record.owner != owner:
+            if not record:
+                return
+            if record.status in ("SUCCEEDED", "FAILED"):
+                return
+            if record.owner != owner:
                 raise RuntimeError("lease heartbeat without ownership")
             record.lease_until = time.time() + ttl
 

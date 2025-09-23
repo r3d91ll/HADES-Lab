@@ -22,15 +22,15 @@ DEFAULT_DATABASE = "arxiv_repository"
 class GraphCollections:
     """Canonical collection names backing the Arango knowledge graph."""
 
-    entities: str = "entities"
-    clusters: str = "clusters"
-    relations: str = "relations"
-    cluster_edges: str = "cluster_edges"
-    bridge_cache: str = "bridge_cache"
-    weight_config: str = "weight_config"
-    query_logs: str = "query_logs"
-    cluster_membership_journal: str = "cluster_membership_journal"
-    papers_raw: str = "papers_raw"
+    entities: str = "arxiv_entities"
+    clusters: str = "arxiv_clusters"
+    relations: str = "arxiv_relations"
+    cluster_edges: str = "arxiv_cluster_edges"
+    bridge_cache: str = "arxiv_bridge_cache"
+    weight_config: str = "arxiv_weight_config"
+    query_logs: str = "arxiv_query_logs"
+    cluster_membership_journal: str = "arxiv_cluster_membership_journal"
+    papers_raw: str = "arxiv_papers_raw"
 
 
 class GraphSchemaManager:
@@ -69,7 +69,7 @@ class GraphSchemaManager:
                     {
                         "type": "persistent",
                         "fields": ["name_lower", "type"],
-                        "unique": True,
+                        "unique": False,
                         "sparse": True,
                     },
                     {"type": "persistent", "fields": ["deg_out"]},
@@ -192,8 +192,11 @@ class GraphSchemaManager:
                 wait_for_sync=True,
             )
         except MemoryServiceError as exc:  # pragma: no cover - defensive logging
-            logger.exception("Failed to ensure named graph '%s'", self._graph_name)
-            raise
+            logger.warning(
+                "Unable to create named graph '%s' automatically (%s); assuming it already exists",
+                self._graph_name,
+                exc,
+            )
 
     # ------------------------------------------------------------------
     @property

@@ -59,7 +59,11 @@ class ShardRunner:
         ]
         results: list[PartitionResult] = []
         for task in asyncio.as_completed(tasks):
-            result = await task
+            try:
+                result = await task
+            except Exception:
+                logger.exception("partition task failed")
+                continue
             if result is not None:
                 results.append(result)
         return results
@@ -125,13 +129,23 @@ class ShardRunner:
             await asyncio.sleep(interval)
             try:
                 await self._lease_store.heartbeat(spec.id, self._owner_id, self._lease_ttl)
-            except Exception:
-                logger.exception(
-                    "lease heartbeat failed for spec %s owner %s",
-                    spec.id,
-                    self._owner_id,
-                    extra={"spec_id": spec.id, "owner_id": self._owner_id},
-                )
+            except Exception as exc:
+                msg = str(exc)
+                if isinstance(exc, RuntimeError) and "heartbeat without ownership" in msg:
+                    logger.debug(
+                        "lease heartbeat ended for spec %s owner %s: %s",
+                        spec.id,
+                        self._owner_id,
+                        msg,
+                        extra={"spec_id": spec.id, "owner_id": self._owner_id},
+                    )
+                else:
+                    logger.exception(
+                        "lease heartbeat failed for spec %s owner %s",
+                        spec.id,
+                        self._owner_id,
+                        extra={"spec_id": spec.id, "owner_id": self._owner_id},
+                    )
                 break
 
     def _emit(self, name: str, spec: PartitionSpec, payload: Mapping[str, Any]) -> None:

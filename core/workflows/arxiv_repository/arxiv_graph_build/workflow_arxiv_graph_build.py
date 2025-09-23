@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Mapping, Optional
-
-try:
-    import redis  # type: ignore
-except ImportError:  # pragma: no cover - optional dependency
-    redis = None  # type: ignore
 
 from core.database.database_factory import DatabaseFactory
 from core.graph.hirag.service import HiragService
@@ -24,8 +20,6 @@ from core.tools.sharding import (
     HiragSemanticEdgesJob,
     NullTokenBucket,
     PartitionResult,
-    RedisLeaseStore,
-    RedisTokenBucket,
     ShardRunner,
 )
 from core.tools.sharding.lease import LeaseStore, InMemoryLeaseStore
@@ -54,26 +48,16 @@ class ArxivGraphBuildConfig(WorkflowConfig):
     semantic_score_threshold: float = 0.7
     semantic_embed_source: str = "jina_v4"
     semantic_snapshot_id: str = "snapshot-unknown"
+    enable_semantic: bool = True
     lease_store_factory: Optional[LeaseStoreFactory] = None
     token_bucket_factory: Optional[TokenBucketFactory] = None
-    redis_socket_path: Optional[str] = "/run/redis/redis-server.sock"
+    partition_subset: Optional[List[int]] = None
+    entity_chunk_size: int = 5000
 
     def build_lease_store(self) -> LeaseStore:
         if self.lease_store_factory is not None:
             return self.lease_store_factory()
-        socket_path = self.redis_socket_path
-        if socket_path and redis is not None:
-            try:
-                probe = redis.Redis(unix_socket_path=socket_path)
-                probe.ping()
-                probe.close()
-                return RedisLeaseStore(
-                    socket_path=socket_path,
-                    namespace=f"hades:{self.name}:lease",
-                )
-            except Exception:
-                pass
-        # Fallback: in-memory store for local runs (non-durable)
+        # Local, single-host runs default to in-memory coordination.
         return InMemoryLeaseStore()
 
     def build_token_buckets(self) -> Dict[str, TokenBucket]:
@@ -81,21 +65,9 @@ class ArxivGraphBuildConfig(WorkflowConfig):
             return self.token_bucket_factory()
         if self.rate_limit is None or self.rate_limit <= 0:
             return {"default": NullTokenBucket()}
-        socket_path = self.redis_socket_path
-        if socket_path and redis is not None:
-            try:
-                probe = redis.Redis(unix_socket_path=socket_path)
-                probe.ping()
-                probe.close()
-                bucket = RedisTokenBucket(
-                    socket_path=socket_path,
-                    bucket_id=f"{self.name}:default",
-                    capacity=self.rate_limit,
-                )
-                return {"default": bucket}
-            except Exception:
-                pass
-        return {"default": NullTokenBucket()}
+        # Local token bucket to bound concurrent jobs without external deps.
+        from core.tools.sharding import FixedTokenBucket
+        return {"default": FixedTokenBucket(self.rate_limit)}
 
 
 class ArxivGraphBuildWorkflow(WorkflowBase):
@@ -134,9 +106,13 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
                 shard_count=self.config.shard_count,
             )
             partitions = adapter.describe_partitions()
+            if self.config.partition_subset is not None:
+                allowed = set(self.config.partition_subset)
+                partitions = [spec for spec in partitions if int(spec.bounds.get("hash_low", -1)) in allowed]
             total_partitions = len(partitions)
 
             phase_results: Dict[str, List[PartitionResult]] = {}
+            phase_stats: List[dict[str, object]] = []
 
             for phase_name, job in self._phases():
                 logger.info("Starting phase %s", phase_name)
@@ -153,6 +129,7 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
                     metrics=self._emit_metric,
                 )
 
+                phase_start = time.perf_counter()
                 results = self._run_async(runner.run(partitions=partitions))
                 phase_results[phase_name] = results
                 items_processed += len(results)
@@ -170,6 +147,19 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
                     errors.append(f"phase {phase_name} completed {len(results)}/{total_partitions} partitions; {skipped} skipped")
                     logger.warning(errors[-1])
 
+                duration = time.perf_counter() - phase_start
+                rows_written = sum(r.rows_written for r in results)
+                rows_read = sum(r.rows_read for r in results)
+                phase_stats.append(
+                    {
+                        "phase": phase_name,
+                        "duration_seconds": duration,
+                        "rows_written": rows_written,
+                        "rows_read": rows_read,
+                        "partitions": len(results),
+                    }
+                )
+
             metadata["phase_results"] = {
                 phase: {
                     "count": len(results),
@@ -177,6 +167,7 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
                 }
                 for phase, results in phase_results.items()
             }
+            metadata["phase_stats"] = phase_stats
 
             success = not errors
         except Exception as exc:  # pragma: no cover - defensive
@@ -202,16 +193,28 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
         client = DatabaseFactory.get_arango_memory_service(database=self.config.database)
         try:
             service = HiragService(client, schema_manager=GraphSchemaManager(client))
-            service.ensure_schema()
+            try:
+                service.ensure_schema()
+            except Exception as exc:
+                logger.warning("ensure_schema failed (%s); continuing under assumption schema already exists", exc)
         finally:
             client.close()
 
     def _phase_names(self) -> List[str]:
-        return ["entities", "relations", "hierarchy", "semantic"]
+        phases = ["entities", "relations", "hierarchy"]
+        if self.config.enable_semantic:
+            phases.append("semantic")
+        return phases
 
     def _phases(self) -> Iterable[tuple[str, object]]:
-        jobs = [
-            ("entities", HiragEntityIngestJob(database=self.config.database)),
+        jobs: List[tuple[str, object]] = [
+            (
+                "entities",
+                HiragEntityIngestJob(
+                    database=self.config.database,
+                    chunk_size=self.config.entity_chunk_size,
+                ),
+            ),
             (
                 "relations",
                 HiragRelationsJob(
@@ -221,17 +224,20 @@ class ArxivGraphBuildWorkflow(WorkflowBase):
                 ),
             ),
             ("hierarchy", HiragHierarchyJob(database=self.config.database)),
-            (
-                "semantic",
-                HiragSemanticEdgesJob(
-                    top_k=self.config.semantic_top_k,
-                    score_threshold=self.config.semantic_score_threshold,
-                    embed_source=self.config.semantic_embed_source,
-                    snapshot_id=self.config.semantic_snapshot_id,
-                    database=self.config.database,
-                ),
-            ),
         ]
+        if self.config.enable_semantic:
+            jobs.append(
+                (
+                    "semantic",
+                    HiragSemanticEdgesJob(
+                        top_k=self.config.semantic_top_k,
+                        score_threshold=self.config.semantic_score_threshold,
+                        embed_source=self.config.semantic_embed_source,
+                        snapshot_id=self.config.semantic_snapshot_id,
+                        database=self.config.database,
+                    ),
+                )
+            )
         return jobs
 
     def _run_async(self, coro):

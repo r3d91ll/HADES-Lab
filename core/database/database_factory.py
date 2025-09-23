@@ -199,52 +199,12 @@ class DatabaseFactory:
         return ArangoMemoryClient(config)
 
     @classmethod
-    def get_redis(cls,
-                  host: str = "localhost",
-                  port: int = 6379,
-                  db: int = 0,
-                  password: Optional[str] = None,
-                  **kwargs) -> Any:
-        """
-        Get Redis connection.
-
-        Args:
-            host: Redis host
-            port: Redis port
-            db: Database number
-            password: Password if required
-            **kwargs: Additional connection options
-
-        Returns:
-            Redis connection object
-        """
-        try:
-            import redis
-            conn = redis.Redis(
-                host=host,
-                port=port,
-                db=db,
-                password=password,
-                decode_responses=True,
-                **kwargs
-            )
-            # Test connection
-            conn.ping()
-            logger.info(f"✓ Connected to Redis at {host}:{port}/{db}")
-            return conn
-        except ImportError:
-            raise ImportError("redis not installed. Run: pip install redis")
-        except Exception as e:
-            logger.error(f"Failed to connect to Redis: {e}")
-            raise
-
-    @classmethod
     def create_pool(cls, db_type: str, pool_size: int = 10, **kwargs) -> Any:
         """
         Create a connection pool for the specified database type.
 
         Args:
-            db_type: Type of database (arango, postgres, redis)
+            db_type: Type of database (arango, postgres)
             pool_size: Size of connection pool
             **kwargs: Database-specific connection options
 
@@ -265,19 +225,6 @@ class DatabaseFactory:
             except ImportError:
                 logger.warning("psycopg_pool not available, returning single connection")
                 return cls.get_postgres(**kwargs)
-
-        elif db_type == "redis":
-            try:
-                import redis
-                pool = redis.ConnectionPool(
-                    max_connections=pool_size,
-                    **kwargs
-                )
-                conn = redis.Redis(connection_pool=pool)
-                logger.info(f"✓ Created Redis connection pool (size={pool_size})")
-                return conn
-            except ImportError:
-                raise ImportError("redis not installed")
 
         else:
             # ArangoDB handles pooling internally

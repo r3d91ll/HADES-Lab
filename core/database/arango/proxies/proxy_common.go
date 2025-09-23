@@ -47,19 +47,47 @@ type UnixReverseProxy struct {
 }
 
 func newUnixReverseProxy(upstreamSocket string, allowFunc func(*http.Request, BodyPeeker) error) *UnixReverseProxy {
-	transport := newUnixTransport(upstreamSocket)
-	return &UnixReverseProxy{
-		upstreamSocket: upstreamSocket,
-		allowFunc:      allowFunc,
-		client: &http.Client{
-			Transport: transport,
-			Timeout:   120 * time.Second,
-		},
-	}
+    transport := newUnixTransport(upstreamSocket)
+    // Allow overriding the client timeout via environment. A value of 0 disables
+    // the timeout (no deadline), which is useful for long-running AQL writes.
+    // Env names supported for convenience:
+    //   PROXY_CLIENT_TIMEOUT_SECONDS
+    //   CLIENT_TIMEOUT_SECONDS
+    timeoutSec := getEnv("PROXY_CLIENT_TIMEOUT_SECONDS", getEnv("CLIENT_TIMEOUT_SECONDS", "120"))
+    timeout := 120 * time.Second
+    if d, err := time.ParseDuration(timeoutSec + "s"); err == nil {
+        timeout = d
+    }
+    if timeoutSec == "0" {
+        log.Printf("proxy client timeout: disabled (0s)")
+        // Zero disables the timeout in http.Client
+        return &UnixReverseProxy{
+            upstreamSocket: upstreamSocket,
+            allowFunc:      allowFunc,
+            client: &http.Client{
+                Transport: transport,
+                Timeout:   0,
+            },
+        }
+    }
+    log.Printf("proxy client timeout: %s", timeout)
+    return &UnixReverseProxy{
+        upstreamSocket: upstreamSocket,
+        allowFunc:      allowFunc,
+        client: &http.Client{
+            Transport: transport,
+            Timeout:   timeout,
+        },
+    }
 }
 
 func newUnixTransport(socketPath string) *http.Transport {
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+    dialTimeoutSec := getEnv("PROXY_DIAL_TIMEOUT_SECONDS", "10")
+    dialTimeout := 10 * time.Second
+    if d, err := time.ParseDuration(dialTimeoutSec + "s"); err == nil {
+        dialTimeout = d
+    }
+    dialer := &net.Dialer{Timeout: dialTimeout}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialer.DialContext(ctx, "unix", socketPath)

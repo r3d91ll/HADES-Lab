@@ -12,7 +12,7 @@ Core modules:
 - `core.tools.sharding.planners`: helpers for hash/time partition plans.
 - `core.tools.sharding.runner`: async runner with leases, retries, throttles.
 - `core.tools.sharding.jobs`: job executors (Python/AQL/external).
-- `core.tools.sharding.lease`: lease store interfaces (defaults to in-memory; replace with Arango/Redis in prod).
+- `core.tools.sharding.lease`: lease store interfaces (defaults to in-memory; stub for external coordinators if ever reintroduced).
 - `core.tools.sharding.token_bucket`: shared throttling primitives.
 - `core.tools.sharding.adapters`: dataset adapters (`ArxivPartitionAdapter` reference implementation).
 - `core.tools.sharding.cli`: CLI entry point for ad-hoc runs.
@@ -21,7 +21,7 @@ Core modules:
 
 - Python 3.12 environment via Poetry (`poetry shell`).
 - Access to ArangoDB memory client when running AQL jobs.
-- For production, configure a durable lease store (TODO: Arango/Redis implementation).
+- Workloads run in-process on a single host; in-memory leases are sufficient.
 
 ## Quick Start
 
@@ -108,7 +108,7 @@ class MyDatasetAdapter(BasePartitionAdapter):
 ### 2. Choose a Lease Store
 
 - **Local/testing**: `InMemoryLeaseStore` (non-durable).
-- **Production**: implement `LeaseStore` backed by Arango/Redis (coming soon). Ensure leases handle `acquire`, `heartbeat`, `mark_succeeded`, `mark_failed`.
+- **Future extension**: if distributed coordination returns, supply a durable `LeaseStore` implementation that handles `acquire`, `heartbeat`, `mark_succeeded`, and `mark_failed` across processes.
 
 ### 3. Configure Throttles
 
@@ -131,7 +131,7 @@ Wrap the runner in your workflow script (Airflow, CLI, etc.). Example pseudo-cod
 ```python
 async def run_ingest(adapter):
     job = PythonShardJob(ingest_partition)
-    lease_store = RedisLeaseStore(url="redis://...")  # TODO: implement
+    lease_store = InMemoryLeaseStore()
     token_buckets = {"default": FixedTokenBucket(32)}
 
     runner = ShardRunner(
@@ -154,8 +154,7 @@ For HiRAG-specific use cases, import ready-made jobs such as `HiragEntityIngestJ
 
 ### 5. Lease & Throttle Backends
 
-- Default configuration uses Redis (via `/run/redis/redis-server.sock`) for both leases and token buckets when available.
-- When Redis is unavailable, the toolkit falls back to in-memory leases and no-op throttles; for distributed runs, configure `redis_socket_path` in the workflow or pass custom factories.
+- Default configuration uses in-memory leases and token buckets. In multi-process scenarios, provide custom factories that plug in a durable coordination backend.
 
 ## Monitoring & Telemetry
 
@@ -170,7 +169,7 @@ Collect aggregates (partitions processed, failure rate, p95 runtime) for Conveya
 
 ## Extending the Toolkit
 
-- Implement production-grade `LeaseStore` (Arango/Redis) and `TokenBucket` with distributed coordination.
+- Implement alternate `LeaseStore`/`TokenBucket` backends if distributed coordination returns.
 - Add adapters for other datasets (patents, Git repos).
 - Plug `AqlShardJob` for direct AQL execution via memory client.
 - Add resume functionality by seeding `ShardRunner.run(partitions=...)` with failed specs from manifest/lease store.

@@ -32,3 +32,11 @@ Contributors keep this codebase consistent, measurable, and secure. Review these
 - Keep secrets out of source; use environment variables and run `setup/verify_storage.py` after deployments.
 - Late chunking is mandatory: encode full documents first, then derive context-aware chunks to preserve Conveyance.
 - Always report how changes affect W, R, H, T, and context factors (L/I/A/G); if any base factor is zero, declare Conveyance `C = 0` per framework policy.
+
+## Machine Profile (HADES)
+- **Host OS / Kernel:** Ubuntu 24.04 (Linux 6.14.0-29-generic `#29~24.04.1-Ubuntu` x86_64)
+- **CPU:** AMD Ryzen Threadripper 7960X (24 cores / 48 threads, AVX512-capable)
+- **Memory:** 256 GiB RAM (≈186 GiB available during profiling); 2 GiB swap
+- **GPU:** 2× NVIDIA RTX A6000 (GA102GL) + 1× NVIDIA RTX 2000 Ada (AD107GL); `nvidia-smi` unavailable (NVML init fails), but CUDA 12.6 toolchain (`nvcc` 12.6.85) is installed
+- **Storage:** Root on `/dev/nvme2n1p2` (1.8 TB, ~1.5 TB free)
+- **Python Toolchain:** CPython 3.12.3 (Poetry-managed environment)
