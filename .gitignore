@@ -415,3 +415,5 @@ core/database/arango/proxies/.gocache/
 core/database/arango/proxies/roproxy
 core/database/arango/proxies/rwproxy
 benchmarks/reports/*
+core/database/arango/proxies/bin/hades-arango-ro-proxy
+core/database/arango/proxies/bin/hades-arango-rw-proxy
